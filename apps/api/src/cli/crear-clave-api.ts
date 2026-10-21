@@ -2,8 +2,8 @@ import 'dotenv/config';
 import { Pool } from 'pg';
 import { drizzle } from 'drizzle-orm/node-postgres';
 import { uuidv7 } from 'uuidv7';
-import { apiKeys } from '../src/db/schema';
-import { hashSecret, randomHex, randomToken } from '../src/common/crypto';
+import { apiKeys } from '../db/schema';
+import { hashSecret, randomHex, randomToken } from '../common/crypto';
 
 /**
  * Emite una clave de API para una integración (§7.1).
@@ -12,7 +12,14 @@ import { hashSecret, randomHex, randomToken } from '../src/common/crypto';
  * así que si se pierde hay que emitir otra. Se usa para dar de alta n8n en el
  * VPS y para las pruebas de extremo a extremo.
  *
- *   pnpm --filter @tax/api exec tsx scripts/crear-clave-api.ts n8n rides:write
+ * Vive dentro de `src/` para que se compile a `dist/` y esté disponible en el
+ * contenedor de producción, donde no hay `tsx`:
+ *
+ *   # en desarrollo
+ *   pnpm --filter @tax/api exec tsx src/cli/crear-clave-api.ts n8n rides:write rides:read
+ *
+ *   # en el VPS, desde el terminal del contenedor
+ *   node dist/cli/crear-clave-api.js n8n rides:write rides:read
  */
 
 async function main(): Promise<void> {

@@ -114,8 +114,12 @@ Las claves no se crean por HTTP: se emiten desde el servidor, y el secreto se
 imprime una sola vez porque en la base solo queda el hash Argon2 (§8.1).
 
 ```bash
-pnpm --filter @tax/api exec tsx scripts/crear-clave-api.ts n8n rides:write rides:read
+pnpm --filter @tax/api exec tsx src/cli/crear-clave-api.ts n8n rides:write rides:read
 ```
+
+El script vive dentro de `src/` para que se compile a `dist/` y exista también
+en el contenedor de producción, donde no hay `tsx`; allí se llama con
+`node dist/cli/crear-clave-api.js`.
 
 Los ámbitos importan: `rides:write` crea carreras, `rides:read` las consulta.
 Una clave a la que le falte uno recibe `403 FORBIDDEN` con el ámbito que le
@@ -238,15 +242,38 @@ devuelve 0, con un tope por ejecución: si una noche no acaba, sigue a la
 siguiente. Además la función pone `lock_timeout = 2s`, así que si algo tiene
 las filas bloqueadas se rinde en lugar de encolar al resto detrás.
 
-Medido con 400.000 filas de atraso, mientras la purga corría:
+Medido con 300.000 filas de atraso, golpeando `/status` —que consulta de
+verdad `rides` y `outbox_events`— mientras la purga corría:
 
 | | p50 | p95 | peor |
 | --- | --- | --- | --- |
-| API en reposo | 2,1 ms | 2,6 ms | 29,4 ms |
-| API durante la purga | 2,2 ms | 3,2 ms | 4,3 ms |
+| API durante la purga | 3,3 ms | **17 ms** | 60,8 ms |
 
-80 lotes, 163 segundos, sin un solo pico. `e2e-purga.ts` mide exactamente eso
-y falla si el p95 pasa de 250 ms o si alguna petición supera 1 s.
+60 lotes, sin una sola petición esperando un bloqueo. Entre ejecuciones el p95
+se ha movido entre 7 y 17 ms y la peor petición entre 12 y 61 ms, según lo que
+estuviera haciendo la máquina; aquí van los peores valores observados. Lo que
+importa es el orden de magnitud: decenas de milisegundos, no segundos.
+
+La referencia «en reposo» que imprime la prueba sale peor que la medida
+durante la purga (p95 de 117 ms) y no sirve para comparar: se toma justo
+después de insertar las filas de prueba, con Postgres todavía digiriendo. Lo
+que se exige es el valor absoluto durante el borrado, no la diferencia.
+`e2e-purga.ts` mide exactamente eso y falla si el p95 pasa de 250 ms o si
+alguna petición supera 1 s.
+
+Dos trampas que esa prueba aprendió a evitar, porque las dos dieron un
+resultado estupendo sin haber medido nada:
+
+- **Medir contra un endpoint que no toca la base.** La primera versión usaba
+  `/v1/zones`, que responde 401 antes de llegar a Postgres: estaba midiendo el
+  guardia de autenticación. Ahora exige un 200 y aborta si no lo recibe.
+- **Medir el limitador de tasa.** Muestreando a 20 peticiones por segundo
+  contra un límite de 240 por minuto, la mitad salían 429. El muestreo va a
+  ritmo bajo y la prueba falla si no junta muestras suficientes.
+- **Dar por propia la bitácora de otro.** Buscaba la última entrada de los
+  diez minutos anteriores, y una purga anterior que siguiera corriendo dejaba
+  la suya: la prueba daba por bueno un borrado que no era el suyo. Ahora
+  anota el `seq` máximo antes de encolar y exige una entrada posterior.
 
 ```bash
 pnpm --filter @tax/api exec tsx src/test/e2e-purga.ts 400000

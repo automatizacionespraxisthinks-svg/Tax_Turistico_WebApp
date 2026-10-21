@@ -1,0 +1,33 @@
+# Lo que no debe entrar en el contexto de construcción.
+#
+# node_modules sobre todo: pnpm lo resuelve dentro de la imagen con el
+# lockfile, y mandar el de Windows además de pesar cientos de megas traería
+# binarios nativos compilados para otra plataforma.
+
+node_modules
+**/node_modules
+
+.git
+.gitignore
+
+# Resultados de construcciones locales: la imagen construye lo suyo.
+dist
+**/dist
+**/.vite
+**/*.tsbuildinfo
+
+# Secretos y material local. El `.env` del VPS lo pone Dokploy.
+.env
+**/.env
+**/.env.local
+.certs
+**/.certs
+
+# Caché del generador de teselas: el .pmtiles ya está versionado.
+packages/tiles/.cache
+
+# Documentación y ficheros del editor.
+*.md
+!README.md
+.vscode
+.idea

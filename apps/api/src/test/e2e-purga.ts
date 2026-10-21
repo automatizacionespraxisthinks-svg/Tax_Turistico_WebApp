@@ -42,26 +42,49 @@ interface Latencias {
 }
 
 /**
- * Mide la latencia de un endpoint barato pero real, que toca la base.
+ * Mide la latencia de un endpoint que de verdad consulta la base.
  *
- * `/v1/zones` sirve: es lo que consulta el despacho para clasificar un punto,
- * así que si la purga bloquea la base, se nota aquí.
+ * `/status` hace una consulta real sobre `rides` y `outbox_events`, que es lo
+ * que se quiere: si la purga se llevara bloqueos por delante o saturara el
+ * disco, estas peticiones se quedarían esperando.
+ *
+ * La petición tiene que responder 200. Un endpoint que contesta 401 antes de
+ * tocar Postgres mediría el guardia de autenticación y daría un resultado
+ * estupendo sin haber probado nada; por eso se comprueba el código y no solo
+ * que la petición no reviente.
+ *
+ * El ritmo de muestreo está por debajo del limitador de tasa de la API (240
+ * peticiones por minuto). Midiendo más rápido, la mitad de las muestras
+ * salían 429: se estaría midiendo el limitador, no la base.
  */
 async function medir(durationMs: number): Promise<Latencias> {
   const muestras: number[] = [];
   const hasta = Date.now() + durationMs;
+  let noOk = 0;
 
   while (Date.now() < hasta) {
     const t0 = performance.now();
     try {
-      await fetch(`${BASE}/v1/zones`);
+      const response = await fetch(`${BASE}/status`);
+      if (!response.ok) noOk++;
+      await response.arrayBuffer();
     } catch {
       // Un fallo de red se cuenta como latencia pésima, no se ignora.
       muestras.push(10_000);
       continue;
     }
     muestras.push(performance.now() - t0);
-    await new Promise((resolve) => setTimeout(resolve, 50));
+    await new Promise((resolve) => setTimeout(resolve, 300));
+  }
+
+  if (noOk > 0) {
+    throw new Error(
+      `${noOk} de ${muestras.length} peticiones a /status no devolvieron 200: la medición no vale`,
+    );
+  }
+
+  if (muestras.length < 20) {
+    throw new Error(`solo ${muestras.length} muestras: no da para un p95 creíble`);
   }
 
   const ordenadas = [...muestras].sort((a, b) => a - b);
@@ -134,16 +157,28 @@ async function main(): Promise<void> {
     assert(caducadas >= FILAS, `${caducadas.toLocaleString('es')} están fuera del plazo de 180 días`);
 
     console.log('\n2. Latencia de la API en reposo');
-    const reposo = await medir(6_000);
+    // Esta referencia se toma DESPUÉS de sembrar, así que sale peor de lo que
+    // es: Postgres todavía está digiriendo 400.000 inserciones. Vale como
+    // contexto, no como comparación. Lo que se exige más abajo es el valor
+    // absoluto durante la purga, no la diferencia con esto.
+    const reposo = await medir(12_000);
     console.log(`  p50 ${reposo.p50} ms · p95 ${reposo.p95} ms · max ${reposo.max} ms  (${reposo.muestras} muestras)`);
 
     console.log('\n3. Se lanza la purga y se mide mientras corre');
+    // Marca de agua: la entrada de bitácora que se compruebe al final tiene
+    // que ser posterior a esto. Si no, una purga anterior que siguiera
+    // corriendo dejaría la suya y la prueba la daría por propia.
+    const previo = await db.execute<{ seq: string }>(
+      sql`select coalesce(max(seq), 0)::text as seq from audit_log`,
+    );
+    const seqPrevio = Number(previo.rows[0]?.seq ?? 0);
+
     const job = await queue.add(PURGE_POSITIONS_JOB, {}, { removeOnComplete: 5, removeOnFail: 5 });
     assert(Boolean(job.id), `trabajo encolado (${job.id})`);
 
     // Un momento para que el trabajador lo recoja y esté de verdad borrando.
     await new Promise((resolve) => setTimeout(resolve, 1_500));
-    const durante = await medir(15_000);
+    const durante = await medir(30_000);
     console.log(`  p50 ${durante.p50} ms · p95 ${durante.p95} ms · max ${durante.max} ms  (${durante.muestras} muestras)`);
 
     const restantesDurante = await contar(true);
@@ -192,7 +227,7 @@ async function main(): Promise<void> {
       const bitacora = await db.execute<{ action: string; after: unknown }>(sql`
         select action, after from audit_log
          where entity = 'driver_positions' and action = 'Borrado por retención'
-           and at > now() - interval '10 minutes'
+           and seq > ${seqPrevio}
          order by seq desc limit 1
       `);
       fila = bitacora.rows[0];
