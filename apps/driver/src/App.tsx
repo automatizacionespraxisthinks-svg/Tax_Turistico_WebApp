@@ -135,6 +135,33 @@ export function App() {
     void restore();
   }, [restore]);
 
+  /*
+   * Red del navegador, que es lo único que se puede saber antes de entrar.
+   *
+   * El socket solo se conecta con sesión abierta —sin token el servidor lo
+   * cierra—, así que en la pantalla de acceso su estado es «desconectado»
+   * siempre. Usarlo ahí hacía que la aplicación saludara con «Sin conexión»
+   * a un conductor que tenía internet perfectamente, y encima le ofreciera
+   * guardar acciones para reenviarlas, cosa que no existe antes de entrar.
+   *
+   * `navigator.onLine` no es infalible —da verdadero conectado a un router
+   * sin salida— pero distingue el caso que importa: el celular sin señal en
+   * una vereda frente al celular que sí tiene datos.
+   */
+  const [redDelNavegador, setRedDelNavegador] = useState(() =>
+    typeof navigator === 'undefined' ? true : navigator.onLine,
+  );
+
+  useEffect(() => {
+    const marcar = () => setRedDelNavegador(navigator.onLine);
+    window.addEventListener('online', marcar);
+    window.addEventListener('offline', marcar);
+    return () => {
+      window.removeEventListener('online', marcar);
+      window.removeEventListener('offline', marcar);
+    };
+  }, []);
+
   /* --- socket: ofertas y cambios de la carrera propia ---------------------- */
   useEffect(() => {
     if (session.phase === 'login') return;
@@ -271,16 +298,25 @@ export function App() {
 
   const rideId = session.offer?.rideId;
 
+  /*
+   * Antes de entrar, el indicador habla de la red del teléfono; después, del
+   * socket, que es lo que de verdad determina si llegarán las ofertas.
+   */
+  const enLinea = session.phase === 'login' ? redDelNavegador : session.online;
+
   const chrome = (children: ReactNode) => (
     <MotionConfig reducedMotion="user">
       <div className="relative mx-auto flex h-dvh max-w-md flex-col overflow-hidden bg-canvas">
         <TopStatus
-          online={session.online}
+          online={enLinea}
           queued={session.queued}
           notice={notice}
           onDismissNotice={() => setNotice(undefined)}
+          offlineHint={
+            session.phase === 'login' ? 'revisa los datos del celular para entrar' : undefined
+          }
           right={
-            session.online ? (
+            enLinea ? (
               <Wifi className="size-3.5 text-ink-muted" />
             ) : (
               <WifiOff className="size-3.5 text-[var(--t-warning-ink)]" />

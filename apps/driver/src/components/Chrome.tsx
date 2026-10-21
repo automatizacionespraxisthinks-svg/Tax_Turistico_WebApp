@@ -17,10 +17,17 @@ export function TopStatus({
   right,
   notice,
   onDismissNotice,
+  offlineHint,
 }: {
   online: boolean;
   queued: number;
   right?: ReactNode;
+  /**
+   * Qué decir cuando no hay conexión, si lo de siempre no aplica. En la
+   * pantalla de acceso no hay nada encolado ni que encolar, así que prometer
+   * que «se envía al reconectar» sería mentira.
+   */
+  offlineHint?: string;
   /** Aviso puntual: oferta perdida, GPS denegado, acción guardada. */
   notice?: string;
   onDismissNotice?: () => void;
@@ -78,9 +85,11 @@ export function TopStatus({
             {online ? <Signal className="size-3.5" /> : <CloudOff className="size-3.5" />}
             {online
               ? `Enviando ${queued} ${queued === 1 ? 'acción guardada' : 'acciones guardadas'}…`
-              : queued === 0
-                ? 'Sin conexión · lo que marques se envía al reconectar'
-                : `Sin conexión · ${queued} ${queued === 1 ? 'acción guardada' : 'acciones guardadas'}`}
+              : offlineHint
+                ? `Sin conexión · ${offlineHint}`
+                : queued === 0
+                  ? 'Sin conexión · lo que marques se envía al reconectar'
+                  : `Sin conexión · ${queued} ${queued === 1 ? 'acción guardada' : 'acciones guardadas'}`}
           </motion.div>
         ) : null}
       </AnimatePresence>

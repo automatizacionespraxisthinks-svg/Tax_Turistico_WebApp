@@ -381,7 +381,28 @@ respaldo**. No se vuelven a mostrar.
 Esto no es un aviso de la interfaz: el servidor responde `TOTP_SETUP_REQUIRED`
 a todo lo demás hasta que el alta esté hecha.
 
-### 4.4 Emite la clave de API para n8n
+### 4.4 Da de alta los conductores
+
+Sin esto nadie puede entrar a la PWA: el sembrado de producción no crea
+conductores a propósito.
+
+```bash
+node dist/cli/crear-conductor.js 101 "Jairo Pérez" +573118889900 UBP472 sedan
+```
+
+El último argumento es `sedan`, `camioneta` o `van`. Crea también el vehículo
+si esa placa no existía. Imprime un PIN de cuatro dígitos **una sola vez**.
+
+Dáselo al conductor por un canal distinto del que usa para su código: el
+código circula entre compañeros y la placa es pública, así que el PIN es lo
+único que de verdad autentica (§8.1). Lo que lo protege no es su longitud
+—cuatro dígitos se teclean con guantes a las cinco de la mañana— sino el
+bloqueo a los cinco intentos fallidos.
+
+La relación conductor-vehículo es por turno, no fija (§6): puede abrir turno
+con cualquier placa dada de alta, no solo con la suya.
+
+### 4.5 Emite la clave de API para n8n
 
 Desde el terminal del contenedor `tax-api` en Dokploy:
 
