@@ -1,0 +1,20 @@
+@import 'tailwindcss';
+@import '../../../packages/ui/src/styles/tokens.css';
+
+@source '../../../packages/ui/src';
+@source './';
+
+/* La PWA se usa al sol y con guantes: tipografía un punto mayor y nada de
+   selección accidental al pulsar botones grandes. */
+@layer base {
+  body {
+    font-size: 0.9375rem;
+    overscroll-behavior-y: none;
+  }
+
+  button,
+  a {
+    -webkit-user-select: none;
+    user-select: none;
+  }
+}

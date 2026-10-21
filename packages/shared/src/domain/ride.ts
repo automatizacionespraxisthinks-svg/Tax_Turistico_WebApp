@@ -1,0 +1,245 @@
+import { z } from 'zod';
+import { pointSchema } from './geo';
+
+/**
+ * Estados de la carrera (§5.3 de la arquitectura).
+ * Los códigos coinciden con los valores de la columna `rides.status`
+ * usados por el UPDATE atómico de exclusividad (§5.1).
+ */
+export const RIDE_STATUSES = [
+  'PENDING',
+  'NOTIFIED',
+  'ASSIGNED',
+  'DRIVER_ARRIVED',
+  'IN_PROGRESS',
+  'COMPLETED',
+  'CANCELLED',
+  'UNASSIGNED',
+] as const;
+
+export type RideStatus = (typeof RIDE_STATUSES)[number];
+
+/** Estados en los que el conductor tiene la carrera tomada (índice único parcial, §5.1). */
+export const ACTIVE_RIDE_STATUSES: RideStatus[] = ['ASSIGNED', 'DRIVER_ARRIVED', 'IN_PROGRESS'];
+
+/** Estados terminales: ya no admiten transiciones. */
+export const TERMINAL_RIDE_STATUSES: RideStatus[] = ['COMPLETED', 'CANCELLED'];
+
+export type TransitionActor = 'system' | 'driver' | 'operator' | 'customer';
+
+export interface RideTransition {
+  from: RideStatus;
+  to: RideStatus;
+  /** Quién puede ejecutarla. */
+  by: TransitionActor[];
+  /** Condición de negocio, tal como la fija §5.3. */
+  condition: string;
+}
+
+/**
+ * Tabla de transiciones explícita (§5.3). Es la única fuente de verdad:
+ * ninguna pantalla ofrece una acción que no esté aquí.
+ */
+export const RIDE_TRANSITIONS: RideTransition[] = [
+  {
+    from: 'PENDING',
+    to: 'NOTIFIED',
+    by: ['system'],
+    condition: 'Hay al menos un candidato en la oleada',
+  },
+  {
+    from: 'NOTIFIED',
+    to: 'ASSIGNED',
+    by: ['driver'],
+    condition: 'UPDATE atómico exitoso',
+  },
+  {
+    from: 'NOTIFIED',
+    to: 'UNASSIGNED',
+    by: ['system'],
+    condition: 'Tres oleadas vencidas',
+  },
+  {
+    /**
+     * Añadida sobre la tabla de §5.3, que da por supuesto que la oleada 1
+     * siempre encuentra a alguien. Cuando no hay ningún conductor disponible
+     * —de madrugada, o en una vereda sin cobertura— la carrera nunca llega a
+     * Notificada y se quedaría en Pendiente sin que nadie se entere. Tiene
+     * que acabar igualmente en Sin asignar: la oficina se entera en segundos.
+     */
+    from: 'PENDING',
+    to: 'UNASSIGNED',
+    by: ['system'],
+    condition: 'Ninguna oleada encontró candidatos',
+  },
+  {
+    from: 'UNASSIGNED',
+    to: 'NOTIFIED',
+    by: ['operator'],
+    condition: 'Relanzar despacho',
+  },
+  {
+    from: 'UNASSIGNED',
+    to: 'ASSIGNED',
+    by: ['operator'],
+    condition: 'Asignación manual',
+  },
+  {
+    from: 'ASSIGNED',
+    to: 'NOTIFIED',
+    by: ['operator'],
+    condition: 'Reasignación (RF-41): el conductor original queda liberado',
+  },
+  {
+    from: 'ASSIGNED',
+    to: 'DRIVER_ARRIVED',
+    by: ['driver'],
+    condition: 'A menos de 150 m del punto; si no, se registra la excepción',
+  },
+  {
+    from: 'DRIVER_ARRIVED',
+    to: 'IN_PROGRESS',
+    by: ['driver'],
+    condition: 'Pasajero a bordo',
+  },
+  {
+    from: 'IN_PROGRESS',
+    to: 'COMPLETED',
+    by: ['driver'],
+    condition: 'El conductor vuelve a Disponible',
+  },
+  {
+    from: 'PENDING',
+    to: 'CANCELLED',
+    by: ['customer', 'operator', 'driver'],
+    condition: 'Motivo obligatorio',
+  },
+  {
+    from: 'NOTIFIED',
+    to: 'CANCELLED',
+    by: ['customer', 'operator', 'driver'],
+    condition: 'Motivo obligatorio',
+  },
+  {
+    from: 'UNASSIGNED',
+    to: 'CANCELLED',
+    by: ['customer', 'operator'],
+    condition: 'Motivo obligatorio',
+  },
+  {
+    from: 'ASSIGNED',
+    to: 'CANCELLED',
+    by: ['customer', 'operator', 'driver'],
+    condition: 'Motivo obligatorio',
+  },
+  {
+    from: 'DRIVER_ARRIVED',
+    to: 'CANCELLED',
+    by: ['customer', 'operator', 'driver'],
+    condition: 'Motivo obligatorio',
+  },
+];
+
+export function transitionsFrom(status: RideStatus, actor?: TransitionActor): RideTransition[] {
+  return RIDE_TRANSITIONS.filter(
+    (t) => t.from === status && (!actor || t.by.includes(actor)),
+  );
+}
+
+export function canTransition(from: RideStatus, to: RideStatus, actor?: TransitionActor): boolean {
+  return transitionsFrom(from, actor).some((t) => t.to === to);
+}
+
+/** Orden de progreso para animar avances y retrocesos del ciclo de vida. */
+export const RIDE_PROGRESS_ORDER: RideStatus[] = [
+  'PENDING',
+  'NOTIFIED',
+  'ASSIGNED',
+  'DRIVER_ARRIVED',
+  'IN_PROGRESS',
+  'COMPLETED',
+];
+
+export function rideProgressIndex(status: RideStatus): number {
+  const i = RIDE_PROGRESS_ORDER.indexOf(status);
+  return i === -1 ? RIDE_PROGRESS_ORDER.length : i;
+}
+
+export const VEHICLE_TYPES = ['sedan', 'camioneta', 'van'] as const;
+export type VehicleType = (typeof VEHICLE_TYPES)[number];
+
+export const rideAddressSchema = z.object({
+  text: z.string().min(3, 'Escribe al menos 3 caracteres'),
+  reference: z.string().optional(),
+  point: pointSchema.optional(),
+  placeId: z.string().optional(),
+});
+export type RideAddress = z.infer<typeof rideAddressSchema>;
+
+export const createRideSchema = z.object({
+  customerPhone: z
+    .string()
+    .regex(/^\+\d{8,15}$/, 'Teléfono en formato E.164, por ejemplo +573001234567'),
+  customerName: z.string().min(2).optional(),
+  pickup: rideAddressSchema,
+  dropoff: rideAddressSchema.optional(),
+  vehicleType: z.enum(VEHICLE_TYPES).default('sedan'),
+  passengers: z.number().int().min(1).max(8).default(1),
+  notes: z.string().max(280).optional(),
+});
+export type CreateRideInput = z.infer<typeof createRideSchema>;
+
+export interface RideStatusEntry {
+  from: RideStatus | null;
+  to: RideStatus;
+  actor: TransitionActor;
+  actorName: string;
+  at: string;
+  note?: string;
+}
+
+export interface RideOffer {
+  driverId: string;
+  driverName: string;
+  wave: 1 | 2 | 3;
+  sentAt: string;
+  expiresAt: string;
+  etaMinutes: number;
+  distanceKm: number;
+  response: 'pending' | 'accepted' | 'rejected' | 'expired' | 'revoked';
+}
+
+export interface Ride {
+  id: string;
+  /** Código legible R-2026-004812 (§6). */
+  code: string;
+  status: RideStatus;
+  /** Columna `version`: bloqueo optimista y orden de eventos hacia n8n (§7.1). */
+  version: number;
+  createdAt: string;
+  customerPhone: string;
+  customerName: string;
+  pickup: RideAddress;
+  dropoff?: RideAddress;
+  zoneId: string;
+  vehicleType: VehicleType;
+  passengers: number;
+  /** Tarifa estimada en pesos; se comunica siempre como aproximada (Ley 1480). */
+  fareEstimate: number;
+  fareRuleVersion: string;
+  driverId?: string;
+  line: string;
+  chatwootConversationId?: number;
+  etaMinutes?: number;
+  notes?: string;
+  history: RideStatusEntry[];
+  offers: RideOffer[];
+  /** Oleada de despacho en curso (§5.2). */
+  wave?: 1 | 2 | 3;
+  cancelReason?: string;
+}
+
+/** Código legible de carrera: R-AAAA-NNNNNN. */
+export function formatRideCode(year: number, sequence: number): string {
+  return `R-${year}-${String(sequence).padStart(6, '0')}`;
+}

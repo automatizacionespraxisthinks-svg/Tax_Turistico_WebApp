@@ -1,0 +1,7 @@
+@import 'tailwindcss';
+@import '../../../packages/ui/src/styles/tokens.css';
+
+/* El panel comparte los componentes del paquete de diseño: Tailwind también
+   debe mirar ahí para generar sus clases. */
+@source '../../../packages/ui/src';
+@source './';

@@ -1,0 +1,32 @@
+{
+  "name": "tax-turistico",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Despacho de taxis para Tax Turístico — monorepo (panel de oficina, PWA de conductores, contratos compartidos)",
+  "packageManager": "pnpm@10.28.2",
+  "engines": {
+    "node": ">=22.0.0"
+  },
+  "scripts": {
+    "dev": "pnpm -r --parallel --filter \"./apps/*\" dev",
+    "dev:admin": "pnpm --filter @tax/admin dev",
+    "dev:driver": "pnpm --filter @tax/driver dev",
+    "build": "pnpm -r build",
+    "typecheck": "pnpm -r typecheck",
+    "preview:admin": "pnpm --filter @tax/admin preview",
+    "preview:driver": "pnpm --filter @tax/driver preview",
+    "db:up": "docker compose -f docker-compose.dev.yml up -d",
+    "db:down": "docker compose -f docker-compose.dev.yml down",
+    "dev:api": "pnpm --filter @tax/api dev",
+    "build:tiles": "pnpm --filter @tax/tiles build:tiles"
+  },
+  "devDependencies": {
+    "typescript": "^5.7.3"
+  },
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "esbuild",
+      "msgpackr-extract"
+    ]
+  }
+}

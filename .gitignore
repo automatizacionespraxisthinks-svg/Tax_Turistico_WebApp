@@ -1,0 +1,22 @@
+node_modules/
+dist/
+dist-ssr/
+build/
+coverage/
+.env
+.env.*
+!.env.example
+*.local
+*.tsbuildinfo
+.DS_Store
+.vite/
+dev-dist/
+.env
+.claude/
+
+# Datos descargados de OpenStreetMap para generar los azulejos.
+packages/tiles/.cache/
+
+# Certificado autofirmado de localhost para la prueba de Web Push (se regenera)
+.certs/
+apps/api/.certs/

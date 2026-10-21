@@ -1,0 +1,527 @@
+/* =============================================================================
+   Tax Turistico — tokens del sistema de diseño
+   -----------------------------------------------------------------------------
+   Deliberadamente SIN MARCA. Toda la identidad visual vive en el bloque de
+   acento y en las superficies. Para aplicar la marca definitiva basta
+   reemplazar esas variables: ningun componente codifica un color a mano.
+
+   Se importa despues de `@import "tailwindcss"` en cada app.
+   ============================================================================= */
+
+@custom-variant dark (&:where(.dark, .dark *));
+
+/* ---------------------------------------------------------------- 1. Modo claro */
+:root {
+  color-scheme: light;
+
+  /* Superficies ------------------------------------------------------------ */
+  --c-canvas:         oklch(0.982 0.002 265);
+  --c-surface:        oklch(1 0 265);
+  --c-surface-sunk:   oklch(0.966 0.003 265);
+  --c-surface-raised: oklch(1 0 265);
+  --c-overlay:        oklch(0.30 0.015 265 / 0.38);
+
+  /* Lineas ----------------------------------------------------------------- */
+  --c-line:        oklch(0.920 0.004 265);
+  --c-line-strong: oklch(0.860 0.006 265);
+
+  /* Tinta ------------------------------------------------------------------ */
+  --c-ink:           oklch(0.235 0.012 265);
+  --c-ink-secondary: oklch(0.455 0.011 265);
+  --c-ink-muted:     oklch(0.595 0.009 265);
+  --c-ink-inverse:   oklch(0.985 0.002 265);
+
+  /* Acento — UNICO punto de personalizacion de marca ----------------------- */
+  --c-accent:        oklch(0.520 0.130 264);
+  --c-accent-hover:  oklch(0.460 0.135 264);
+  --c-accent-active: oklch(0.410 0.130 264);
+  --c-accent-soft:   oklch(0.960 0.020 264);
+  --c-accent-line:   oklch(0.880 0.045 264);
+  --c-accent-ink:    oklch(0.450 0.140 264);
+  --c-on-accent:     oklch(0.995 0 265);
+
+  /* Tonos semanticos de estado -------------------------------------------- */
+  --t-neutral-ink:   oklch(0.455 0.010 265);
+  --t-neutral-bg:    oklch(0.960 0.003 265);
+  --t-neutral-line:  oklch(0.890 0.004 265);
+  --t-neutral-solid: oklch(0.600 0.010 265);
+
+  --t-info-ink:   oklch(0.470 0.140 264);
+  --t-info-bg:    oklch(0.962 0.018 264);
+  --t-info-line:  oklch(0.880 0.040 264);
+  --t-info-solid: oklch(0.550 0.150 264);
+
+  --t-accent-ink:   oklch(0.470 0.150 305);
+  --t-accent-bg:    oklch(0.963 0.020 305);
+  --t-accent-line:  oklch(0.890 0.040 305);
+  --t-accent-solid: oklch(0.540 0.160 305);
+
+  --t-progress-ink:   oklch(0.460 0.100 200);
+  --t-progress-bg:    oklch(0.960 0.022 200);
+  --t-progress-line:  oklch(0.878 0.042 200);
+  --t-progress-solid: oklch(0.560 0.120 200);
+
+  --t-positive-ink:   oklch(0.455 0.110 150);
+  --t-positive-bg:    oklch(0.961 0.022 150);
+  --t-positive-line:  oklch(0.878 0.042 150);
+  --t-positive-solid: oklch(0.560 0.130 150);
+
+  --t-warning-ink:   oklch(0.490 0.110 70);
+  --t-warning-bg:    oklch(0.964 0.030 80);
+  --t-warning-line:  oklch(0.888 0.050 80);
+  --t-warning-solid: oklch(0.690 0.150 72);
+
+  --t-critical-ink:   oklch(0.495 0.170 25);
+  --t-critical-bg:    oklch(0.962 0.022 25);
+  --t-critical-line:  oklch(0.886 0.045 25);
+  --t-critical-solid: oklch(0.560 0.200 25);
+
+  /* Series de graficas — orden fijo, validado para vision normal y daltonismo
+     sobre superficie blanca (delta-E deutan >= 8, contraste >= 3:1). No se
+     cicla: una septima serie se agrupa en "Otras". */
+  --c-series-1: oklch(0.550 0.130 264);
+  --c-series-2: oklch(0.620 0.140 70);
+  --c-series-3: oklch(0.600 0.130 185);
+  --c-series-4: oklch(0.560 0.160 18);
+  --c-series-5: oklch(0.520 0.150 310);
+  --c-series-6: oklch(0.600 0.130 145);
+
+  /* Rampa secuencial de un solo tono (magnitud) */
+  --c-ramp-1: oklch(0.945 0.020 264);
+  --c-ramp-2: oklch(0.880 0.045 264);
+  --c-ramp-3: oklch(0.790 0.075 264);
+  --c-ramp-4: oklch(0.690 0.105 264);
+  --c-ramp-5: oklch(0.590 0.130 264);
+  --c-ramp-6: oklch(0.470 0.135 264);
+
+  /* Sombras: discretas, la jerarquia la llevan las lineas ------------------ */
+  --sh-1: 0 1px 2px oklch(0.25 0.02 265 / 0.05), 0 1px 1px oklch(0.25 0.02 265 / 0.04);
+  --sh-2: 0 2px 4px oklch(0.25 0.02 265 / 0.05), 0 6px 14px oklch(0.25 0.02 265 / 0.07);
+  --sh-3: 0 8px 20px oklch(0.25 0.02 265 / 0.10), 0 24px 48px oklch(0.25 0.02 265 / 0.12);
+}
+
+/* ---------------------------------------------------------------- 2. Modo oscuro
+   Pasos elegidos para el fondo oscuro, no una inversion automatica del claro. */
+.dark {
+  color-scheme: dark;
+
+  --c-canvas:         oklch(0.168 0.008 265);
+  --c-surface:        oklch(0.205 0.009 265);
+  --c-surface-sunk:   oklch(0.185 0.008 265);
+  --c-surface-raised: oklch(0.238 0.010 265);
+  --c-overlay:        oklch(0.10 0.010 265 / 0.62);
+
+  --c-line:        oklch(0.295 0.010 265);
+  --c-line-strong: oklch(0.380 0.012 265);
+
+  --c-ink:           oklch(0.958 0.003 265);
+  --c-ink-secondary: oklch(0.760 0.008 265);
+  --c-ink-muted:     oklch(0.620 0.010 265);
+  --c-ink-inverse:   oklch(0.180 0.010 265);
+
+  --c-accent:        oklch(0.680 0.130 264);
+  --c-accent-hover:  oklch(0.740 0.125 264);
+  --c-accent-active: oklch(0.790 0.115 264);
+  --c-accent-soft:   oklch(0.285 0.050 264);
+  --c-accent-line:   oklch(0.385 0.070 264);
+  --c-accent-ink:    oklch(0.790 0.110 264);
+  --c-on-accent:     oklch(0.160 0.015 264);
+
+  --t-neutral-ink:   oklch(0.720 0.012 265);
+  --t-neutral-bg:    oklch(0.262 0.010 265);
+  --t-neutral-line:  oklch(0.340 0.012 265);
+  --t-neutral-solid: oklch(0.600 0.012 265);
+
+  --t-info-ink:   oklch(0.790 0.110 264);
+  --t-info-bg:    oklch(0.282 0.050 264);
+  --t-info-line:  oklch(0.380 0.070 264);
+  --t-info-solid: oklch(0.620 0.140 264);
+
+  --t-accent-ink:   oklch(0.790 0.110 305);
+  --t-accent-bg:    oklch(0.285 0.055 305);
+  --t-accent-line:  oklch(0.385 0.075 305);
+  --t-accent-solid: oklch(0.600 0.150 305);
+
+  --t-progress-ink:   oklch(0.810 0.090 200);
+  --t-progress-bg:    oklch(0.278 0.045 200);
+  --t-progress-line:  oklch(0.372 0.060 200);
+  --t-progress-solid: oklch(0.660 0.120 200);
+
+  --t-positive-ink:   oklch(0.805 0.100 150);
+  --t-positive-bg:    oklch(0.278 0.045 150);
+  --t-positive-line:  oklch(0.372 0.060 150);
+  --t-positive-solid: oklch(0.665 0.130 150);
+
+  --t-warning-ink:   oklch(0.835 0.110 75);
+  --t-warning-bg:    oklch(0.290 0.050 70);
+  --t-warning-line:  oklch(0.390 0.070 70);
+  --t-warning-solid: oklch(0.760 0.140 75);
+
+  --t-critical-ink:   oklch(0.765 0.140 25);
+  --t-critical-bg:    oklch(0.292 0.060 25);
+  --t-critical-line:  oklch(0.392 0.090 25);
+  --t-critical-solid: oklch(0.605 0.190 25);
+
+  /* Series revalidadas contra la superficie oscura */
+  --c-series-1: oklch(0.620 0.140 264);
+  --c-series-2: oklch(0.670 0.140 70);
+  --c-series-3: oklch(0.650 0.130 185);
+  --c-series-4: oklch(0.540 0.170 18);
+  --c-series-5: oklch(0.580 0.160 310);
+  --c-series-6: oklch(0.640 0.140 145);
+
+  --c-ramp-1: oklch(0.275 0.035 264);
+  --c-ramp-2: oklch(0.345 0.060 264);
+  --c-ramp-3: oklch(0.430 0.090 264);
+  --c-ramp-4: oklch(0.520 0.120 264);
+  --c-ramp-5: oklch(0.615 0.140 264);
+  --c-ramp-6: oklch(0.715 0.125 264);
+
+  --sh-1: 0 1px 2px oklch(0 0 0 / 0.40);
+  --sh-2: 0 2px 6px oklch(0 0 0 / 0.42), 0 8px 20px oklch(0 0 0 / 0.34);
+  --sh-3: 0 10px 28px oklch(0 0 0 / 0.50), 0 28px 60px oklch(0 0 0 / 0.42);
+}
+
+/* ------------------------------------------------- 3. Movimiento: tokens fijos
+   Cinco duraciones y cuatro curvas. Ninguna animacion de la app usa valores
+   fuera de esta tabla; asi el producto se mueve siempre igual. */
+:root {
+  --mo-instant: 90ms;      /* realimentacion tactil: pulsar, marcar */
+  --mo-fast: 150ms;        /* hover, foco, cambio de color */
+  --mo-base: 240ms;        /* entrada y salida de elementos pequenos */
+  --mo-slow: 380ms;        /* paneles, transicion de ruta */
+  --mo-deliberate: 560ms;  /* cambios de estado que el usuario debe notar */
+
+  --ease-standard: cubic-bezier(0.2, 0, 0, 1);
+  --ease-entrance: cubic-bezier(0.05, 0.7, 0.1, 1);
+  --ease-exit: cubic-bezier(0.3, 0, 0.8, 0.15);
+  --ease-soft: cubic-bezier(0.4, 0, 0.2, 1);
+
+  /* Desplazamientos de entrada: siempre uno de estos tres */
+  --mo-rise: 6px;
+  --mo-rise-lg: 12px;
+  --mo-slide: 24px;
+}
+
+/* ------------------------------------------------------- 4. Mapa a Tailwind v4 */
+@theme inline {
+  --color-canvas: var(--c-canvas);
+  --color-surface: var(--c-surface);
+  --color-surface-sunk: var(--c-surface-sunk);
+  --color-surface-raised: var(--c-surface-raised);
+  --color-overlay: var(--c-overlay);
+
+  --color-line: var(--c-line);
+  --color-line-strong: var(--c-line-strong);
+
+  --color-ink: var(--c-ink);
+  --color-ink-secondary: var(--c-ink-secondary);
+  --color-ink-muted: var(--c-ink-muted);
+  --color-ink-inverse: var(--c-ink-inverse);
+
+  --color-accent: var(--c-accent);
+  --color-accent-hover: var(--c-accent-hover);
+  --color-accent-active: var(--c-accent-active);
+  --color-accent-soft: var(--c-accent-soft);
+  --color-accent-line: var(--c-accent-line);
+  --color-accent-ink: var(--c-accent-ink);
+  --color-on-accent: var(--c-on-accent);
+
+  --color-tone-ink: var(--tone-ink);
+  --color-tone-bg: var(--tone-bg);
+  --color-tone-line: var(--tone-line);
+  --color-tone-solid: var(--tone-solid);
+
+  --color-series-1: var(--c-series-1);
+  --color-series-2: var(--c-series-2);
+  --color-series-3: var(--c-series-3);
+  --color-series-4: var(--c-series-4);
+  --color-series-5: var(--c-series-5);
+  --color-series-6: var(--c-series-6);
+
+  --font-sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto,
+    "Helvetica Neue", Arial, "Noto Sans", sans-serif;
+  --font-mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas,
+    "Liberation Mono", monospace;
+
+  --text-micro: 0.6875rem;
+  --text-micro--line-height: 1.3;
+  --text-micro--letter-spacing: 0.04em;
+  --text-caption: 0.75rem;
+  --text-caption--line-height: 1.4;
+  --text-sm: 0.8125rem;
+  --text-sm--line-height: 1.45;
+  --text-base: 0.875rem;
+  --text-base--line-height: 1.55;
+  --text-lg: 1rem;
+  --text-lg--line-height: 1.5;
+  --text-title: 1.25rem;
+  --text-title--line-height: 1.3;
+  --text-title--letter-spacing: -0.012em;
+  --text-display: 1.75rem;
+  --text-display--line-height: 1.15;
+  --text-display--letter-spacing: -0.021em;
+
+  --radius-xs: 0.25rem;
+  --radius-sm: 0.375rem;
+  --radius-md: 0.625rem;
+  --radius-lg: 0.875rem;
+  --radius-xl: 1.25rem;
+
+  --shadow-sm: var(--sh-1);
+  --shadow-md: var(--sh-2);
+  --shadow-lg: var(--sh-3);
+
+  --ease-standard: cubic-bezier(0.2, 0, 0, 1);
+  --ease-entrance: cubic-bezier(0.05, 0.7, 0.1, 1);
+  --ease-exit: cubic-bezier(0.3, 0, 0.8, 0.15);
+  --ease-soft: cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+/* ------------------------------------------------------------ 5. Base y reset */
+@layer base {
+  * {
+    border-color: var(--c-line);
+  }
+
+  html {
+    -webkit-text-size-adjust: 100%;
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  body {
+    background-color: var(--c-canvas);
+    color: var(--c-ink);
+    font-family: var(--font-sans);
+    font-size: 0.875rem;
+    line-height: 1.55;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  /* Un solo anillo de foco en todo el producto */
+  :focus-visible {
+    outline: 2px solid var(--c-accent);
+    outline-offset: 2px;
+    border-radius: var(--radius-xs);
+  }
+
+  ::selection {
+    background: var(--c-accent-soft);
+    color: var(--c-accent-ink);
+  }
+
+  /* Numeros siempre tabulares: las columnas no bailan al actualizarse */
+  .tnum,
+  td,
+  time {
+    font-variant-numeric: tabular-nums;
+  }
+
+  ::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+  }
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  ::-webkit-scrollbar-thumb {
+    background-color: var(--c-line-strong);
+    border-radius: 999px;
+    border: 3px solid transparent;
+    background-clip: content-box;
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    background-color: var(--c-ink-muted);
+    background-clip: content-box;
+  }
+}
+
+/* ------------------------------------------------------------- 6. Tonos
+   Una clase por tono expone cuatro variables; los componentes solo leen
+   --tone-*, nunca un color concreto. */
+.tone-neutral {
+  --tone-ink: var(--t-neutral-ink);
+  --tone-bg: var(--t-neutral-bg);
+  --tone-line: var(--t-neutral-line);
+  --tone-solid: var(--t-neutral-solid);
+}
+.tone-info {
+  --tone-ink: var(--t-info-ink);
+  --tone-bg: var(--t-info-bg);
+  --tone-line: var(--t-info-line);
+  --tone-solid: var(--t-info-solid);
+}
+.tone-accent {
+  --tone-ink: var(--t-accent-ink);
+  --tone-bg: var(--t-accent-bg);
+  --tone-line: var(--t-accent-line);
+  --tone-solid: var(--t-accent-solid);
+}
+.tone-progress {
+  --tone-ink: var(--t-progress-ink);
+  --tone-bg: var(--t-progress-bg);
+  --tone-line: var(--t-progress-line);
+  --tone-solid: var(--t-progress-solid);
+}
+.tone-positive {
+  --tone-ink: var(--t-positive-ink);
+  --tone-bg: var(--t-positive-bg);
+  --tone-line: var(--t-positive-line);
+  --tone-solid: var(--t-positive-solid);
+}
+.tone-warning {
+  --tone-ink: var(--t-warning-ink);
+  --tone-bg: var(--t-warning-bg);
+  --tone-line: var(--t-warning-line);
+  --tone-solid: var(--t-warning-solid);
+}
+.tone-critical {
+  --tone-ink: var(--t-critical-ink);
+  --tone-bg: var(--t-critical-bg);
+  --tone-line: var(--t-critical-line);
+  --tone-solid: var(--t-critical-solid);
+}
+
+/* ------------------------------------------------- 7. Animaciones con nombre
+   Cada keyframe tiene un uso declarado; no se improvisan animaciones nuevas. */
+
+/* Aparicion simple */
+@keyframes tax-fade-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+/* Entrada estandar de tarjetas, filas y paneles */
+@keyframes tax-rise-in {
+  from {
+    opacity: 0;
+    transform: translateY(var(--mo-rise));
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+/* Entrada de dialogos y hojas */
+@keyframes tax-scale-in {
+  from {
+    opacity: 0;
+    transform: scale(0.97);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+/* Carga: barrido del esqueleto */
+@keyframes tax-shimmer {
+  from {
+    background-position: -160% 0;
+  }
+  to {
+    background-position: 260% 0;
+  }
+}
+
+/* Indicador "en vivo": halo que se expande y se desvanece */
+@keyframes tax-beacon {
+  0% {
+    transform: scale(1);
+    opacity: 0.55;
+  }
+  70% {
+    transform: scale(2.6);
+    opacity: 0;
+  }
+  100% {
+    transform: scale(2.6);
+    opacity: 0;
+  }
+}
+
+/* Llamada de atencion en un dato que acaba de cambiar */
+@keyframes tax-flash {
+  0% {
+    background-color: var(--c-accent-soft);
+  }
+  100% {
+    background-color: transparent;
+  }
+}
+
+/* Barrido del radar sobre el mapa al lanzar una oleada */
+@keyframes tax-sweep {
+  0% {
+    transform: scale(0.15);
+    opacity: 0.45;
+  }
+  100% {
+    transform: scale(1);
+    opacity: 0;
+  }
+}
+
+/* Avance de la ruta punteada entre conductor y punto de recogida */
+@keyframes tax-march {
+  to {
+    stroke-dashoffset: -16;
+  }
+}
+
+/* Respiracion lenta para un estado de espera prolongada */
+@keyframes tax-breathe {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.45;
+  }
+}
+
+@utility animate-rise-in {
+  animation: tax-rise-in var(--mo-base) var(--ease-entrance) both;
+}
+@utility animate-fade-in {
+  animation: tax-fade-in var(--mo-base) var(--ease-standard) both;
+}
+@utility animate-scale-in {
+  animation: tax-scale-in var(--mo-base) var(--ease-entrance) both;
+}
+@utility animate-flash {
+  animation: tax-flash var(--mo-deliberate) var(--ease-exit) both;
+}
+@utility animate-breathe {
+  animation: tax-breathe 2.4s var(--ease-soft) infinite;
+}
+
+@utility skeleton {
+  background-image: linear-gradient(
+    90deg,
+    var(--c-surface-sunk) 0%,
+    var(--c-line) 50%,
+    var(--c-surface-sunk) 100%
+  );
+  background-size: 220% 100%;
+  animation: tax-shimmer 1.4s var(--ease-soft) infinite;
+  border-radius: var(--radius-sm);
+}
+
+/* ------------------------------------------- 8. Respeto por reducir movimiento
+   Obligatorio: la app sigue siendo usable sin una sola animacion. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 1ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 1ms !important;
+    scroll-behavior: auto !important;
+  }
+}
