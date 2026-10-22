@@ -138,6 +138,16 @@ oleada, aceptación simultánea— y comprueba que exactamente un conductor gana
 los demás reciben `RIDE_ALREADY_TAKEN`.
 
 ```bash
+pnpm --filter @tax/api exec tsx src/test/e2e-pausa.ts <clave-de-api>
+```
+
+La pausa del turno. Lo que comprueba no es que el endpoint responda 200, sino
+que **al conductor en pausa no le llegan carreras** — y, para que eso no pase
+por vacío, repite la misma carrera con el turno reanudado, donde sí tiene que
+ofrecérsela. Aparta a los otros conductores antes: si quedaran disponibles, no
+podría distinguir «al pausado no le ofrecieron» de «le ofrecieron a otro».
+
+```bash
 pnpm --filter @tax/api exec nest build
 pnpm --filter @tax/api exec tsx src/test/e2e-cli.ts
 ```

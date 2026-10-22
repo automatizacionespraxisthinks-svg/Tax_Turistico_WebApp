@@ -40,6 +40,24 @@ export class FleetController {
   }
 
   /**
+   * Pausa del turno: el conductor sigue en turno pero deja de recibir
+   * ofertas. Es una ruta propia y no un `PATCH` del turno porque el conductor
+   * no elige un estado, pulsa un botón; y porque así la cola de la PWA la
+   * puede reenviar tal cual cuando vuelve la señal.
+   */
+  @Post('shift/pause')
+  async pauseShift(@Req() request: FastifyRequest) {
+    await this.fleet.pauseShift(requireDriver(request).id);
+    return { ok: true };
+  }
+
+  @Post('shift/resume')
+  async resumeShift(@Req() request: FastifyRequest) {
+    await this.fleet.resumeShift(requireDriver(request).id);
+    return { ok: true };
+  }
+
+  /**
    * Posición del conductor. Es el endpoint más llamado de la API —62 taxis
    * cada 10–30 s—, así que no escribe en Postgres en cada llamada: Redis
    * guarda la última y el muestreo decide cuándo persistir (§6).

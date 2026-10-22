@@ -37,7 +37,7 @@ const ORDER: Record<Phase, number> = {
 interface DriverSessionResponse {
   driver: { id: string; code: string; name: string };
   /** Turno abierto, si lo hay: decide si la PWA arranca en espera o fuera. */
-  shift: { shiftId: string; plate: string; startedAt: string } | null;
+  shift: { shiftId: string; plate: string; startedAt: string; paused: boolean } | null;
   totals: { rides: number; earned: number };
   activeRide: ApiRide | null;
   pendingOffer: {
@@ -116,9 +116,14 @@ export function App() {
       // Con turno abierto se vuelve a la espera, no a «fuera de turno»:
       // ofrecer «iniciar turno» cuando ya hay uno deja al conductor
       // chocando contra el índice único sin forma de salir.
+      //
+      // Y si estaba en pausa, se vuelve a la pausa. Esta línea decía
+      // 'available' a secas: cualquier recuperación —reconectar el socket,
+      // reabrir la aplicación— le quitaba la pausa al conductor sin que él
+      // tocara nada.
       dispatch({
         type: 'restore',
-        phase: me.shift ? 'available' : 'off_shift',
+        phase: me.shift ? (me.shift.paused ? 'paused' : 'available') : 'off_shift',
         offer: null,
         shiftStartedAt,
         totals: me.totals,
@@ -163,8 +168,26 @@ export function App() {
   }, []);
 
   /* --- socket: ofertas y cambios de la carrera propia ---------------------- */
+
+  /*
+   * La sesión viva, para los manejadores del socket.
+   *
+   * El efecto de abajo dependía de `session.phase` y del identificador de la
+   * oferta, así que *cualquier* cambio de fase desmontaba el socket y lo
+   * volvía a montar. Al reconectar se pide el estado, y eso devolvía al
+   * conductor a «esperando carrera»: tomar una pausa la deshacía sola un
+   * segundo después. Con la referencia los manejadores siguen viendo el
+   * valor último sin que el socket se entere de nada.
+   */
+  const sesionViva = useRef(session);
   useEffect(() => {
-    if (session.phase === 'login') return;
+    sesionViva.current = session;
+  }, [session]);
+
+  const conSesion = session.phase !== 'login';
+
+  useEffect(() => {
+    if (!conSesion) return;
 
     const disconnect = connectDriverSocket({
       onConnectionChange: (connected) => {
@@ -180,7 +203,8 @@ export function App() {
       onOfferRevoked: (rideId) => {
         // Llega a todos los conductores; solo importa si es la que se está
         // mirando ahora mismo.
-        if (session.phase === 'offer' && session.offer?.rideId === rideId) {
+        const actual = sesionViva.current;
+        if (actual.phase === 'offer' && actual.offer?.rideId === rideId) {
           dispatch({ type: 'offer_rejected' });
           setNotice('Otro conductor tomó la carrera.');
         }
@@ -192,7 +216,7 @@ export function App() {
     });
 
     return disconnect;
-  }, [session.phase, session.offer?.rideId, restore]);
+  }, [conSesion, restore]);
 
   /* --- posición: solo con turno abierto ------------------------------------ */
   useEffect(() => {
@@ -380,8 +404,12 @@ export function App() {
                     void disablePush().catch(() => undefined);
                   })
                 }
-                onPause={() => dispatch({ type: 'pause' })}
-                onResume={() => dispatch({ type: 'resume' })}
+                onPause={() =>
+                  void command('/v1/driver/shift/pause', () => dispatch({ type: 'pause' }))
+                }
+                onResume={() =>
+                  void command('/v1/driver/shift/resume', () => dispatch({ type: 'resume' }))
+                }
               />
             ) : null}
 

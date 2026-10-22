@@ -104,6 +104,63 @@ export class FleetService {
   }
 
   /**
+   * Pausa y reanudación del turno.
+   *
+   * La pausa existía solo en el teléfono: la PWA se pintaba «En pausa» y no
+   * se lo decía a nadie, así que el conductor seguía `AVAILABLE` en la base,
+   * el despacho le seguía ofreciendo carreras y la siguiente recuperación de
+   * estado le devolvía la pantalla a «esperando carrera».
+   *
+   * Va como UPDATE condicional y no como lectura-y-escritura a propósito. El
+   * despacho pone `ON_RIDE` desde otro proceso; entre un `select` y un
+   * `update` cabe perfectamente una asignación, y el conductor se quedaría
+   * «en pausa» con una carrera asignada que nadie le mostraría. Al exigir el
+   * estado de partida en el `where`, o la fila era la que creíamos o no se
+   * toca nada.
+   */
+  async pauseShift(driverId: string): Promise<void> {
+    await this.cambiarEstadoDeTurno(driverId, 'AVAILABLE', 'PAUSED');
+  }
+
+  async resumeShift(driverId: string): Promise<void> {
+    await this.cambiarEstadoDeTurno(driverId, 'PAUSED', 'AVAILABLE');
+  }
+
+  private async cambiarEstadoDeTurno(
+    driverId: string,
+    desde: 'AVAILABLE' | 'PAUSED',
+    hasta: 'AVAILABLE' | 'PAUSED',
+  ): Promise<void> {
+    const cambiadas = await this.db
+      .update(drivers)
+      .set({ status: hasta })
+      .where(and(eq(drivers.id, driverId), eq(drivers.status, desde)))
+      .returning({ id: drivers.id });
+
+    if (cambiadas.length > 0) return;
+
+    /*
+     * No cambió nada. Puede ser que ya estuviera en el estado pedido —dos
+     * toques seguidos, o el reenvío de la cola al volver la señal— y eso no
+     * es un error: el resultado es el que el conductor quería. Lo demás sí.
+     */
+    const [actual] = await this.db
+      .select({ status: drivers.status })
+      .from(drivers)
+      .where(eq(drivers.id, driverId))
+      .limit(1);
+
+    if (!actual) throw new AppError('NOT_FOUND', 'El conductor no existe');
+    if (actual.status === hasta) return;
+
+    if (actual.status === 'ON_RIDE') {
+      throw new AppError('DRIVER_BUSY', 'No se puede pausar con una carrera en curso');
+    }
+
+    throw new AppError('DRIVER_OFF_SHIFT', 'No hay un turno abierto para pausar');
+  }
+
+  /**
    * Turno abierto del conductor, si lo hay.
    *
    * Lo necesita la PWA al arrancar: sin esto, un conductor cuyo turno quedó
@@ -112,19 +169,27 @@ export class FleetService {
    */
   async currentShift(
     driverId: string,
-  ): Promise<{ shiftId: string; plate: string; startedAt: Date } | null> {
+  ): Promise<{ shiftId: string; plate: string; startedAt: Date; paused: boolean } | null> {
     const [shift] = await this.db
       .select({
         shiftId: driverShifts.id,
         plate: vehicles.plate,
         startedAt: driverShifts.startedAt,
+        status: drivers.status,
       })
       .from(driverShifts)
       .innerJoin(vehicles, eq(vehicles.id, driverShifts.vehicleId))
+      .innerJoin(drivers, eq(drivers.id, driverShifts.driverId))
       .where(and(eq(driverShifts.driverId, driverId), isNull(driverShifts.endedAt)))
       .limit(1);
 
-    return shift ?? null;
+    if (!shift) return null;
+
+    // La pausa viaja con el turno porque es justo cuando importa: al abrir la
+    // aplicación hay que devolver al conductor a la pantalla que dejó, no a
+    // «esperando carrera».
+    const { status, ...resto } = shift;
+    return { ...resto, paused: status === 'PAUSED' };
   }
 
   /** Lo que el conductor lleva hoy: carreras finalizadas y suma de tarifas. */
