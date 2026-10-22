@@ -26,6 +26,23 @@ el archivo con su nombre exacto y sin hash. Lleva además una comprobación: si
 una versión futura de MapLibre renombra el worker, la compilación falla en vez
 de publicar un mapa vacío.
 
+**Y no basta con emitirlo.** El `mime.types` de nginx solo mapea `js`, no
+`mjs`, así que el worker salía como `application/octet-stream` y el navegador
+lo rechazaba igual: un worker de módulo exige un tipo de JavaScript. Mismo
+mapa en blanco, otra causa. `nginx.conf` le pone el tipo a mano con
+`types { } default_type text/javascript`, el mismo recurso que la PWA del
+conductor usa para su `.webmanifest`.
+
+Esto no se ve con `vite preview`, que sí conoce `.mjs`. Para comprobar un
+cambio que toque cómo se sirven los archivos hay que levantar el nginx de
+verdad:
+
+```bash
+docker run --rm -p 8099:80 -v "$PWD/apps/admin/nginx.conf:/etc/nginx/conf.d/default.conf:ro" -v "$PWD/apps/admin/dist:/usr/share/nginx/html:ro" nginx:1.29-alpine
+```
+
+y mirar el `Content-Type` de lo que devuelve, no solo el código 200.
+
 ## Las tipografías del mapa
 
 Están en `public/fonts`, servidas por nosotros. El estilo apuntaba a
