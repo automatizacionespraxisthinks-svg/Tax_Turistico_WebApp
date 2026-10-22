@@ -3,7 +3,7 @@ import { Module } from '@nestjs/common';
 import { NestFactory } from '@nestjs/core';
 import { VEHICLE_TYPES, type VehicleType } from '@tax/shared';
 import { DbModule } from '../db/db.module';
-import { AuditModule } from '../modules/audit/audit.module';
+import { AuditService } from '../modules/audit/audit.service';
 import { FleetAdminService } from '../modules/fleet/fleet-admin.service';
 
 /**
@@ -20,7 +20,16 @@ import { FleetAdminService } from '../modules/fleet/fleet-admin.service';
  *   node dist/cli/crear-conductor.js 106 "Pedro Ramírez" +573118889900 WXY123 sedan
  */
 
-@Module({ imports: [DbModule, AuditModule], providers: [FleetAdminService] })
+/*
+ * Se provee `AuditService` directamente en vez de importar `AuditModule`.
+ *
+ * Ese modulo trae consigo su controlador, el controlador usa `SessionGuard` y
+ * el guardia necesita `IdentityService`: nada de eso tiene sentido en un
+ * comando de terminal, y compilado hace que Nest falle al arrancar con
+ * «can't resolve dependencies of the SessionGuard». El servicio por su cuenta
+ * solo depende de la base.
+ */
+@Module({ imports: [DbModule], providers: [AuditService, FleetAdminService] })
 class CliModule {}
 
 async function main(): Promise<void> {

@@ -7,7 +7,6 @@ import { desc, eq } from 'drizzle-orm';
 import { DB, DbModule, type Database } from '../db/db.module';
 import { users, userRecoveryCodes } from '../db/schema';
 import { hashSecret } from '../common/crypto';
-import { AuditModule } from '../modules/audit/audit.module';
 import { AuditService } from '../modules/audit/audit.service';
 
 /**
@@ -140,7 +139,16 @@ class UsuariosCli {
   }
 }
 
-@Module({ imports: [DbModule, AuditModule], providers: [UsuariosCli] })
+/*
+ * Se provee `AuditService` directamente en vez de importar `AuditModule`.
+ *
+ * Ese modulo trae consigo su controlador, el controlador usa `SessionGuard` y
+ * el guardia necesita `IdentityService`: nada de eso tiene sentido en un
+ * comando de terminal, y compilado hace que Nest falle al arrancar con
+ * «can't resolve dependencies of the SessionGuard». El servicio por su cuenta
+ * solo depende de la base.
+ */
+@Module({ imports: [DbModule], providers: [AuditService, UsuariosCli] })
 class CliModule {}
 
 async function main(): Promise<void> {

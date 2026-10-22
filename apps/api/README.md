@@ -138,6 +138,18 @@ oleada, aceptación simultánea— y comprueba que exactamente un conductor gana
 los demás reciben `RIDE_ALREADY_TAKEN`.
 
 ```bash
+pnpm --filter @tax/api exec nest build
+pnpm --filter @tax/api exec tsx src/test/e2e-cli.ts
+```
+
+Ejecuta los comandos de `cli/` **compilados**, como los corre el contenedor.
+No es redundante con probarlos a mano: `tsx` no emite los metadatos de
+decoradores, así que Nest no ve las dependencias de los guardias y los
+instancia vacíos sin protestar. Un comando podía pasar en desarrollo y morir
+en el VPS con «can't resolve dependencies of the SessionGuard». Esta prueba
+corre `node dist/cli/*.js` y falla si aparece ese error.
+
+```bash
 pnpm --filter @tax/api exec tsx src/test/e2e-totp.ts
 ```
 
