@@ -23,6 +23,8 @@ export interface Driver {
   position?: Point;
   /** Antigüedad de la posición en segundos; >60 s descarta al candidato (§5.2). */
   positionAgeSeconds?: number;
+  /** Si sigue trabajando. Un conductor inactivo no entra en ninguna oleada. */
+  active: boolean;
   shiftStartedAt?: string;
   ridesToday: number;
   acceptanceRate: number;

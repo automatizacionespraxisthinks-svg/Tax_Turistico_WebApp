@@ -156,6 +156,17 @@ function reportError(error: unknown): void {
 /* ------------------------------------------------------------ acciones --- */
 
 export const actions = {
+  /**
+   * Recarga la flota.
+   *
+   * Hace falta porque dar de alta o editar un conductor no genera evento de
+   * socket: el tiempo real está pensado para las carreras, que cambian cada
+   * segundo, no para el alta de personal, que pasa una vez al mes.
+   */
+  async refreshDrivers() {
+    await loadDrivers();
+  },
+
   /** Relanza el despacho de una carrera sin asignar (§5.3, operador). */
   async relaunch(rideId: string) {
     await api.post(`/v1/admin/rides/${rideId}/redispatch`);

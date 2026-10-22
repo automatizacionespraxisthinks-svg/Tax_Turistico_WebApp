@@ -6,7 +6,7 @@ import type { Point, VehicleType } from '@tax/shared';
 import { estimateEtaMinutes } from '@tax/shared';
 import { DB, type Database } from '../../db/db.module';
 import { REDIS, redisKeys } from '../../redis/redis.module';
-import { driverPositions, driverShifts, drivers, vehicles } from '../../db/schema';
+import { driverDevices, driverPositions, driverShifts, drivers, vehicles } from '../../db/schema';
 import { AppError } from '../../common/problem';
 import { loadEnv } from '../../config/env';
 import { ZonesService } from '../pricing/zones.service';
@@ -331,6 +331,21 @@ export class FleetService {
     for (const id of ids) pipeline.hget(redisKeys.driverMeta(id), 'at');
     const ages = await pipeline.exec();
 
+    /*
+     * Qué conductores tienen celular vivo.
+     *
+     * El panel lo daba por cierto siempre —estaba escrito a mano como `true`
+     * en su mapeador—, así que la alerta «dispositivo sin registrar» no se
+     * encendía nunca y la ficha decía «Sí» incluso para alguien a quien le
+     * acababan de revocar el teléfono. Una consulta más, en vez de una por
+     * conductor.
+     */
+    const conDispositivo = await this.db
+      .selectDistinct({ driverId: driverDevices.driverId })
+      .from(driverDevices)
+      .where(and(inArray(driverDevices.driverId, ids), isNull(driverDevices.revokedAt)));
+    const registrados = new Set(conDispositivo.map((row) => row.driverId));
+
     const now = Date.now();
 
     return rows.map((row, index) => {
@@ -339,6 +354,7 @@ export class FleetService {
 
       return {
         ...row,
+        deviceRegistered: registrados.has(row.id),
         position:
           position && position[0] && position[1]
             ? { lat: Number(position[1]), lng: Number(position[0]) }

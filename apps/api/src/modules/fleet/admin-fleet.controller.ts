@@ -1,15 +1,124 @@
-import { Controller, Get, UseGuards } from '@nestjs/common';
-import { SessionGuard } from '../identity/guards';
+import { Body, Controller, Get, HttpCode, Param, ParseUUIDPipe, Patch, Post, Req, UseGuards } from '@nestjs/common';
+import type { FastifyRequest } from 'fastify';
+import { z } from 'zod';
+import { VEHICLE_TYPES } from '@tax/shared';
+import { zodBody } from '../../common/zod.pipe';
+import { Roles, SessionGuard } from '../identity/guards';
 import { FleetService } from './fleet.service';
+import { FleetAdminService, type AdminActor } from './fleet-admin.service';
 
-/** Flota vista desde el panel: estado y posición en vivo de los 62 taxis. */
+const nuevoConductorSchema = z.object({
+  // El código es lo que el conductor teclea cada mañana: corto y numérico.
+  code: z.string().trim().min(1).max(10).regex(/^[0-9]+$/, 'El código es numérico'),
+  name: z.string().trim().min(3).max(120),
+  phone: z.string().trim().regex(/^\+\d{8,15}$/, 'Teléfono en formato E.164, por ejemplo +573001234567'),
+  plate: z.string().trim().min(5).max(10),
+  vehicleType: z.enum(VEHICLE_TYPES).default('sedan'),
+});
+
+const cambiosSchema = z
+  .object({
+    name: z.string().trim().min(3).max(120).optional(),
+    phone: z.string().trim().regex(/^\+\d{8,15}$/).optional(),
+    active: z.boolean().optional(),
+  })
+  .refine((v) => Object.keys(v).length > 0, 'No hay nada que cambiar');
+
+function actorDe(request: FastifyRequest): AdminActor {
+  const user = request.user!;
+  return { id: user.id, name: user.name, role: user.role, ip: request.ip };
+}
+
+/**
+ * Flota vista desde el panel: estado y posición en vivo de los 62 taxis, y el
+ * mantenimiento de conductores y dispositivos.
+ *
+ * La lectura la puede hacer cualquier operador —necesita ver la flota para
+ * despachar—, pero dar de alta, editar, reiniciar un PIN o revocar un celular
+ * son solo de administrador (§8.1). El guardia lo comprueba aquí, del lado del
+ * servidor: si estuviera solo en la interfaz, bastaría con saltarse la
+ * interfaz.
+ */
 @Controller('v1/admin/drivers')
 @UseGuards(SessionGuard)
 export class AdminFleetController {
-  constructor(private readonly fleet: FleetService) {}
+  constructor(
+    private readonly fleet: FleetService,
+    private readonly admin: FleetAdminService,
+  ) {}
 
   @Get()
   list() {
     return this.fleet.listWithPositions();
+  }
+
+  /**
+   * Da de alta un conductor. Devuelve el PIN **una sola vez**: en la base
+   * solo queda su hash Argon2, así que si se pierde hay que generar otro.
+   */
+  @Post()
+  @Roles('administrador')
+  async create(
+    @Req() request: FastifyRequest,
+    @Body(zodBody(nuevoConductorSchema)) body: z.infer<typeof nuevoConductorSchema>,
+  ) {
+    const { id, code, pin } = await this.admin.createDriver(body, actorDe(request));
+    return { id, code, pin, aviso: 'Este PIN no se vuelve a mostrar. Entrégaselo al conductor ahora.' };
+  }
+
+  @Patch(':driverId')
+  @Roles('administrador')
+  @HttpCode(204)
+  async update(
+    @Req() request: FastifyRequest,
+    @Param('driverId', ParseUUIDPipe) driverId: string,
+    @Body(zodBody(cambiosSchema)) body: z.infer<typeof cambiosSchema>,
+  ) {
+    await this.admin.updateDriver(driverId, body, actorDe(request));
+  }
+
+  /** Genera un PIN nuevo y levanta el bloqueo por intentos fallidos. */
+  @Post(':driverId/pin')
+  @Roles('administrador')
+  async resetPin(@Req() request: FastifyRequest, @Param('driverId', ParseUUIDPipe) driverId: string) {
+    const { code, pin } = await this.admin.resetPin(driverId, actorDe(request));
+    return { code, pin, aviso: 'Este PIN no se vuelve a mostrar.' };
+  }
+
+  /** Si tiene turno abierto: la oficina lo mira antes de desactivarlo. */
+  @Get(':driverId/shift')
+  async shift(@Param('driverId', ParseUUIDPipe) driverId: string) {
+    return { open: await this.admin.hasOpenShift(driverId) };
+  }
+
+  @Get(':driverId/devices')
+  @Roles('administrador')
+  async devices(@Param('driverId', ParseUUIDPipe) driverId: string) {
+    const rows = await this.admin.listDevices(driverId);
+    // La suscripción de push es un secreto del navegador; afuera solo se dice
+    // si existe, que es lo único que la oficina necesita saber.
+    return rows.map(({ pushSubscription, ...rest }) => ({
+      ...rest,
+      recibeAvisos: Boolean(pushSubscription),
+    }));
+  }
+
+  @Post('devices/:deviceId/revoke')
+  @Roles('administrador')
+  @HttpCode(204)
+  async revoke(@Req() request: FastifyRequest, @Param('deviceId', ParseUUIDPipe) deviceId: string) {
+    await this.admin.revokeDevice(deviceId, actorDe(request));
+  }
+}
+
+/** Placas dadas de alta, para elegir en vez de escribirlas a mano. */
+@Controller('v1/admin/vehicles')
+@UseGuards(SessionGuard)
+export class AdminVehiclesController {
+  constructor(private readonly admin: FleetAdminService) {}
+
+  @Get()
+  list() {
+    return this.admin.listVehicles();
   }
 }

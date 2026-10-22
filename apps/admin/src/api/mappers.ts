@@ -80,6 +80,7 @@ export interface ApiDriver {
   phone: string;
   status: DriverStatus;
   active: boolean;
+  deviceRegistered: boolean;
   shiftStartedAt: string | null;
   plate: string | null;
   vehicleType: VehicleType | null;
@@ -197,6 +198,7 @@ export function toDriver(row: ApiDriver): Driver {
     name: row.name,
     phone: row.phone,
     status: row.status,
+    active: row.active,
     vehicle: {
       plate: row.plate ?? '—',
       type: row.vehicleType ?? 'sedan',
@@ -209,7 +211,7 @@ export function toDriver(row: ApiDriver): Driver {
     // Estos dos todavía no los expone la API; se calcularán con los reportes.
     ridesToday: 0,
     acceptanceRate: 0,
-    deviceRegistered: true,
+    deviceRegistered: row.deviceRegistered,
   };
 }
 

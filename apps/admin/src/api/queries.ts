@@ -166,3 +166,29 @@ export function useSystemStatus() {
     refetchInterval: 15_000,
   });
 }
+
+
+/* ------------------------------------------------------------- sesión --- */
+
+export interface SesionUsuario {
+  id: string;
+  name: string;
+  role: 'administrador' | 'operador';
+  totpEnabled: boolean;
+}
+
+/**
+ * Quién está en sesión y con qué rol.
+ *
+ * El panel lo usa para no enseñar botones que el servidor va a rechazar. No
+ * es la barrera de seguridad —esa está en el guardia de la API, que exige
+ * `administrador`— sino cortesía: enseñar un botón que siempre falla es peor
+ * que no enseñarlo.
+ */
+export function useSesion() {
+  return useQuery({
+    queryKey: ['sesion'],
+    queryFn: () => api.get<{ user: SesionUsuario }>('/v1/auth/me'),
+    staleTime: 5 * 60_000,
+  });
+}
