@@ -11,6 +11,14 @@
     <meta name="mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
     <link rel="icon" href="/icon.svg" type="image/svg+xml" />
+    <!--
+      Safari en iOS ignora los iconos del manifiesto para la pantalla de
+      inicio: usa este. Sin el, el icono acaba siendo una captura de la
+      pagina, que es lo que delata a una aplicacion mal instalada.
+    -->
+    <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-title" content="Conductor" />
     <title>Conductor · Tax Turístico</title>
     <script>
       // La PWA se usa al sol y de noche: por defecto sigue al sistema.

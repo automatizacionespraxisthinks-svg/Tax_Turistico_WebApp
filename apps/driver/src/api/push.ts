@@ -1,4 +1,5 @@
 import { api } from './client';
+import { esIOS, instalada } from './instalacion';
 
 /**
  * Suscripción a Web Push (ADR-07).
@@ -16,26 +17,6 @@ export type PushState =
   | 'denegado'
   | 'requiere-instalar'
   | 'no-soportado';
-
-/**
- * En iOS el push solo existe si la PWA está instalada en la pantalla de
- * inicio (iOS 16.4+). Desde Safari como web normal no hay `PushManager`, y
- * conviene decirlo con esas palabras en vez de «no soportado»: la solución
- * es instalarla, no cambiar de teléfono.
- */
-function esIOS(): boolean {
-  return (
-    /iPad|iPhone|iPod/.test(navigator.userAgent) ||
-    (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1)
-  );
-}
-
-function instalada(): boolean {
-  return (
-    window.matchMedia('(display-mode: standalone)').matches ||
-    (navigator as unknown as { standalone?: boolean }).standalone === true
-  );
-}
 
 export function pushSupport(): PushState {
   if (!('serviceWorker' in navigator) || !('Notification' in window)) {

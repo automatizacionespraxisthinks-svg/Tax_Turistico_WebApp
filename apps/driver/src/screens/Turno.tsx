@@ -6,6 +6,7 @@ import { Button, Field, Input, StatusPill, transition } from '@tax/ui';
 import { ActionBar, DataRow, Screen } from '../components/Chrome';
 import type { SessionState } from '../state/session';
 import type { PushState } from '../api/push';
+import { Instalar } from '../components/Instalar';
 
 /**
  * Tres estados de espera en una sola pantalla: fuera de turno, disponible y en
@@ -127,6 +128,8 @@ export function Turno({
           <DataRow label="Total estimado" value={formatMoney(session.earnedToday)} />
           {plate ? <DataRow label="Vehículo" value={plate} /> : null}
         </div>
+
+        <Instalar compacto />
 
         {onShift ? <AvisoPush estado={push} onActivar={onEnablePush} /> : null}
 

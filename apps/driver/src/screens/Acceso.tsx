@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { motion } from 'motion/react';
 import { ShieldCheck } from 'lucide-react';
+import { Instalar } from '../components/Instalar';
 import { Button, Field, Input, transition } from '@tax/ui';
 import { Screen } from '../components/Chrome';
 
@@ -110,6 +111,8 @@ export function Acceso({
             />
           </Field>
         </div>
+
+        <Instalar />
 
         <Button variant="primary" size="touch" loading={submitting} onClick={() => void submit()}>
           Entrar

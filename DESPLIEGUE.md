@@ -334,6 +334,27 @@ Igual que el panel, cambiando:
 worker no hay Web Push: los conductores solo verían las ofertas con la
 aplicación abierta en pantalla.
 
+### Cómo la instalan los conductores
+
+La aplicación se ofrece a sí misma, distinto en cada sistema:
+
+- **Android**: aparece un botón «Instalar aplicación» en la pantalla de
+  acceso. Para que Chrome lo permita, el manifiesto necesita iconos **PNG** de
+  192 y 512; con solo SVG el evento de instalación no se dispara nunca y no
+  hay botón. Los genera `apps/driver/scripts/generar-iconos.mjs`.
+- **iPhone**: no existe nada programático, así que la pantalla explica los tres
+  toques (Compartir → Añadir a pantalla de inicio → abrirla desde el icono).
+
+**En iPhone instalar no es opcional**: Web Push solo funciona con la
+aplicación en la pantalla de inicio (iOS 16.4+). Un conductor que la use desde
+Safari no recibirá ofertas con el teléfono bloqueado, y la oleada 1 dura 45
+segundos.
+
+Dile a los conductores de iPhone que **la instalen antes de entrar**: la
+aplicación instalada tiene su propio almacenamiento, separado del de Safari,
+así que quien entre primero en el navegador tendrá que escribir su código otra
+vez dentro. La pantalla ya lo advierte.
+
 ---
 
 ## 4. Primer arranque
