@@ -173,6 +173,7 @@ export function useSystemStatus() {
 export interface SesionUsuario {
   id: string;
   name: string;
+  email: string;
   role: 'administrador' | 'operador';
   totpEnabled: boolean;
 }

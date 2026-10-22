@@ -34,15 +34,21 @@ import {
   transition,
   useToast,
 } from '@tax/ui';
-import { useAuditLog, useAuditVerification, useSystemStatus } from '../api/queries';
+import { useAuditLog, useAuditVerification, useSesion, useSystemStatus } from '../api/queries';
+import { UsuariosAdmin } from '../components/UsuariosAdmin';
 import { actions, useLive } from '../live/store';
 
-type Tab = 'estado' | 'outbox' | 'auditoria';
+type Tab = 'estado' | 'outbox' | 'auditoria' | 'usuarios';
 
 export function Sistema() {
   const [tab, setTab] = useState<Tab>('estado');
   const outbox = useLive((s) => s.outbox);
   const dead = outbox.filter((e) => e.status === 'dead').length;
+
+  // La pestaña solo existe para administradores. No es la barrera —el
+  // servidor responde 403 a un operador— sino no enseñar lo que no puede usar.
+  const sesion = useSesion();
+  const esAdmin = sesion.data?.user.role === 'administrador';
 
   return (
     <div className="space-y-4 p-5">
@@ -53,6 +59,7 @@ export function Sistema() {
           { value: 'estado', label: 'Estado' },
           { value: 'outbox', label: 'Eventos a n8n', count: outbox.length },
           { value: 'auditoria', label: 'Auditoría' },
+          ...(esAdmin ? [{ value: 'usuarios' as const, label: 'Usuarios' }] : []),
         ]}
       />
 
@@ -74,6 +81,7 @@ export function Sistema() {
           {tab === 'estado' ? <Estado /> : null}
           {tab === 'outbox' ? <Outbox /> : null}
           {tab === 'auditoria' ? <Auditoria /> : null}
+          {tab === 'usuarios' && esAdmin ? <UsuariosAdmin /> : null}
         </motion.div>
       </AnimatePresence>
     </div>

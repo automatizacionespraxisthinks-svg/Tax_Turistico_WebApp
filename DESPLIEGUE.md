@@ -371,6 +371,39 @@ El segundo factor no se activa aquí a propósito: lo da de alta la propia
 persona al entrar, escaneando el QR con su teléfono. Así el secreto TOTP nunca
 pasa por las manos de quien crea la cuenta.
 
+### 4.2.1 Si pierdes la contraseña
+
+La contraseña **no se puede recuperar**: en la base solo vive su hash Argon2.
+Lo que sí se puede, desde el terminal del contenedor, es ver qué usuarios hay
+y generar una nueva.
+
+```bash
+node dist/cli/usuarios.js
+```
+
+Lista correo, nombre, rol, si tiene segundo factor activo y el último acceso.
+El correo no es secreto; la contraseña no aparece por ninguna parte.
+
+```bash
+node dist/cli/usuarios.js ana@TUDOMINIO
+```
+
+Genera una contraseña nueva y la imprime una vez. **Conserva el segundo
+factor**, así que seguirás necesitando el código de tu aplicación o uno de tus
+códigos de respaldo.
+
+Si además perdiste el teléfono y los códigos de respaldo:
+
+```bash
+node dist/cli/usuarios.js ana@TUDOMINIO --reiniciar-segundo-factor
+```
+
+Eso desactiva el segundo factor y borra los códigos de respaldo viejos: al
+entrar tendrás que darlo de alta otra vez desde cero. Úsalo solo en ese caso,
+porque deja la cuenta un rato protegida por contraseña a secas.
+
+Las dos operaciones quedan en la bitácora como «Terminal del servidor».
+
 ### 4.3 Da de alta el segundo factor
 
 Entra a `https://panel.TUDOMINIO`. Como la cuenta aún no tiene segundo factor,

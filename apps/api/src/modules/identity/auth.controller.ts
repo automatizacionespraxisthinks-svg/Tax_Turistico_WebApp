@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Post, Req, Res, UseGuards } from '@nestjs/common';
+import { Body, Controller, Get, HttpCode, Post, Req, Res, UseGuards } from '@nestjs/common';
 import type { FastifyReply, FastifyRequest } from 'fastify';
 import { z } from 'zod';
 import { zodBody } from '../../common/zod.pipe';
@@ -28,6 +28,13 @@ const userLoginSchema = z.object({
    * escribe en la misma casilla lo que tenga a mano.
    */
   totp: z.string().trim().min(6).max(20).optional(),
+});
+
+const cambioClaveSchema = z.object({
+  currentPassword: z.string().min(1, 'Escribe tu contraseña actual'),
+  // El largo mínimo real lo juzga la política compartida; aquí solo se corta
+  // lo absurdo antes de gastar un Argon2 en ello.
+  newPassword: z.string().min(1).max(200),
 });
 
 const totpActivateSchema = z.object({
@@ -93,6 +100,29 @@ export class AuthController {
         ? await this.identity.recoveryCodesLeft(user.id)
         : null,
     };
+  }
+
+  /**
+   * El propio usuario cambia su contraseña.
+   *
+   * No es `/v1/admin/...` a propósito: cualquiera con sesión puede cambiar la
+   * suya, administrador u operador. Lo que lo protege no es el rol, es tener
+   * que escribir la actual.
+   */
+  @Post('password')
+  @UseGuards(SessionGuard)
+  @HttpCode(204)
+  async changePassword(
+    @Req() request: FastifyRequest,
+    @Body(zodBody(cambioClaveSchema)) body: z.infer<typeof cambioClaveSchema>,
+  ) {
+    await this.identity.changeOwnPassword(
+      request.user!.id,
+      body.currentPassword,
+      body.newPassword,
+      request.cookies?.[SESSION_COOKIE],
+      request.ip,
+    );
   }
 
   /* --------------------------------------------------- segundo factor --- */

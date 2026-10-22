@@ -3,6 +3,8 @@ import { IdentityService } from './identity.service';
 import { ApiKeyGuard } from './api-key.guard';
 import { DriverGuard, SessionGuard } from './guards';
 import { AuthController } from './auth.controller';
+import { AdminUsersController } from './admin-users.controller';
+import { UsersAdminService } from './users-admin.service';
 
 /**
  * Identidad.
@@ -13,8 +15,8 @@ import { AuthController } from './auth.controller';
  */
 @Global()
 @Module({
-  providers: [IdentityService, ApiKeyGuard, SessionGuard, DriverGuard],
-  controllers: [AuthController],
-  exports: [IdentityService, ApiKeyGuard, SessionGuard, DriverGuard],
+  providers: [IdentityService, UsersAdminService, ApiKeyGuard, SessionGuard, DriverGuard],
+  controllers: [AuthController, AdminUsersController],
+  exports: [IdentityService, UsersAdminService, ApiKeyGuard, SessionGuard, DriverGuard],
 })
 export class IdentityModule {}

@@ -19,6 +19,7 @@ import { WAHA_STATUS_LABEL, WAHA_STATUS_TONE, formatTime } from '@tax/shared';
 import { Banner, LiveDot, StatusPill, ThemeToggle, cn, spring, transition } from '@tax/ui';
 import { useLive } from '../live/store';
 import { api } from '../api/client';
+import { CambiarClave } from '../components/CambiarClave';
 
 interface NavItem {
   to: string;
@@ -189,14 +190,20 @@ function Sidebar({
           {!collapsed ? (
             <div className="min-w-0 flex-1">
               <p className="truncate text-caption font-medium text-ink">{userName}</p>
-              <button
-                onClick={() => {
-                  void api.post('/v1/auth/logout').finally(() => window.location.reload());
-                }}
-                className="text-micro text-ink-muted transition-colors duration-150 hover:text-ink"
-              >
-                Cerrar sesión
-              </button>
+              <div className="flex items-center gap-2">
+                <CambiarClave />
+                <span aria-hidden="true" className="text-micro text-ink-muted">
+                  ·
+                </span>
+                <button
+                  onClick={() => {
+                    void api.post('/v1/auth/logout').finally(() => window.location.reload());
+                  }}
+                  className="text-micro text-ink-muted transition-colors duration-150 hover:text-ink"
+                >
+                  Salir
+                </button>
+              </div>
             </div>
           ) : null}
           {!collapsed ? <ThemeToggle /> : null}

@@ -1,6 +1,6 @@
 import { randomBytes } from 'node:crypto';
 import { Inject, Injectable, Logger } from '@nestjs/common';
-import { and, eq, isNull, or, gt } from 'drizzle-orm';
+import { and, eq, isNull, ne, or, gt } from 'drizzle-orm';
 import { uuidv7 } from 'uuidv7';
 import { DB, type Database } from '../../db/db.module';
 import { apiKeys, driverDevices, drivers, sessions, userRecoveryCodes, users } from '../../db/schema';
@@ -16,6 +16,8 @@ import {
 } from '../../common/crypto';
 import { base32Decode, generateTotpSecret, otpauthUri, verifyTotp } from '../../common/totp';
 import { loadEnv } from '../../config/env';
+import { evaluatePassword } from '@tax/shared';
+import { AuditService } from '../audit/audit.service';
 
 export interface ApiPrincipal {
   kind: 'integration';
@@ -28,6 +30,8 @@ export interface UserPrincipal {
   kind: 'user';
   id: string;
   name: string;
+  /** Lo necesita el panel para juzgar una contraseña nueva igual que aquí. */
+  email: string;
   role: 'administrador' | 'operador';
   /** Si no, la sesión solo sirve para darlo de alta (§8.1). */
   totpEnabled: boolean;
@@ -53,7 +57,12 @@ export interface DriverPrincipal {
 export class IdentityService {
   private readonly logger = new Logger(IdentityService.name);
 
-  constructor(@Inject(DB) private readonly db: Database) {}
+  constructor(
+    @Inject(DB) private readonly db: Database,
+    // Por token explícito: `tsx`, con el que corren los comandos de `cli/`,
+    // no emite los metadatos de tipos que Nest usa para inyectar.
+    @Inject(AuditService) private readonly audit: AuditService,
+  ) {}
 
   /* -------------------------------------------------------- claves de API */
 
@@ -428,6 +437,7 @@ export class IdentityService {
         kind: 'user',
         id: user.id,
         name: user.name,
+        email: user.email,
         role: user.role,
         totpEnabled: user.totpEnabled,
       },
@@ -441,6 +451,7 @@ export class IdentityService {
       .select({
         userId: users.id,
         name: users.name,
+        email: users.email,
         role: users.role,
         active: users.active,
         totpEnabled: users.totpEnabled,
@@ -457,6 +468,7 @@ export class IdentityService {
       kind: 'user',
       id: row.userId,
       name: row.name,
+      email: row.email,
       role: row.role,
       totpEnabled: row.totpEnabled,
     };
@@ -584,6 +596,80 @@ export class IdentityService {
       .from(userRecoveryCodes)
       .where(and(eq(userRecoveryCodes.userId, userId), isNull(userRecoveryCodes.usedAt)));
     return rows.length;
+  }
+
+  /**
+   * El propio usuario cambia su contraseña (§8.1).
+   *
+   * Pide la actual, y eso no es burocracia: sin ello, cualquiera que se
+   * siente ante una sesión abierta podría cambiarla y dejar fuera a su dueño.
+   * Es la diferencia entre una sesión secuestrada durante doce horas y una
+   * cuenta perdida.
+   *
+   * Cierra las demás sesiones de esa persona pero NO la actual: cerrarla
+   * sería expulsarla justo después de hacer lo correcto.
+   */
+  async changeOwnPassword(
+    userId: string,
+    actual: string,
+    nueva: string,
+    tokenActual: string | undefined,
+    ip?: string,
+  ): Promise<void> {
+    const [user] = await this.db.select().from(users).where(eq(users.id, userId)).limit(1);
+    if (!user) throw new AppError('NOT_FOUND', 'El usuario no existe');
+
+    if (!(await verifySecret(user.passwordHash, actual))) {
+      throw new AppError('UNAUTHORIZED', 'La contraseña actual no es correcta');
+    }
+
+    if (await verifySecret(user.passwordHash, nueva)) {
+      throw new AppError('VALIDATION_FAILED', 'La contraseña nueva tiene que ser distinta de la actual');
+    }
+
+    // La misma política que juzga el panel: si divergieran, el operador
+    // escribiría algo válido a sus ojos y el servidor lo rechazaría sin
+    // explicar por qué.
+    const veredicto = evaluatePassword(nueva, { email: user.email, name: user.name });
+    if (!veredicto.ok) {
+      throw new AppError('VALIDATION_FAILED', veredicto.problemas.join(' '));
+    }
+
+    const hashNuevo = await hashSecret(nueva);
+    const hashSesionActual = tokenActual ? sha256Hex(tokenActual) : null;
+
+    await this.db.transaction(async (tx) => {
+      await tx
+        .update(users)
+        .set({ passwordHash: hashNuevo, failedAttempts: 0, lockedUntil: null })
+        .where(eq(users.id, userId));
+
+      await tx
+        .update(sessions)
+        .set({ revokedAt: new Date() })
+        .where(
+          and(
+            eq(sessions.userId, userId),
+            isNull(sessions.revokedAt),
+            ...(hashSesionActual ? [ne(sessions.tokenHash, hashSesionActual)] : []),
+          ),
+        );
+
+      await this.audit.record(
+        {
+          actorId: user.id,
+          actorName: user.name,
+          role: user.role,
+          action: 'Cambió su propia contraseña',
+          entity: 'users',
+          entityId: user.email,
+          ip,
+        },
+        tx as unknown as Database,
+      );
+    });
+
+    this.logger.log({ userId }, 'Contraseña cambiada por su dueño');
   }
 
   /** Secreto con el que se firman los webhooks de una integración (§7.1). */

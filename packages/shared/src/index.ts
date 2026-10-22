@@ -1,5 +1,6 @@
 export * from './domain/ride';
 export * from './domain/driver';
+export * from './domain/password';
 export * from './domain/geo';
 export * from './domain/fare';
 export * from './domain/events';
