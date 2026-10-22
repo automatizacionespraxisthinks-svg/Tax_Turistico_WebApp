@@ -103,7 +103,21 @@ export function buildStyle(tilesUrl: string, palette: MapPalette): StyleSpecific
   return {
     version: 8,
     name: 'Tax Turístico · Paipa',
-    glyphs: 'https://fonts.openmaptiles.org/{fontstack}/{range}.pbf',
+    /*
+     * Las tipografias se sirven desde `public/fonts`, no desde un CDN.
+     *
+     * El estilo apuntaba a `fonts.openmaptiles.org`, que hoy responde 200 con
+     * una pagina HTML: MapLibre intenta leer ese HTML como protobuf, falla con
+     * «Unimplemented type: 4» y dibuja cada letra con el canvas del navegador.
+     * Se nota poco —las etiquetas salen igual, con otra letra— pero son 61
+     * avisos por carga y una dependencia de un tercero caido.
+     *
+     * Hay dos rangos porque son los que piden los nombres de Paipa: 0-255 trae
+     * el latino con acentos y enies, 256-511 el latino extendido. Si algun dia
+     * aparece un nombre fuera de ahi, MapLibre lo dibujara localmente, que es
+     * exactamente lo que pasa hoy con todos.
+     */
+    glyphs: '/fonts/{fontstack}/{range}.pbf',
     sources: {
       paipa: {
         type: 'vector',
