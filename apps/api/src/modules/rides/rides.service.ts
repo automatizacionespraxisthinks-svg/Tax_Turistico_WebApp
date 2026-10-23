@@ -17,6 +17,7 @@ import { AuditService } from '../audit/audit.service';
 import { OutboxService } from '../integrations/outbox.service';
 import { FaresService } from '../pricing/fares.service';
 import { GeocodingService } from '../pricing/geocoding.service';
+import { ZonesService } from '../pricing/zones.service';
 import { DispatchService } from '../dispatch/dispatch.service';
 import { isUniqueViolation } from '../../common/pg-errors';
 import { RealtimeGateway } from '../../realtime/realtime.gateway';
@@ -66,6 +67,7 @@ export class RidesService {
     private readonly audit: AuditService,
     private readonly fares: FaresService,
     private readonly geocoding: GeocodingService,
+    private readonly zones: ZonesService,
     private readonly realtime: RealtimeGateway,
     @Inject(forwardRef(() => DispatchService))
     private readonly dispatch: DispatchService,
@@ -84,7 +86,7 @@ export class RidesService {
      * contra las zonas con servicio.
      */
     let point = input.pickup.point;
-    let pickupSource: 'compartida' | 'geocodificada' = 'compartida';
+    let pickupSource: 'compartida' | 'geocodificada' | 'sin_ubicar' = 'compartida';
     let direccionResuelta: string | undefined;
 
     if (!point) {
@@ -96,11 +98,28 @@ export class RidesService {
       }
     }
 
+    /*
+     * Si no se pudo ubicar, la carrera se crea igual.
+     *
+     * El cliente da una direccion y el conductor la lee: asi se ha despachado
+     * toda la vida y no hace falta un mapa para eso. Lo unico que necesita
+     * coordenadas es el despacho, porque las oleadas son radios y un radio
+     * necesita un centro; para eso basta el centro del pueblo.
+     *
+     * Rechazar la carrera seria lo peor de los dos mundos: el cliente se
+     * queda sin taxi por un geocodificador que no entendio una nomenclatura
+     * que el conductor habria leido sin problema. Queda marcada como
+     * `sin_ubicar` para que en el panel se vea que ese punto del mapa es el
+     * del pueblo y no el del cliente.
+     */
     if (!point) {
-      throw new AppError(
-        'MISSING_LOCATION',
-        'No se pudo ubicar esa dirección. Pídele al cliente que comparta su ubicación.',
-      );
+      point = this.zones.puntoDeReferencia();
+      pickupSource = 'sin_ubicar';
+    }
+
+    if (!point) {
+      // Solo si no hay ni una zona configurada: eso es un sistema sin montar.
+      throw new AppError('MISSING_LOCATION', 'No hay zonas configuradas para despachar');
     }
 
     const quote = await this.fares.quote(point, input.dropoff?.point);
@@ -278,6 +297,15 @@ export class RidesService {
         patch: {},
         note: loDijoElCliente ? undefined : 'Finalizó sin ubicación: queda sin distancia',
       };
+    }
+
+    /*
+     * Si la recogida nunca se ubico, su punto es el centro del pueblo, no
+     * donde estaba el cliente. Medir desde ahi daria una distancia falsa, y
+     * una distancia falsa en un informe es peor que una casilla vacia.
+     */
+    if (ride.pickupSource === 'sin_ubicar') {
+      return { patch: {}, note: 'Sin distancia: la recogida nunca se ubicó en el mapa' };
     }
 
     const origen = { lat: ride.pickupLat, lng: ride.pickupLng };

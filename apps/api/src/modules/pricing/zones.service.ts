@@ -105,6 +105,25 @@ export class ZonesService implements OnModuleInit {
     };
   }
 
+  /**
+   * Un punto del pueblo desde el que despachar cuando no se sabe mas.
+   *
+   * El cliente da una direccion y el conductor la lee: esa parte no necesita
+   * coordenadas. Pero el despacho si, porque las oleadas son radios, y un
+   * radio necesita un centro. Antes de rechazar la carrera se usa el centro
+   * de la zona urbana: desde ahi la oleada 1 cubre el casco, y el conductor
+   * llega leyendo la direccion, como siempre se ha hecho.
+   */
+  puntoDeReferencia(): Point | undefined {
+    const urbana = this.cache.find((z) => z.kind === 'urbano') ?? this.cache[0];
+    if (!urbana) return undefined;
+
+    const puntos = urbana.polygon.coordinates.flat();
+    const lat = puntos.reduce((suma, [, y]) => suma + y, 0) / puntos.length;
+    const lng = puntos.reduce((suma, [x]) => suma + x, 0) / puntos.length;
+    return { lat, lng };
+  }
+
   /** Parámetros de la oleada N para una zona, con respaldo razonable. */
   waveConfig(zoneId: string, wave: 1 | 2 | 3): WaveConfig {
     const zone = this.byId(zoneId);

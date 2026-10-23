@@ -106,18 +106,24 @@ async function main(): Promise<void> {
     await call(`/v1/rides/${id2}/cancel`, { method: 'POST', body: { reason: 'Fin de la prueba' } });
   } else {
     /*
-     * Sin clave configurada la API no adivina. Lo importante no es que
-     * falle, sino COMO: el agente tiene que poder deducir que lo siguiente
-     * es pedirle la ubicacion al cliente, no reintentar lo mismo.
+     * Sin geocodificador la carrera se crea IGUAL. El cliente da una
+     * direccion y el conductor la lee; lo unico que necesitaba coordenadas
+     * era el despacho, y para eso basta un punto del pueblo. Rechazarla
+     * dejaria al cliente sin taxi por una nomenclatura que el conductor
+     * habria entendido sin problema.
      */
-    assert(soloTexto.status === 422, 'sin geocodificador responde 422', soloTexto.status);
-    const cuerpo = soloTexto.body as { code?: string; detail?: string };
-    assert(cuerpo.code === 'MISSING_LOCATION', 'con MISSING_LOCATION', cuerpo.code);
+    assert(soloTexto.status < 400, 'la carrera se crea igual, sin geocodificador', soloTexto.body);
+    const sinUbicarId = (soloTexto.body as { id: string }).id;
+    const d2 = (await call(`/v1/rides/${sinUbicarId}`)).body as {
+      pickupSource: string; pickupText: string; pickupLat: number;
+    };
+    assert(d2.pickupSource === 'sin_ubicar', 'marcada como sin ubicar', d2.pickupSource);
+    assert(Number.isFinite(d2.pickupLat), 'con un punto del pueblo para poder despachar');
     assert(
-      (cuerpo.detail ?? '').toLowerCase().includes('comparta su ubicaci'),
-      `y un detalle que dice que hacer: «${cuerpo.detail}»`,
+      d2.pickupText === 'Carrera 21 # 24-18, frente a la plaza',
+      'y el conductor recibe la direccion tal cual',
     );
-    console.log('\n  (sin GOOGLE_GEOCODING_API_KEY: no se probo la resolucion real)');
+    await call(`/v1/rides/${sinUbicarId}/cancel`, { method: 'POST', body: { reason: 'Fin de la prueba' } });
   }
 
   console.log('\n3. Una direccion que no existe en ningun lado');
@@ -129,13 +135,16 @@ async function main(): Promise<void> {
       passengers: 1,
     },
   });
-  assert(inventada.status === 422, 'tambien se rechaza con 422', inventada.status);
-  assert(
-    (inventada.body as { code?: string }).code === 'MISSING_LOCATION',
-    'y no se crea una carrera con un punto inventado',
-  );
+  assert(inventada.status < 400, 'tambien se crea: el conductor leera lo que haya', inventada.body);
+  const inventadaId = (inventada.body as { id: string }).id;
+  const d3 = (await call(`/v1/rides/${inventadaId}`)).body as { pickupSource: string };
+  assert(d3.pickupSource === 'sin_ubicar', 'y queda marcada como sin ubicar', d3.pickupSource);
+  await call(`/v1/rides/${inventadaId}/cancel`, {
+    method: 'POST',
+    body: { reason: 'Fin de la prueba' },
+  });
 
-  console.log('\nok El punto lo resuelve la API, y cuando no puede lo dice claro\n');
+  console.log('\nok La carrera se crea siempre: con punto exacto si lo hay, y si no con la direccion\n');
 }
 
 main().catch((e) => {

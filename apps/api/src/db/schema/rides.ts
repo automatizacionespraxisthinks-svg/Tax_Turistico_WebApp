@@ -72,7 +72,7 @@ export const rides = pgTable(
      * un conductor dice que el cliente no estaba ahi, esta columna es la
      * diferencia entre buscar el fallo en el GPS o en la direccion.
      */
-    pickupSource: text('pickup_source').$type<'compartida' | 'geocodificada'>(),
+    pickupSource: text('pickup_source').$type<'compartida' | 'geocodificada' | 'sin_ubicar'>(),
     dropoffText: text('dropoff_text'),
     dropoffLat: doublePrecision('dropoff_lat'),
     dropoffLng: doublePrecision('dropoff_lng'),
