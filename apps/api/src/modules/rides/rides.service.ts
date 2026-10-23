@@ -16,6 +16,7 @@ import { AppError } from '../../common/problem';
 import { AuditService } from '../audit/audit.service';
 import { OutboxService } from '../integrations/outbox.service';
 import { FaresService } from '../pricing/fares.service';
+import { GeocodingService } from '../pricing/geocoding.service';
 import { DispatchService } from '../dispatch/dispatch.service';
 import { isUniqueViolation } from '../../common/pg-errors';
 import { RealtimeGateway } from '../../realtime/realtime.gateway';
@@ -64,6 +65,7 @@ export class RidesService {
     private readonly outbox: OutboxService,
     private readonly audit: AuditService,
     private readonly fares: FaresService,
+    private readonly geocoding: GeocodingService,
     private readonly realtime: RealtimeGateway,
     @Inject(forwardRef(() => DispatchService))
     private readonly dispatch: DispatchService,
@@ -72,14 +74,36 @@ export class RidesService {
   /* ------------------------------------------------------------- creación */
 
   async create(input: CreateRideInput, actor: Actor) {
-    if (!input.pickup.point) {
+    /*
+     * El punto de recogida, por orden de confianza.
+     *
+     * Si el cliente compartio su ubicacion, esa manda: es exacta al metro y
+     * no hay nada que adivinar. Si solo escribio una direccion, la resuelve
+     * el geocodificador —aqui, nunca el agente de n8n, que podria cambiarle
+     * un digito sin que se note— y lo que devuelve ya viene comprobado
+     * contra las zonas con servicio.
+     */
+    let point = input.pickup.point;
+    let pickupSource: 'compartida' | 'geocodificada' = 'compartida';
+    let direccionResuelta: string | undefined;
+
+    if (!point) {
+      const hallada = await this.geocoding.resolve(input.pickup.text);
+      if (hallada) {
+        point = hallada.point;
+        pickupSource = 'geocodificada';
+        direccionResuelta = hallada.formatted;
+      }
+    }
+
+    if (!point) {
       throw new AppError(
         'MISSING_LOCATION',
-        'Hace falta la ubicación del punto de recogida para despachar',
+        'No se pudo ubicar esa dirección. Pídele al cliente que comparta su ubicación.',
       );
     }
 
-    const quote = await this.fares.quote(input.pickup.point, input.dropoff?.point);
+    const quote = await this.fares.quote(point, input.dropoff?.point);
     const rideId = uuidv7();
     const pendingEvents: string[] = [];
 
@@ -108,8 +132,9 @@ export class RidesService {
             customerId,
             pickupText: input.pickup.text,
             pickupReference: input.pickup.reference,
-            pickupLat: input.pickup.point!.lat,
-            pickupLng: input.pickup.point!.lng,
+            pickupLat: point.lat,
+            pickupLng: point.lng,
+            pickupSource,
             dropoffText: input.dropoff?.text,
             dropoffLat: input.dropoff?.point?.lat,
             dropoffLng: input.dropoff?.point?.lng,
@@ -144,7 +169,11 @@ export class RidesService {
             rideVersion: 1,
             payload: {
               code,
-              pickup: input.pickup,
+              pickup: { ...input.pickup, point },
+              pickupSource,
+              // Para que el agente pueda confirmarle al cliente lo que se
+              // entendio, sin tener que geocodificar el por su cuenta.
+              direccionResuelta,
               dropoff: input.dropoff,
               fareEstimate: quote.amount,
               fareApproximate: true,

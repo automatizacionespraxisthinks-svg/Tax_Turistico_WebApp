@@ -50,4 +50,9 @@ export const redisKeys = {
   rateLimit: (subject: string, window: number) => `rl:${subject}:${window}`,
   /** Marca de oleada en curso, para no lanzar dos a la vez. */
   dispatchLock: (rideId: string) => `dispatch:${rideId}:lock`,
+  /**
+   * Dirección ya resuelta. En un pueblo las mismas direcciones se repiten
+   * mucho, y cada consulta al geocodificador se paga y se espera.
+   */
+  geocode: (consulta: string) => `geo:q:${consulta}`,
 } as const;

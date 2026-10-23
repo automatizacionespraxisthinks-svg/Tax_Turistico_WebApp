@@ -63,6 +63,16 @@ export const rides = pgTable(
     pickupReference: text('pickup_reference'),
     pickupLat: doublePrecision('pickup_lat'),
     pickupLng: doublePrecision('pickup_lng'),
+    /**
+     * De donde salieron esas coordenadas.
+     *
+     * `compartida` es la ubicacion que mando el cliente por WhatsApp, exacta
+     * al metro. `geocodificada` es una direccion en palabras que resolvio el
+     * geocodificador, y esa puede quedarse en la calle sin el numero. Cuando
+     * un conductor dice que el cliente no estaba ahi, esta columna es la
+     * diferencia entre buscar el fallo en el GPS o en la direccion.
+     */
+    pickupSource: text('pickup_source').$type<'compartida' | 'geocodificada'>(),
     dropoffText: text('dropoff_text'),
     dropoffLat: doublePrecision('dropoff_lat'),
     dropoffLng: doublePrecision('dropoff_lng'),

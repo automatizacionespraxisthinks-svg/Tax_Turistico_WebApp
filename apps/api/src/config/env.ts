@@ -44,6 +44,15 @@ const envSchema = z.object({
       (documento del conductor, secreto TOTP): 32 bytes en hexadecimal. */
   ENCRYPTION_KEY: z.string().regex(/^[0-9a-f]{64}$/, 'Debe ser 32 bytes en hexadecimal'),
 
+  /**
+   * Clave de la API de Geocoding de Google.
+   *
+   * Es opcional a propósito. Sin ella la API no adivina direcciones: exige
+   * que la carrera llegue con coordenadas, como antes. Es preferible pedir
+   * la ubicación a mandar un taxi a un punto inventado.
+   */
+  GOOGLE_GEOCODING_API_KEY: z.string().min(20).optional(),
+
   /** Orígenes autorizados del panel y de la PWA. */
   PUBLIC_ORIGINS: z
     .string()

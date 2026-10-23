@@ -82,6 +82,29 @@ export class ZonesService implements OnModuleInit {
     return zone;
   }
 
+  /**
+   * El rectángulo que envuelve toda la cobertura.
+   *
+   * Sale de los polígonos vivos, no de una constante: si mañana se añade una
+   * vereda, el geocodificador la busca sin que nadie tenga que acordarse de
+   * actualizar unos números a mano.
+   */
+  boundingBox(): { south: number; west: number; north: number; east: number } | undefined {
+    const puntos = this.cache.flatMap((zona) => zona.polygon.coordinates.flat());
+    if (puntos.length === 0) return undefined;
+
+    // GeoJSON va en [lng, lat].
+    const lngs = puntos.map(([lng]) => lng);
+    const lats = puntos.map(([, lat]) => lat);
+
+    return {
+      south: Math.min(...lats),
+      west: Math.min(...lngs),
+      north: Math.max(...lats),
+      east: Math.max(...lngs),
+    };
+  }
+
   /** Parámetros de la oleada N para una zona, con respaldo razonable. */
   waveConfig(zoneId: string, wave: 1 | 2 | 3): WaveConfig {
     const zone = this.byId(zoneId);

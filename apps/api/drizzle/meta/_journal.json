@@ -43,6 +43,13 @@
       "when": 1792772862655,
       "tag": "0005_destino_al_finalizar",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1792775979725,
+      "tag": "0006_origen_del_punto",
+      "breakpoints": true
     }
   ]
 }

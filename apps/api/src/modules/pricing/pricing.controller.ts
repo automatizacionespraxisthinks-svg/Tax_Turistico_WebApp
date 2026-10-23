@@ -5,13 +5,23 @@ import { fareRules, places } from '../../db/schema';
 import { z } from 'zod';
 import { pointSchema } from '@tax/shared';
 import { zodBody } from '../../common/zod.pipe';
+import { AppError } from '../../common/problem';
 import { ApiKeyGuard, Scopes } from '../identity/api-key.guard';
 import { SessionGuard } from '../identity/guards';
 import { ZonesService } from './zones.service';
 import { FaresService } from './fares.service';
+import { GeocodingService } from './geocoding.service';
 
 const quoteSchema = z.object({
-  origin: pointSchema,
+  origin: pointSchema.optional(),
+  /**
+   * Alternativa a `origin` para quien solo tiene la direccion en palabras.
+   *
+   * La resuelve la API, igual que al crear la carrera: el agente de n8n
+   * nunca manda coordenadas, ni para cotizar. Si mandara las de la cotizacion
+   * y luego las de la carrera, podrian no ser las mismas.
+   */
+  originText: z.string().min(4).max(200).optional(),
   destination: pointSchema.optional(),
 });
 
@@ -21,6 +31,7 @@ export class PricingController {
   constructor(
     private readonly zonesService: ZonesService,
     private readonly faresService: FaresService,
+    private readonly geocoding: GeocodingService,
   ) {}
 
   /** Las zonas con su configuración de oleadas, para el panel. */
@@ -42,8 +53,26 @@ export class PricingController {
    */
   @Post('quotes')
   @Scopes('rides:read', 'rides:write')
-  quote(@Body(zodBody(quoteSchema)) body: z.infer<typeof quoteSchema>) {
-    return this.faresService.quote(body.origin, body.destination);
+  async quote(@Body(zodBody(quoteSchema)) body: z.infer<typeof quoteSchema>) {
+    const origin = body.origin ?? (await this.resolverOrigen(body.originText));
+    return this.faresService.quote(origin, body.destination);
+  }
+
+  private async resolverOrigen(texto: string | undefined) {
+    if (!texto) {
+      throw new AppError('VALIDATION_FAILED', 'Hace falta `origin` o `originText`');
+    }
+
+    const hallada = await this.geocoding.resolve(texto);
+    if (!hallada) {
+      // El mismo mensaje que al crear la carrera, para que el agente sepa
+      // que lo siguiente es pedir la ubicacion y no reintentar lo mismo.
+      throw new AppError(
+        'MISSING_LOCATION',
+        'No se pudo ubicar esa dirección. Pídele al cliente que comparta su ubicación.',
+      );
+    }
+    return hallada.point;
   }
 }
 

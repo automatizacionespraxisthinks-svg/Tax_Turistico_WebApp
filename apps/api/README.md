@@ -138,6 +138,25 @@ oleada, aceptación simultánea— y comprueba que exactamente un conductor gana
 los demás reciben `RIDE_ALREADY_TAKEN`.
 
 ```bash
+pnpm --filter @tax/api exec tsx src/test/e2e-geocodificacion.ts <clave-de-api>
+```
+
+El punto de recogida lo resuelve la API, no el agente. Por WhatsApp la gente
+escribe «Cra. 12 A # 31B-14», no coordenadas; antes las resolvía el agente de
+n8n y se las pasaba, ahora manda solo texto. Un modelo que copia coordenadas
+de una respuesta a otra puede cambiar un dígito sin que nadie lo note, y un
+dígito en la cuarta decimal son once metros.
+
+Necesita `GOOGLE_GEOCODING_API_KEY`. **Sin ella la API no adivina**: exige
+coordenadas, como antes, y responde `MISSING_LOCATION` con un detalle que le
+dice al agente que pida la ubicación. Es preferible pedirla a mandar un taxi
+a un punto inventado. La prueba se adapta a si la clave está puesta o no.
+
+El filtro que decide si un punto se acepta está cubierto aparte, en
+`geocoding.spec.ts`: `bounds` solo sesga la búsqueda de Google, no la limita,
+así que una «Carrera 21» puede llegar desde Tunja con toda confianza.
+
+```bash
 pnpm --filter @tax/api exec tsx src/test/e2e-destino.ts <clave-de-api>
 ```
 

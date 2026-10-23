@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
 import { ZonesService } from './zones.service';
 import { FaresService } from './fares.service';
+import { GeocodingService } from './geocoding.service';
 import { AdminPricingController, PricingController } from './pricing.controller';
 
 /**
@@ -11,8 +12,8 @@ import { AdminPricingController, PricingController } from './pricing.controller'
  * `classify(punto)`; ningún otro módulo lee sus tablas (§4.1).
  */
 @Module({
-  providers: [ZonesService, FaresService],
+  providers: [ZonesService, FaresService, GeocodingService],
   controllers: [PricingController, AdminPricingController],
-  exports: [ZonesService, FaresService],
+  exports: [ZonesService, FaresService, GeocodingService],
 })
 export class PricingModule {}

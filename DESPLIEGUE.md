@@ -226,6 +226,8 @@ VAPID_PUBLIC_KEY=...
 VAPID_PRIVATE_KEY=...
 VAPID_SUBJECT=mailto:soporte@TUDOMINIO
 
+GOOGLE_GEOCODING_API_KEY=...
+
 PUBLIC_ORIGINS=https://panel.TUDOMINIO,https://conductor.TUDOMINIO
 
 POSITION_MAX_AGE_SECONDS=60
@@ -252,6 +254,12 @@ Tres cosas que se equivocan siempre:
 - **`PUBLIC_ORIGINS`** sin barra final y con `https://`. Si no coincide
   exactamente con lo que el navegador manda, el panel recibe un error de CORS
   y no carga.
+- **`GOOGLE_GEOCODING_API_KEY`** convierte las direcciones que el cliente
+  escribe por WhatsApp en coordenadas. Necesita la API de Geocoding
+  habilitada en el proyecto de Google. **Es opcional**: sin ella la API no
+  adivina direcciones y exige que la carrera llegue con coordenadas, así que
+  el agente tendrá que pedirle la ubicación al cliente en todos los casos.
+  Conviene restringirla por IP a la del VPS.
 - **`ENCRYPTION_KEY`** cifra el secreto TOTP de cada operador. Si la pierdes o
   la cambias, nadie de la oficina puede entrar y hay que volver a dar de alta
   el segundo factor de todos. Guárdala en el gestor de contraseñas antes de
