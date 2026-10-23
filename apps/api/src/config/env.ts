@@ -53,6 +53,21 @@ const envSchema = z.object({
    */
   GOOGLE_GEOCODING_API_KEY: z.string().min(20).optional(),
 
+  /**
+   * Tras la tercera oleada, una ronda más a todos los conductores
+   * disponibles, sin mirar distancia, tipo de vehículo ni antigüedad del
+   * GPS. Es para probar los avisos con pocos conductores: con uno solo en
+   * turno lejos del punto, las tres oleadas por radio no lo encuentran
+   * nunca y no se puede ver una notificación de verdad.
+   *
+   * Encendida por defecto mientras se prueba. Para volver al comportamiento
+   * por radio, `OLEADA_FINAL_A_TODOS=false` en el entorno de la API.
+   */
+  OLEADA_FINAL_A_TODOS: z
+    .enum(['true', 'false'])
+    .default('true')
+    .transform((valor) => valor === 'true'),
+
   /** Orígenes autorizados del panel y de la PWA. */
   PUBLIC_ORIGINS: z
     .string()

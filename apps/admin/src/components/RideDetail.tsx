@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { AnimatePresence, motion } from 'motion/react';
 import { Ban, Car, MessageSquare, RefreshCw, ShieldCheck } from 'lucide-react';
-import type { Driver, Ride } from '@tax/shared';
+import type { Driver, Ride, RideOffer, WaveLogEntry } from '@tax/shared';
 import {
   ACTOR_LABEL,
   RIDE_STATUS_LABEL,
@@ -12,6 +12,7 @@ import {
   formatTime,
   haversineKm,
   maskPhone,
+  OLEADA_A_TODOS,
   transitionsFrom,
 } from '@tax/shared';
 import {
@@ -65,7 +66,7 @@ export function RideDetail({ ride }: { ride: Ride }) {
         onChange={setTab}
         options={[
           { value: 'resumen', label: 'Resumen' },
-          { value: 'oleadas', label: 'Oleadas', count: ride.offers.length },
+          { value: 'oleadas', label: 'Oleadas', count: ride.waveLog?.length || ride.offers.length },
           { value: 'bitacora', label: 'Bitácora', count: ride.history.length },
         ]}
       />
@@ -375,63 +376,217 @@ function RideActions({ ride }: { ride: Ride }) {
 
 /* ------------------------------------------------------------------ oleadas */
 
+const RESPUESTA: Record<RideOffer['response'], { label: string; tone: 'positive' | 'warning' | 'critical' | 'neutral' }> = {
+  accepted: { label: 'Aceptó', tone: 'positive' },
+  pending: { label: 'Pendiente', tone: 'warning' },
+  rejected: { label: 'Rechazó', tone: 'critical' },
+  expired: { label: 'No contestó', tone: 'neutral' },
+  revoked: { label: 'Revocada', tone: 'neutral' },
+};
+
+/**
+ * El reloj de la pestaña. Solo late mientras hay una oleada en curso: con la
+ * carrera ya asignada o sin asignar no hay nada que contar, y un intervalo
+ * corriendo para nada en cada ficha abierta es trabajo regalado.
+ */
+function useAhora(activo: boolean): number {
+  const [ahora, setAhora] = useState(() => Date.now());
+  useEffect(() => {
+    if (!activo) return;
+    setAhora(Date.now());
+    const id = window.setInterval(() => setAhora(Date.now()), 500);
+    return () => window.clearInterval(id);
+  }, [activo]);
+  return ahora;
+}
+
+function mmss(ms: number): string {
+  const total = Math.max(0, Math.ceil(ms / 1000));
+  return `${Math.floor(total / 60)}:${String(total % 60).padStart(2, '0')}`;
+}
+
 function Oleadas({ ride }: { ride: Ride }) {
-  const waves = [1, 2, 3] as const;
+  const registro = ride.waveLog ?? [];
+  const ultima = registro.at(-1);
+  const enCurso =
+    ride.status === 'NOTIFIED' && ultima !== undefined && ultima.expiresAt !== null ? ultima : undefined;
+  const ahora = useAhora(Boolean(enCurso));
+
+  // Carreras de antes de que existiera el registro: solo hay ofertas, así
+  // que se agrupan por oleada como se hacía siempre.
+  if (registro.length === 0) {
+    return ride.offers.length > 0 ? (
+      <OleadasSinRegistro ride={ride} />
+    ) : (
+      <p className="text-caption text-ink-muted">
+        {ride.status === 'PENDING'
+          ? 'Buscando conductores…'
+          : 'Esta carrera no pasó por el despacho automático.'}
+      </p>
+    );
+  }
 
   return (
     <div className="space-y-4">
       <p className="text-caption text-ink-muted">
-        Cada oferta explica por qué un conductor recibió o no la carrera: radio, orden por ETA y
-        vencimiento de la oleada.
+        Cada oleada busca más lejos y espera más. Si no encuentra a nadie, pasa a la siguiente sin
+        esperar el reloj.
       </p>
 
-      {waves.map((wave) => {
-        const offers = ride.offers.filter((o) => o.wave === wave);
-        if (offers.length === 0) return null;
+      <ol className="space-y-3">
+        {registro.map((entrada, i) => (
+          <OleadaFila
+            key={`${entrada.wave}-${entrada.startedAt}`}
+            entrada={entrada}
+            ofertas={ride.offers.filter((o) => o.wave === entrada.wave)}
+            enCurso={entrada === enCurso}
+            ahora={ahora}
+            esLaUltima={i === registro.length - 1}
+            estado={ride.status}
+          />
+        ))}
+      </ol>
 
-        return (
-          <div key={wave}>
-            <SectionLabel>Oleada {wave}</SectionLabel>
-            <ul className="mt-2 space-y-1.5">
-              {offers.map((offer) => {
-                const tone =
-                  offer.response === 'accepted'
-                    ? 'positive'
-                    : offer.response === 'pending'
-                      ? 'warning'
-                      : offer.response === 'rejected'
-                        ? 'critical'
-                        : 'neutral';
-                const label = {
-                  accepted: 'Aceptó',
-                  pending: 'Pendiente',
-                  rejected: 'Rechazó',
-                  expired: 'Venció',
-                  revoked: 'Revocada',
-                }[offer.response];
+      {/* Agotadas todas: que se lea el final, no solo que paró de moverse. */}
+      {ride.status === 'UNASSIGNED' ? (
+        <p className="tone-critical rounded-md border border-[var(--tone-line)] bg-[var(--tone-bg)] px-3 py-2 text-caption text-[var(--tone-ink)]">
+          Nadie aceptó. La carrera quedó sin asignar y espera a la oficina.
+        </p>
+      ) : null}
+    </div>
+  );
+}
 
-                return (
-                  <li
-                    key={`${offer.driverId}-${offer.sentAt}`}
-                    className={cn(
-                      TONE_CLASS[tone],
-                      'flex items-center gap-3 rounded-md border border-line px-2.5 py-2',
-                      offer.response === 'accepted' && 'border-[var(--tone-line)] bg-[var(--tone-bg)]',
-                    )}
-                  >
-                    <span className="size-1.5 shrink-0 rounded-full bg-[var(--tone-solid)]" />
-                    <span className="min-w-0 flex-1 truncate text-base text-ink">{offer.driverName}</span>
-                    <span className="tnum shrink-0 text-caption text-ink-muted">
-                      {formatDistance(offer.distanceKm)} · {offer.etaMinutes} min
-                    </span>
-                    <span className="shrink-0 text-caption font-medium text-[var(--tone-ink)]">{label}</span>
-                  </li>
-                );
-              })}
-            </ul>
-          </div>
-        );
-      })}
+function OleadaFila({
+  entrada,
+  ofertas,
+  enCurso,
+  ahora,
+  esLaUltima,
+  estado,
+}: {
+  entrada: WaveLogEntry;
+  ofertas: RideOffer[];
+  enCurso: boolean;
+  ahora: number;
+  esLaUltima: boolean;
+  estado: Ride['status'];
+}) {
+  const aTodos = entrada.wave === OLEADA_A_TODOS;
+  const titulo = aTodos ? 'Todos los disponibles' : `Oleada ${entrada.wave}`;
+  const alcance =
+    entrada.radiusKm === null ? 'sin límite de distancia' : `hasta ${formatDistance(entrada.radiusKm)}`;
+
+  const inicio = new Date(entrada.startedAt).getTime();
+  const fin = entrada.expiresAt ? new Date(entrada.expiresAt).getTime() : inicio;
+  const restante = fin - ahora;
+  const fraccion = enCurso && fin > inicio ? Math.min(1, Math.max(0, restante / (fin - inicio))) : 0;
+  const aceptada = ofertas.some((o) => o.response === 'accepted');
+
+  let lateral: string;
+  if (entrada.candidates === 0) lateral = 'Pasó al instante';
+  else if (aceptada) lateral = 'Aceptada';
+  else if (enCurso) lateral = restante > 0 ? mmss(restante) : 'Pasando…';
+  else if (esLaUltima && estado === 'NOTIFIED') lateral = 'Pasando…';
+  else lateral = 'Venció';
+
+  const disponiblesSinGps = entrada.sinGps ?? 0;
+
+  return (
+    <li className={cn('rounded-md border px-3 py-2.5', enCurso ? 'tone-warning border-[var(--tone-line)]' : 'border-line')}>
+      <div className="flex items-baseline justify-between gap-3">
+        <div className="min-w-0">
+          <p className="text-base font-medium text-ink">
+            {titulo}
+            <span className="ml-1.5 text-caption font-normal text-ink-muted">· {alcance}</span>
+          </p>
+          <p className="text-micro text-ink-muted">
+            <time title={formatDateTime(entrada.startedAt)}>{formatTime(entrada.startedAt)}</time>
+            {' · '}
+            {entrada.candidates === 0
+              ? 'nadie disponible'
+              : `${entrada.candidates} ${entrada.candidates === 1 ? 'conductor' : 'conductores'}`}
+            {disponiblesSinGps > 0
+              ? ` · ${disponiblesSinGps} disponible${disponiblesSinGps === 1 ? '' : 's'} sin GPS`
+              : ''}
+          </p>
+        </div>
+        <span
+          className={cn(
+            'tnum shrink-0 text-caption font-medium',
+            aceptada && TONE_CLASS.positive,
+            enCurso || aceptada ? 'text-[var(--tone-ink)]' : 'text-ink-muted',
+          )}
+        >
+          {lateral}
+        </span>
+      </div>
+
+      {/* La barra se vacía con el reloj: se ve de un vistazo cuánto le queda. */}
+      {enCurso ? (
+        <div className="mt-2 h-1 overflow-hidden rounded-full bg-[var(--tone-bg)]">
+          <div
+            className="h-full rounded-full bg-[var(--tone-solid)] transition-[width] duration-500 ease-linear"
+            style={{ width: `${fraccion * 100}%` }}
+          />
+        </div>
+      ) : null}
+
+      {ofertas.length > 0 ? (
+        <ul className="mt-2 space-y-1">
+          {ofertas.map((offer) => (
+            <OfertaFila key={`${offer.driverId}-${offer.sentAt}`} offer={offer} />
+          ))}
+        </ul>
+      ) : null}
+
+      {disponiblesSinGps > 0 && entrada.candidates === 0 ? (
+        <p className="mt-1.5 text-micro text-ink-muted">
+          Hay conductores en turno, pero ninguno ha mandado su ubicación: sin ella no se les puede
+          ofrecer la carrera.
+        </p>
+      ) : null}
+    </li>
+  );
+}
+
+function OfertaFila({ offer }: { offer: RideOffer }) {
+  const { label, tone } = RESPUESTA[offer.response];
+  return (
+    <li
+      className={cn(
+        TONE_CLASS[tone],
+        'flex items-center gap-3 rounded border border-transparent px-2 py-1.5',
+        offer.response === 'accepted' && 'border-[var(--tone-line)] bg-[var(--tone-bg)]',
+      )}
+    >
+      <span className="size-1.5 shrink-0 rounded-full bg-[var(--tone-solid)]" />
+      <span className="min-w-0 flex-1 truncate text-base text-ink">{offer.driverName}</span>
+      <span className="tnum shrink-0 text-caption text-ink-muted">
+        {formatDistance(offer.distanceKm)} · {offer.etaMinutes} min
+      </span>
+      <span className="shrink-0 text-caption font-medium text-[var(--tone-ink)]">{label}</span>
+    </li>
+  );
+}
+
+/** Para carreras anteriores al registro de oleadas: solo hay ofertas. */
+function OleadasSinRegistro({ ride }: { ride: Ride }) {
+  const waves = [...new Set(ride.offers.map((o) => o.wave))].sort();
+  return (
+    <div className="space-y-4">
+      {waves.map((wave) => (
+        <div key={wave}>
+          <SectionLabel>{wave === OLEADA_A_TODOS ? 'Todos los disponibles' : `Oleada ${wave}`}</SectionLabel>
+          <ul className="mt-2 space-y-1.5">
+            {ride.offers
+              .filter((o) => o.wave === wave)
+              .map((offer) => (
+                <OfertaFila key={`${offer.driverId}-${offer.sentAt}`} offer={offer} />
+              ))}
+          </ul>
+        </div>
+      ))}
     </div>
   );
 }

@@ -198,10 +198,42 @@ export interface RideStatusEntry {
   note?: string;
 }
 
+/**
+ * Las tres oleadas por radio, y una cuarta ronda que avisa a todos los
+ * disponibles sin mirar distancia. La cuarta existe para probar los avisos
+ * con pocos conductores y se apaga con `OLEADA_FINAL_A_TODOS=false`.
+ */
+export type Oleada = 1 | 2 | 3 | 4;
+export const OLEADA_A_TODOS = 4 as const;
+
+/**
+ * Lo que hizo cada oleada, también las que no encontraron a nadie.
+ *
+ * Las ofertas solo cuentan las oleadas que tuvieron candidatos. Una que miró
+ * en 1,5 km, no halló a nadie y escaló al instante no dejaba ningún rastro,
+ * y desde el panel parecía que la carrera había saltado directamente a la
+ * oleada 2 sin razón.
+ */
+export interface WaveLogEntry {
+  wave: Oleada;
+  startedAt: string;
+  /** Cuándo vence. Nulo si no encontró a nadie y escaló en el acto. */
+  expiresAt: string | null;
+  /** Radio de búsqueda. Nulo en la ronda a todos, que no mira distancia. */
+  radiusKm: number | null;
+  candidates: number;
+  /**
+   * Solo en la ronda a todos: conductores disponibles que no recibieron la
+   * oferta porque nunca mandaron su posición. Sin esto el panel diría
+   * «nadie disponible» con un conductor en turno, y parece un fallo.
+   */
+  sinGps?: number;
+}
+
 export interface RideOffer {
   driverId: string;
   driverName: string;
-  wave: 1 | 2 | 3;
+  wave: Oleada;
   sentAt: string;
   expiresAt: string;
   etaMinutes: number;
@@ -243,7 +275,9 @@ export interface Ride {
   history: RideStatusEntry[];
   offers: RideOffer[];
   /** Oleada de despacho en curso (§5.2). */
-  wave?: 1 | 2 | 3;
+  wave?: Oleada;
+  /** El recorrido completo de las oleadas, para seguirlo desde el panel. */
+  waveLog?: WaveLogEntry[];
   cancelReason?: string;
 }
 

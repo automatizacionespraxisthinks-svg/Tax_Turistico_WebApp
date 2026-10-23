@@ -97,9 +97,30 @@ export function getLive(): LiveState {
 
 /* ------------------------------------------------------------- cargas --- */
 
+/**
+ * Carreras cuyo detalle esta cargado: alguien abrio su ficha.
+ *
+ * El listado no trae historial ni ofertas, y antes cada refresco del listado
+ * reemplazaba la carrera entera por una sin ellos. Como cualquier evento
+ * dispara un refresco, la pestaña de oleadas se vaciaba justo mientras se
+ * miraba avanzar una carrera. Con esto, el listado respeta lo que ya habia
+ * y el detalle se vuelve a pedir cuando cambia algo.
+ */
+const conDetalle = new Set<string>();
+
 async function loadRides(): Promise<void> {
   const rows = await api.get<ApiRide[]>('/v1/admin/rides?limit=300');
-  emit({ rides: rows.map(toRide) });
+  const previas = new Map(state.rides.map((ride) => [ride.id, ride]));
+
+  emit({
+    rides: rows.map((row) => {
+      const nueva = toRide(row);
+      const previa = previas.get(nueva.id);
+      return previa && conDetalle.has(nueva.id)
+        ? { ...nueva, history: previa.history, offers: previa.offers }
+        : nueva;
+    }),
+  });
 }
 
 async function loadDrivers(): Promise<void> {
@@ -122,6 +143,7 @@ async function loadReference(): Promise<void> {
 
 /** Detalle completo de una carrera: historial y ofertas por oleada. */
 export async function loadRideDetail(rideId: string): Promise<Ride> {
+  conDetalle.add(rideId);
   const row = await api.get<ApiRideDetail>(`/v1/admin/rides/${rideId}`);
   const detailed = toRideDetail(row);
   emit({ rides: state.rides.map((ride) => (ride.id === rideId ? detailed : ride)) });
@@ -267,7 +289,27 @@ export function startLive(): () => void {
         }
       }
 
+      // Con la ficha abierta, que se vea quien acepto sin tener que reabrirla.
+      if (conDetalle.has(event.id)) void loadRideDetail(event.id).catch(reportError);
       scheduleRefresh();
+    },
+
+    onRideWave: (event) => {
+      const { rideId, ...entrada } = event;
+
+      // Se pinta al instante: la cuenta atras empieza cuando empieza la
+      // oleada, no cuando termina de volver una peticion.
+      emit({
+        rides: state.rides.map((ride) =>
+          ride.id === rideId
+            ? { ...ride, wave: entrada.wave, waveLog: [...(ride.waveLog ?? []), entrada] }
+            : ride,
+        ),
+      });
+
+      // Y si la ficha esta abierta, se piden las ofertas: el evento dice
+      // cuantos conductores, pero los nombres vienen con el detalle.
+      if (conDetalle.has(rideId)) void loadRideDetail(rideId).catch(reportError);
     },
 
     onDriverMoved: (event) => {

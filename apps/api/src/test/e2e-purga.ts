@@ -107,7 +107,7 @@ async function main(): Promise<void> {
   const db = drizzle(pool, { schema, casing: 'snake_case' });
 
   const queue = new Queue(MAINTENANCE_QUEUE, {
-    connection: { url: process.env.REDIS_URL ?? 'redis://localhost:56379' },
+    connection: { url: process.env.REDIS_URL ?? 'redis://localhost:16379' },
     prefix: 'tax:bull',
   });
 

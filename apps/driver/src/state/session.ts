@@ -1,4 +1,4 @@
-import type { Point, RideStatus, VehicleType } from '@tax/shared';
+import type { Oleada, Point, RideStatus, VehicleType } from '@tax/shared';
 
 /**
  * Estado de la sesión del conductor.
@@ -40,7 +40,7 @@ export interface OfferedRide {
   customerName?: string;
   /** Fin de la ventana de la oferta, en milisegundos. */
   expiresAt: number;
-  wave: 1 | 2 | 3;
+  wave: Oleada;
 }
 
 export interface SessionState {
@@ -253,7 +253,7 @@ export function offerFromSocket(push: ApiOffer): OfferedRide {
     passengers: push.passengers,
     vehicleType: 'sedan',
     expiresAt: new Date(push.expiresAt).getTime(),
-    wave: Math.min(3, Math.max(1, push.wave)) as 1 | 2 | 3,
+    wave: Math.min(4, Math.max(1, push.wave)) as Oleada,
   };
 }
 

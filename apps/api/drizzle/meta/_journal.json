@@ -50,6 +50,13 @@
       "when": 1792775979725,
       "tag": "0006_origen_del_punto",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1792798527726,
+      "tag": "0007_registro_de_oleadas",
+      "breakpoints": true
     }
   ]
 }

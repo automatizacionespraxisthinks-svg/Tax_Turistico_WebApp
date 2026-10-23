@@ -1,6 +1,7 @@
 import type {
   Driver,
   DriverStatus,
+  Oleada,
   OutboxEvent,
   Ride,
   RideOffer,
@@ -8,6 +9,7 @@ import type {
   RideStatusEntry,
   VehicleType,
   WahaSession,
+  WaveLogEntry,
   Zone,
 } from '@tax/shared';
 
@@ -52,6 +54,7 @@ export interface ApiRide {
   etaMinutes: number | null;
   notes: string | null;
   wave: number | null;
+  waveLog: WaveLogEntry[] | null;
   cancelReason: string | null;
 }
 
@@ -166,6 +169,7 @@ export function toRide(row: ApiRide): Ride {
     etaMinutes: row.etaMinutes ?? undefined,
     notes: row.notes ?? undefined,
     wave: (row.wave ?? undefined) as Ride['wave'],
+    waveLog: row.waveLog ?? [],
     cancelReason: row.cancelReason ?? undefined,
     // El listado no trae historial ni ofertas: se piden al abrir el detalle.
     history: [],
@@ -187,7 +191,7 @@ export function toRideDetail(row: ApiRideDetail): Ride {
     offers: row.offers.map((offer) => ({
       driverId: offer.driverId,
       driverName: offer.driverName,
-      wave: offer.wave as 1 | 2 | 3,
+      wave: offer.wave as Oleada,
       sentAt: offer.sentAt,
       expiresAt: offer.expiresAt,
       etaMinutes: offer.etaMinutes,

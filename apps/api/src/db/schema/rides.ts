@@ -1,9 +1,11 @@
 import { relations, sql } from 'drizzle-orm';
+import type { WaveLogEntry } from '@tax/shared';
 import {
   boolean,
   doublePrecision,
   index,
   integer,
+  jsonb,
   pgSequence,
   pgTable,
   text,
@@ -120,6 +122,13 @@ export const rides = pgTable(
     notes: text('notes'),
     /** Oleada de despacho en curso (§5.2). */
     wave: integer('wave'),
+    /**
+     * Cada oleada que se lanzo, con su radio, su vencimiento y cuantos
+     * conductores encontro. Las que no hallaron a nadie no dejan ofertas, y
+     * sin esto el panel no podia contar que la carrera busco en 1,5 km,
+     * no encontro a nadie y paso a la siguiente.
+     */
+    waveLog: jsonb('wave_log').$type<WaveLogEntry[]>().notNull().default([]),
     cancelReason: text('cancel_reason'),
 
     /**

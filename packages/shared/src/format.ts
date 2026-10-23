@@ -27,7 +27,11 @@ export function formatDateTime(iso: string | Date): string {
 }
 
 export function formatDistance(km: number): string {
-  return km < 1 ? `${Math.round(km * 1000)} m` : `${km.toFixed(1)} km`;
+  // Con coma decimal: en Colombia el punto separa miles, y «1.5 km» junto a
+  // un «$ 7.600» se lee por un momento como mil quinientos.
+  return km < 1
+    ? `${Math.round(km * 1000)} m`
+    : `${km.toLocaleString('es-CO', { maximumFractionDigits: 1 })} km`;
 }
 
 export function formatDuration(seconds: number): string {

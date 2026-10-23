@@ -1,3 +1,4 @@
+import type { WaveLogEntry } from '@tax/shared';
 import { Injectable, Logger } from '@nestjs/common';
 import {
   type OnGatewayConnection,
@@ -129,6 +130,17 @@ export class RealtimeGateway implements OnGatewayConnection, OnGatewayDisconnect
         version: ride.version,
       });
     }
+  }
+
+  /**
+   * Una oleada acaba de lanzarse, para seguirla en vivo desde el panel.
+   *
+   * Hace falta aparte de `ride:changed` porque de la oleada 2 en adelante la
+   * carrera no cambia de estado —sigue Notificada—, y sin este evento el
+   * panel no se enteraba de que el radio se habia ampliado.
+   */
+  rideWave(rideId: string, entrada: WaveLogEntry): void {
+    this.server?.to('office').emit('ride:wave', { rideId, ...entrada });
   }
 
   /** Posición de un conductor, para el mapa de la oficina. */

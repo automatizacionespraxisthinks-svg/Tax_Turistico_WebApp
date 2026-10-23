@@ -228,6 +228,9 @@ VAPID_SUBJECT=mailto:soporte@TUDOMINIO
 
 GOOGLE_GEOCODING_API_KEY=...
 
+# Solo mientras se prueba: ver la nota de abajo.
+OLEADA_FINAL_A_TODOS=true
+
 PUBLIC_ORIGINS=https://panel.TUDOMINIO,https://conductor.TUDOMINIO
 
 POSITION_MAX_AGE_SECONDS=60
@@ -254,6 +257,13 @@ Tres cosas que se equivocan siempre:
 - **`PUBLIC_ORIGINS`** sin barra final y con `https://`. Si no coincide
   exactamente con lo que el navegador manda, el panel recibe un error de CORS
   y no carga.
+- **`OLEADA_FINAL_A_TODOS`** añade, tras la tercera oleada, una ronda que
+  avisa a **todos** los conductores disponibles sin mirar distancia, tipo de
+  vehículo ni antigüedad del GPS. Sirve para probar los avisos con pocos
+  conductores: con uno solo en turno lejos del punto, las oleadas por radio
+  no lo encuentran nunca. Viene encendida por defecto mientras se prueba;
+  para volver al despacho por radio, `false`. Un conductor en pausa no la
+  recibe, y quien rechazó la carrera tampoco.
 - **`GOOGLE_GEOCODING_API_KEY`** convierte las direcciones que el cliente
   escribe por WhatsApp en coordenadas. Necesita la API de Geocoding
   habilitada en el proyecto de Google. **Es opcional**: sin ella la API no

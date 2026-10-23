@@ -3,7 +3,7 @@ import { Redis } from 'ioredis';
 import { and, eq, inArray, isNull, sql } from 'drizzle-orm';
 import { uuidv7 } from 'uuidv7';
 import type { Point, VehicleType } from '@tax/shared';
-import { estimateEtaMinutes } from '@tax/shared';
+import { estimateEtaMinutes, haversineKm } from '@tax/shared';
 import { DB, type Database } from '../../db/db.module';
 import { REDIS, redisKeys } from '../../redis/redis.module';
 import { driverDevices, driverPositions, driverShifts, drivers, vehicles } from '../../db/schema';
@@ -277,6 +277,84 @@ export class FleetService {
    * y Postgres decide «quién puede» con los datos que mandan (estado, tipo de
    * vehículo, turno). Hacerlo al revés obligaría a recorrer toda la flota.
    */
+  /**
+   * Todos los conductores disponibles, sin mirar distancia.
+   *
+   * Es la ronda final para pruebas (`OLEADA_FINAL_A_TODOS`): no filtra por
+   * radio, ni por tipo de vehiculo, ni por lo vieja que este su posicion.
+   * Con un solo conductor en turno lejos del punto, las tres oleadas por
+   * radio no lo encuentran nunca, y no habria forma de ver un aviso de
+   * verdad llegando a un telefono.
+   *
+   * Lo unico que exige es que el conductor haya mandado alguna posicion en
+   * este turno, porque sin ella no hay distancia ni tiempo que ofrecerle, y
+   * la oferta los guarda. Los que estan disponibles pero nunca mandaron GPS
+   * se cuentan aparte en `sinGps`: si no, el panel diria «nadie disponible»
+   * mientras el conductor esta en turno, y parece un fallo del despacho.
+   */
+  async findAllAvailable(
+    pickup: Point,
+    exclude: string[] = [],
+  ): Promise<{ candidates: Candidate[]; sinGps: number }> {
+    const rows = await this.db
+      .select({
+        driverId: drivers.id,
+        name: drivers.name,
+        code: drivers.code,
+        vehicleId: vehicles.id,
+        plate: vehicles.plate,
+      })
+      .from(drivers)
+      .innerJoin(driverShifts, and(eq(driverShifts.driverId, drivers.id), isNull(driverShifts.endedAt)))
+      .innerJoin(vehicles, eq(vehicles.id, driverShifts.vehicleId))
+      .where(
+        and(
+          eq(drivers.status, 'AVAILABLE'),
+          eq(drivers.active, true),
+          eq(vehicles.active, true),
+        ),
+      );
+
+    const excluidos = new Set(exclude);
+    const disponibles = rows.filter((row) => !excluidos.has(row.driverId));
+    if (disponibles.length === 0) return { candidates: [], sinGps: 0 };
+
+    // Una sola ida a Redis para todas las posiciones, como en el mapa.
+    const posiciones = await this.redis.geopos(
+      redisKeys.driverPositions,
+      ...disponibles.map((row) => row.driverId),
+    );
+
+    const zona = this.zonesService.classify(pickup);
+    const tortuosidad = zona?.tortuosity ?? 1.5;
+
+    const candidates: Candidate[] = [];
+    let sinGps = 0;
+
+    disponibles.forEach((row, i) => {
+      const posicion = posiciones[i];
+      if (!posicion || !posicion[0] || !posicion[1]) {
+        sinGps++;
+        return;
+      }
+      const distanceKm = haversineKm(pickup, { lat: Number(posicion[1]), lng: Number(posicion[0]) });
+      candidates.push({
+        driverId: row.driverId,
+        name: row.name,
+        code: row.code,
+        vehicleId: row.vehicleId,
+        plate: row.plate,
+        distanceKm: Math.round(distanceKm * 100) / 100,
+        etaMinutes: estimateEtaMinutes(distanceKm, tortuosidad),
+      });
+    });
+
+    return {
+      candidates: candidates.sort((a, b) => a.etaMinutes - b.etaMinutes),
+      sinGps,
+    };
+  }
+
   async findCandidates(
     pickup: Point,
     radiusKm: number,

@@ -30,7 +30,11 @@ services:
     # pueden descartar por presión de memoria.
     command: ['redis-server', '--maxmemory-policy', 'noeviction', '--appendonly', 'yes']
     ports:
-      - '56379:6379'
+      # Fuera del rango dinamico de Windows (49152-65535) a proposito. Hyper-V
+      # reserva bloques de ese rango al arrancar y cambian en cada reinicio:
+      # el 56379 de antes cayo un dia dentro de 56360-56459 y Redis dejo de
+      # levantar con «acceso a un socket no permitido». Aqui no puede pasar.
+      - '16379:6379'
     volumes:
       - tax-redis:/data
     healthcheck:

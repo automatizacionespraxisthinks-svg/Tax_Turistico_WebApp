@@ -138,6 +138,17 @@ oleada, aceptación simultánea— y comprueba que exactamente un conductor gana
 los demás reciben `RIDE_ALREADY_TAKEN`.
 
 ```bash
+pnpm --filter @tax/api exec tsx src/test/e2e-oleadas.ts <clave-de-api>
+```
+
+El recorrido de las oleadas, con un solo conductor en turno a unos 19 km:
+fuera de los 12 km de la tercera. Comprueba que cada oleada queda registrada
+en `wave_log` —también las que no hallan a nadie, que antes no dejaban
+rastro—, que las vacías pasan al instante, y que la ronda final llega al
+conductor lejano. Lee `OLEADA_FINAL_A_TODOS` y comprueba la rama que toca:
+pásala con la API arrancada igual que la prueba.
+
+```bash
 pnpm --filter @tax/api exec tsx src/test/e2e-geocodificacion.ts <clave-de-api>
 ```
 

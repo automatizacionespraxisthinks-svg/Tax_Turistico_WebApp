@@ -1,0 +1,1 @@
+ALTER TABLE "rides" ADD COLUMN "wave_log" jsonb DEFAULT '[]'::jsonb NOT NULL;

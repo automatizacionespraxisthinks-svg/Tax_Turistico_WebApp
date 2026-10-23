@@ -14,13 +14,15 @@ import { ZonesService } from '../pricing/zones.service';
 import { RidesService, type Actor } from '../rides/rides.service';
 import { RealtimeGateway } from '../../realtime/realtime.gateway';
 import { PushService } from '../push/push.service';
+import { loadEnv } from '../../config/env';
+import { OLEADA_A_TODOS, type Oleada, type WaveLogEntry } from '@tax/shared';
 
 export const DISPATCH_QUEUE = 'dispatch';
 export const WAVE_TIMEOUT_JOB = 'wave-timeout';
 
 export interface WaveTimeoutJob {
   rideId: string;
-  wave: 1 | 2 | 3;
+  wave: Oleada;
 }
 
 const SYSTEM: Actor = { kind: 'system', name: 'Despacho', role: 'sistema' };
@@ -38,6 +40,7 @@ const SYSTEM: Actor = { kind: 'system', name: 'Despacho', role: 'sistema' };
 @Injectable()
 export class DispatchService {
   private readonly logger = new Logger(DispatchService.name);
+  private readonly env = loadEnv();
 
   constructor(
     @Inject(DB) private readonly db: Database,
@@ -61,7 +64,7 @@ export class DispatchService {
    * Si no hay nadie, no espera al temporizador: escala de inmediato, porque
    * esperar 45 segundos a nadie es tiempo regalado.
    */
-  async startWave(rideId: string, wave: 1 | 2 | 3): Promise<void> {
+  async startWave(rideId: string, wave: Oleada): Promise<void> {
     const ride = await this.ridesService.byId(rideId);
 
     if (ride.status !== 'PENDING' && ride.status !== 'NOTIFIED' && ride.status !== 'UNASSIGNED') {
@@ -74,24 +77,58 @@ export class DispatchService {
     }
 
     const pickup = { lat: ride.pickupLat, lng: ride.pickupLng };
-    const config = this.zones.waveConfig(ride.zoneId, wave);
+    const aTodos = wave === OLEADA_A_TODOS;
+    // La ronda a todos usa el tiempo de la tercera: no tiene configuracion
+    // propia por zona porque es una herramienta de prueba, no una oleada mas.
+    const config = this.zones.waveConfig(ride.zoneId, aTodos ? 3 : wave);
 
-    // A quien ya se le ofreció no se le vuelve a ofrecer en esta carrera.
-    const alreadyOffered = await this.db
-      .select({ driverId: rideOffers.driverId })
-      .from(rideOffers)
-      .where(eq(rideOffers.rideId, rideId));
+    let candidates;
+    let sinGps: number | undefined;
 
-    const candidates = await this.fleet.findCandidates(
-      pickup,
-      config.radiusKm,
-      ride.vehicleType,
-      config.candidates,
-      alreadyOffered.map((row) => row.driverId),
-    );
+    if (aTodos) {
+      /*
+       * Aqui si se le vuelve a ofrecer a quien no contesto antes: no
+       * contestar no es decir que no, y en pruebas con un solo telefono es
+       * justo el conductor al que se quiere ver recibir el aviso. Solo se
+       * excluye a quien rechazo la carrera de forma expresa.
+       */
+      const rechazaron = await this.db
+        .select({ driverId: rideOffers.driverId })
+        .from(rideOffers)
+        .where(and(eq(rideOffers.rideId, rideId), eq(rideOffers.response, 'rejected')));
+
+      const todos = await this.fleet.findAllAvailable(
+        pickup,
+        rechazaron.map((row) => row.driverId),
+      );
+      candidates = todos.candidates;
+      sinGps = todos.sinGps;
+    } else {
+      // A quien ya se le ofreció no se le vuelve a ofrecer en esta carrera.
+      const alreadyOffered = await this.db
+        .select({ driverId: rideOffers.driverId })
+        .from(rideOffers)
+        .where(eq(rideOffers.rideId, rideId));
+
+      candidates = await this.fleet.findCandidates(
+        pickup,
+        config.radiusKm,
+        ride.vehicleType,
+        config.candidates,
+        alreadyOffered.map((row) => row.driverId),
+      );
+    }
 
     if (candidates.length === 0) {
       this.logger.log({ rideId, wave }, 'Oleada sin candidatos: se escala de inmediato');
+      await this.registrarOleada(rideId, {
+        wave,
+        startedAt: new Date().toISOString(),
+        expiresAt: null,
+        radiusKm: aTodos ? null : config.radiusKm,
+        candidates: 0,
+        ...(sinGps !== undefined ? { sinGps } : {}),
+      });
       await this.escalate(rideId, wave);
       return;
     }
@@ -121,6 +158,15 @@ export class DispatchService {
     } else {
       await this.db.update(rides).set({ wave }).where(eq(rides.id, rideId));
     }
+
+    await this.registrarOleada(rideId, {
+      wave,
+      startedAt: new Date().toISOString(),
+      expiresAt: expiresAt.toISOString(),
+      radiusKm: aTodos ? null : config.radiusKm,
+      candidates: candidates.length,
+      ...(sinGps !== undefined ? { sinGps } : {}),
+    });
 
     const zoneName = this.zones.byId(ride.zoneId)?.name;
 
@@ -177,8 +223,24 @@ export class DispatchService {
     );
   }
 
+  /**
+   * Anota la oleada en la carrera y se la cuenta al panel en vivo.
+   *
+   * Se anade al final del arreglo en la propia sentencia, sin leer antes:
+   * dos oleadas no corren a la vez sobre la misma carrera, pero si alguna
+   * vez lo hicieran, una lectura-y-escritura perderia una de las dos.
+   */
+  private async registrarOleada(rideId: string, entrada: WaveLogEntry): Promise<void> {
+    await this.db
+      .update(rides)
+      .set({ waveLog: sql`${rides.waveLog} || ${JSON.stringify([entrada])}::jsonb` })
+      .where(eq(rides.id, rideId));
+
+    this.realtime.rideWave(rideId, entrada);
+  }
+
   /** Vence la oleada: si nadie aceptó, amplía el radio o se da por agotada. */
-  async expireWave(rideId: string, wave: 1 | 2 | 3): Promise<void> {
+  async expireWave(rideId: string, wave: Oleada): Promise<void> {
     const ride = await this.ridesService.byId(rideId);
     if (ride.status !== 'NOTIFIED') return;
 
@@ -196,9 +258,15 @@ export class DispatchService {
     await this.escalate(rideId, wave);
   }
 
-  private async escalate(rideId: string, wave: 1 | 2 | 3): Promise<void> {
+  private async escalate(rideId: string, wave: Oleada): Promise<void> {
     if (wave < 3) {
       await this.startWave(rideId, (wave + 1) as 2 | 3);
+      return;
+    }
+
+    // Tras la tercera, la ronda a todos si esta encendida (solo para pruebas).
+    if (wave === 3 && this.env.OLEADA_FINAL_A_TODOS) {
+      await this.startWave(rideId, OLEADA_A_TODOS);
       return;
     }
 
@@ -417,7 +485,7 @@ export class DispatchService {
     if ((pending?.count ?? 0) === 0) {
       const ride = await this.ridesService.byId(rideId);
       if (ride.status === 'NOTIFIED') {
-        await this.escalate(rideId, (ride.wave ?? 1) as 1 | 2 | 3);
+        await this.escalate(rideId, (ride.wave ?? 1) as Oleada);
       }
     }
   }

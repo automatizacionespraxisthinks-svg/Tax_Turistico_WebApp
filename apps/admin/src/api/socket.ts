@@ -1,4 +1,5 @@
 import { io, type Socket } from 'socket.io-client';
+import type { WaveLogEntry } from '@tax/shared';
 import { API_BASE } from './client';
 
 /**
@@ -21,6 +22,12 @@ export interface RideChangedEvent {
   driverId: string | null;
 }
 
+/** Una oleada recién lanzada. De la segunda en adelante la carrera no
+    cambia de estado, así que sin esto el panel no se enteraba. */
+export interface RideWaveEvent extends WaveLogEntry {
+  rideId: string;
+}
+
 export interface DriverMovedEvent {
   driverId: string;
   lat: number;
@@ -36,6 +43,7 @@ export interface OfficeAlert {
 
 export interface SocketHandlers {
   onRideChanged: (event: RideChangedEvent) => void;
+  onRideWave: (event: RideWaveEvent) => void;
   onDriverMoved: (event: DriverMovedEvent) => void;
   onAlert: (alert: OfficeAlert) => void;
   onConnectionChange: (connected: boolean) => void;
@@ -62,6 +70,7 @@ export function connectOfficeSocket(handlers: SocketHandlers): () => void {
   socket.on('connect_error', () => handlers.onConnectionChange(false));
 
   socket.on('ride:changed', handlers.onRideChanged);
+  socket.on('ride:wave', handlers.onRideWave);
   socket.on('driver:moved', handlers.onDriverMoved);
   socket.on('alert', handlers.onAlert);
 

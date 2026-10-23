@@ -2,6 +2,7 @@ import { useCallback, useEffect, useReducer, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
 import { MotionConfig, motion } from 'motion/react';
 import { Wifi, WifiOff } from 'lucide-react';
+import type { Oleada } from '@tax/shared';
 import { screenTransition } from '@tax/ui';
 import { TopStatus } from './components/Chrome';
 import { Acceso } from './screens/Acceso';
@@ -104,7 +105,7 @@ export function App() {
             distanceKm: me.pendingOffer.distanceKm,
             etaMinutes: me.pendingOffer.etaMinutes,
             expiresAt: new Date(me.pendingOffer.expiresAt).getTime(),
-            wave: Math.min(3, Math.max(1, me.pendingOffer.wave)) as 1 | 2 | 3,
+            wave: Math.min(4, Math.max(1, me.pendingOffer.wave)) as Oleada,
             // Una oferta no lleva cliente aunque venga de la carrera.
             customerName: undefined,
             customerPhone: undefined,
