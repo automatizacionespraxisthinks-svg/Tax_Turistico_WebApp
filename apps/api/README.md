@@ -138,6 +138,21 @@ oleada, aceptación simultánea— y comprueba que exactamente un conductor gana
 los demás reciben `RIDE_ALREADY_TAKEN`.
 
 ```bash
+pnpm --filter @tax/api exec tsx src/test/e2e-destino.ts <clave-de-api>
+```
+
+El destino que se descubre al final. Casi nadie dice a donde va por WhatsApp
+—lo dice ya montado en el carro—, asi que la mayoria de carreras nacen solo
+con punto de partida y el destino se registra cuando el conductor marca
+finalizada, donde quiera que este. De ahi salen `distance_km` y `fare_final`.
+
+Lo que comprueba no es que el numero se guarde, sino las cuatro formas de
+estropearlo: que la posicion del conductor pise un destino que el cliente si
+habia dicho, que `fare_estimate` se sobrescriba y se pierda lo que se le
+prometio, y que un GPS mudo o con una lectura absurda deje al conductor sin
+poder cerrar la carrera con el cliente ya bajandose.
+
+```bash
 pnpm --filter @tax/api exec tsx src/test/e2e-pausa.ts <clave-de-api>
 ```
 

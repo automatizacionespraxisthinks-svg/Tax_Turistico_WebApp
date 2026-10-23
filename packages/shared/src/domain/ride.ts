@@ -227,6 +227,14 @@ export interface Ride {
   /** Tarifa estimada en pesos; se comunica siempre como aproximada (Ley 1480). */
   fareEstimate: number;
   fareRuleVersion: string;
+  /**
+   * Lo que resultó, una vez conocido el destino. Ausentes mientras la carrera
+   * no ha terminado, y también después si el conductor cerró sin GPS.
+   */
+  distanceKm?: number;
+  fareFinal?: number;
+  /** Quién puso el destino: el cliente al pedirla, o el conductor al cerrar. */
+  dropoffSource?: 'cliente' | 'conductor';
   driverId?: string;
   line: string;
   chatwootConversationId?: number;

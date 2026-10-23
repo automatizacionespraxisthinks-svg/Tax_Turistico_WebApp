@@ -42,6 +42,9 @@ export interface ApiRide {
   vehicleType: VehicleType;
   passengers: number;
   fareEstimate: number;
+  distanceKm: number | null;
+  fareFinal: number | null;
+  dropoffSource: 'cliente' | 'conductor' | null;
   fareRuleVersion: string;
   driverId: string | null;
   line: string | null;
@@ -154,6 +157,9 @@ export function toRide(row: ApiRide): Ride {
     passengers: row.passengers,
     fareEstimate: row.fareEstimate,
     fareRuleVersion: row.fareRuleVersion,
+    distanceKm: row.distanceKm ?? undefined,
+    fareFinal: row.fareFinal ?? undefined,
+    dropoffSource: row.dropoffSource ?? undefined,
     driverId: row.driverId ?? undefined,
     line: row.line ?? '—',
     chatwootConversationId: row.chatwootConversationId ?? undefined,

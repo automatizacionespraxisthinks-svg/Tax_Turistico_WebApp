@@ -31,6 +31,17 @@ import { actions, loadRideDetail, useLive } from '../live/store';
 
 type DetailTab = 'resumen' | 'oleadas' | 'bitacora';
 
+/**
+ * Distancia con coma decimal.
+ *
+ * `toFixed` escribe «1.3», y justo encima de un «$ 7.600» donde el punto son
+ * miles eso se lee por un momento como mil trescientos. En la misma tarjeta
+ * no pueden convivir los dos usos del punto.
+ */
+function formatKm(km: number): string {
+  return `${km.toLocaleString('es-CO', { minimumFractionDigits: 1, maximumFractionDigits: 1 })} km`;
+}
+
 export function RideDetail({ ride }: { ride: Ride }) {
   const [tab, setTab] = useState<DetailTab>('resumen');
   const drivers = useLive((s) => s.drivers);
@@ -116,7 +127,18 @@ function Resumen({ ride, driver }: { ride: Ride; driver?: Driver }) {
 
       <div className="rounded-md border border-line">
         <Route label="Recogida" text={ride.pickup.text} reference={ride.pickup.reference} />
-        {ride.dropoff ? <Route label="Destino" text={ride.dropoff.text} last /> : null}
+        {ride.dropoff ? (
+          <Route
+            label="Destino"
+            text={ride.dropoff.text}
+            /* Un destino que puso el conductor al cerrar no es el que pidio
+               el cliente: quien lee la ficha tiene que poder distinguirlos. */
+            reference={
+              ride.dropoffSource === 'conductor' ? 'Registrado donde terminó la carrera' : undefined
+            }
+            last
+          />
+        ) : null}
       </div>
 
       {ride.notes ? (
@@ -128,17 +150,37 @@ function Resumen({ ride, driver }: { ride: Ride; driver?: Driver }) {
 
       <div>
         <SectionLabel>Tarifa</SectionLabel>
-        <div className="mt-2 flex items-baseline justify-between rounded-md border border-line bg-surface-sunk px-3 py-2.5">
-          <div>
-            <p className="text-title font-semibold tnum text-ink">{formatMoney(ride.fareEstimate)}</p>
-            <p className="text-micro text-ink-muted">
-              Estimada · regla {ride.fareRuleVersion} · zona {zone?.name ?? '—'}
-            </p>
+        <div className="mt-2 rounded-md border border-line bg-surface-sunk px-3 py-2.5">
+          <div className="flex items-baseline justify-between">
+            <div>
+              <p className="text-title font-semibold tnum text-ink">
+                {formatMoney(ride.fareFinal ?? ride.fareEstimate)}
+              </p>
+              <p className="text-micro text-ink-muted">
+                {ride.fareFinal !== undefined
+                  ? `Final${ride.distanceKm !== undefined ? ` · ${formatKm(ride.distanceKm)}` : ''} · regla ${ride.fareRuleVersion}`
+                  : `Estimada · regla ${ride.fareRuleVersion} · zona ${zone?.name ?? '—'}`}
+              </p>
+            </div>
+            <span className="inline-flex items-center gap-1 text-micro text-ink-muted">
+              <ShieldCheck className="size-3.5" />
+              Tarifa autorizada
+            </span>
           </div>
-          <span className="inline-flex items-center gap-1 text-micro text-ink-muted">
-            <ShieldCheck className="size-3.5" />
-            Tarifa autorizada
-          </span>
+
+          {/*
+            Con tarifa final, la estimada no desaparece: es la que se le dijo
+            al cliente cuando pidio el taxi. Si hay diferencia, la oficina la
+            ve aqui y no cuando el cliente llama a reclamar.
+          */}
+          {ride.fareFinal !== undefined ? (
+            <p className="mt-2 border-t border-line pt-2 text-micro text-ink-muted">
+              Se le dijo {formatMoney(ride.fareEstimate)} al pedirla
+              {ride.fareFinal !== ride.fareEstimate
+                ? ` · ${ride.fareFinal > ride.fareEstimate ? '+' : '−'}${formatMoney(Math.abs(ride.fareFinal - ride.fareEstimate))}`
+                : ' · sin diferencia'}
+            </p>
+          ) : null}
         </div>
       </div>
 

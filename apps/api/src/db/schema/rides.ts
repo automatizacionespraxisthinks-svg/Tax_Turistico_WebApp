@@ -66,6 +66,17 @@ export const rides = pgTable(
     dropoffText: text('dropoff_text'),
     dropoffLat: doublePrecision('dropoff_lat'),
     dropoffLng: doublePrecision('dropoff_lng'),
+    /**
+     * De donde salio el destino.
+     *
+     * Casi nadie lo dice por WhatsApp: lo dicen ya montados en el carro. Asi
+     * que cuando el conductor marca finalizada, su posicion se guarda como
+     * destino y queda `conductor`. Importa distinguirlos: una distancia
+     * medida hasta donde el taxi realmente paro no es lo mismo que una
+     * calculada contra una direccion que el cliente dicto por chat, y los
+     * informes no deberian mezclarlas.
+     */
+    dropoffSource: text('dropoff_source').$type<'cliente' | 'conductor'>(),
 
     zoneId: uuid('zone_id').references(() => zones.id),
     vehicleType: vehicleType('vehicle_type').notNull().default('sedan'),
@@ -77,6 +88,16 @@ export const rides = pgTable(
     /** Versión de la regla con la que se calculó: una carrera conserva su
         tarifa aunque la tabla cambie después (§9.2). */
     fareRuleVersion: text('fare_rule_version').notNull(),
+    /**
+     * Distancia y tarifa calculadas al finalizar, con el destino ya conocido.
+     *
+     * No reemplazan a `fareEstimate`: esa es la que se le dijo al cliente
+     * cuando pidio el taxi, y tiene que poder consultarse tal cual se
+     * prometio. Estas dos son lo que resulto de verdad, para los informes.
+     * Quedan en nulo si el conductor finalizo sin GPS.
+     */
+    distanceKm: doublePrecision('distance_km'),
+    fareFinal: integer('fare_final'),
 
     driverId: uuid('driver_id').references(() => drivers.id),
     vehicleId: uuid('vehicle_id').references(() => vehicles.id),

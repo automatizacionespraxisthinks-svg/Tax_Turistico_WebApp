@@ -118,12 +118,25 @@ export class DriverRidesController {
     @Body(zodBody(atSchema)) body: z.infer<typeof atSchema>,
   ) {
     const driver = requireDriver(request);
-    await this.ownRide(rideId, driver.id);
+    const ride = await this.ownRide(rideId, driver.id);
+
+    /*
+     * Aqui es donde la carrera consigue su destino. Casi nadie lo dice por
+     * WhatsApp —lo dice ya montado en el carro—, asi que hasta este momento
+     * la mayoria de carreras solo tienen punto de partida. La posicion del
+     * conductor al cerrar es el destino, y con el salen la distancia y la
+     * tarifa real.
+     */
+    const cierre = await this.rides.cierreDeCarrera(ride, body.at);
 
     const updated = await this.rides.transition(rideId, 'COMPLETED', actorFrom(request), {
       at: body.at,
-      patch: { finishedAt: new Date() },
-      event: { type: 'ride.completed' },
+      note: cierre.note,
+      patch: { finishedAt: new Date(), ...cierre.patch },
+      event: {
+        type: 'ride.completed',
+        payload: { distanceKm: cierre.patch.distanceKm, fareFinal: cierre.patch.fareFinal },
+      },
     });
 
     // El conductor vuelve a Disponible, condición de la transición (§5.3).

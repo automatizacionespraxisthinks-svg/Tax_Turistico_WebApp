@@ -2,7 +2,7 @@ import { Inject, Injectable, Logger, forwardRef } from '@nestjs/common';
 import { and, desc, eq, gt, inArray, isNull, sql } from 'drizzle-orm';
 import { uuidv7 } from 'uuidv7';
 import type { CreateRideInput, Point, RideStatus, TransitionActor } from '@tax/shared';
-import { canTransition, formatRideCode } from '@tax/shared';
+import { canTransition, formatRideCode, haversineKm } from '@tax/shared';
 import { DB, type Database, type Tx } from '../../db/db.module';
 import {
   customers,
@@ -51,6 +51,13 @@ export interface TransitionOptions {
 @Injectable()
 export class RidesService {
   private readonly logger = new Logger(RidesService.name);
+
+  /**
+   * Mas alla de esto, la lectura del GPS no se cree. Paipa-Bogota son unos
+   * 180 km, asi que un intermunicipal largo sigue cabiendo; lo que no cabe
+   * es un (0, 0), que da la vuelta al mundo.
+   */
+  private static readonly DISTANCIA_MAXIMA_KM = 300;
 
   constructor(
     @Inject(DB) private readonly db: Database,
@@ -106,6 +113,9 @@ export class RidesService {
             dropoffText: input.dropoff?.text,
             dropoffLat: input.dropoff?.point?.lat,
             dropoffLng: input.dropoff?.point?.lng,
+            // Solo cuenta como dicho por el cliente si trae coordenadas: un
+            // destino en palabras no sirve para medir nada.
+            dropoffSource: input.dropoff?.point ? 'cliente' : undefined,
             zoneId: quote.originZoneId,
             vehicleType: input.vehicleType,
             passengers: input.passengers,
@@ -208,6 +218,78 @@ export class RidesService {
    * auditoría, publica el evento y avisa por socket. Devuelve la carrera ya
    * actualizada.
    */
+  /**
+   * Lo que se guarda al finalizar: destino, distancia y tarifa real.
+   *
+   * Casi nadie dice a donde va por WhatsApp; lo dice ya montado en el carro.
+   * Por eso el destino se da por conocido cuando el taxi para: la posicion
+   * del conductor al marcar finalizada es el destino. Si el cliente si lo
+   * habia dicho, ese manda y la posicion del conductor no lo pisa.
+   *
+   * `fareEstimate` no se toca. Esa es la que se le prometio al cliente
+   * cuando pidio el taxi y tiene que poder consultarse tal cual; lo que
+   * resulto de verdad va en `fareFinal`.
+   *
+   * Nada de esto puede impedir cerrar una carrera. Sin GPS, con una lectura
+   * absurda o con las zonas cambiadas, el conductor cierra igual y la
+   * carrera queda sin distancia: un informe incompleto es mucho menos malo
+   * que un taxista atrapado en una pantalla con el cliente ya bajandose.
+   */
+  async cierreDeCarrera(
+    ride: typeof rides.$inferSelect,
+    at: Point | undefined,
+  ): Promise<{ patch: Partial<typeof rides.$inferInsert>; note?: string }> {
+    const loDijoElCliente = ride.dropoffLat != null && ride.dropoffLng != null;
+    const destino = loDijoElCliente
+      ? { lat: ride.dropoffLat!, lng: ride.dropoffLng! }
+      : at;
+
+    if (!destino || ride.pickupLat == null || ride.pickupLng == null) {
+      return {
+        patch: {},
+        note: loDijoElCliente ? undefined : 'Finalizó sin ubicación: queda sin distancia',
+      };
+    }
+
+    const origen = { lat: ride.pickupLat, lng: ride.pickupLng };
+
+    /*
+     * Guarda contra lecturas basura. Un GPS que devuelve (0, 0) pone el
+     * destino en el golfo de Guinea: serian miles de kilometros y una tarifa
+     * de millones, y ese numero acabaria en un informe como si fuera cierto.
+     */
+    const enLineaRecta = haversineKm(origen, destino);
+    if (enLineaRecta > RidesService.DISTANCIA_MAXIMA_KM) {
+      return {
+        patch: {},
+        note: `Ubicación descartada: ${Math.round(enLineaRecta)} km del origen`,
+      };
+    }
+
+    let quote;
+    try {
+      quote = await this.fares.quote(origen, destino);
+    } catch (error) {
+      // Zona fuera de cobertura o tabla de tarifas sin regla: se cierra igual.
+      this.logger.warn({ rideId: ride.id, error }, 'No se pudo calcular la tarifa final');
+      return { patch: {}, note: 'No se pudo calcular la distancia al finalizar' };
+    }
+
+    const patch: Partial<typeof rides.$inferInsert> = {
+      distanceKm: quote.distanceKm,
+      fareFinal: quote.amount,
+    };
+
+    if (loDijoElCliente) return { patch };
+
+    patch.dropoffLat = destino.lat;
+    patch.dropoffLng = destino.lng;
+    patch.dropoffSource = 'conductor';
+    patch.dropoffText = ride.dropoffText ?? 'Donde terminó la carrera';
+
+    return { patch, note: 'Destino tomado de donde finalizó el conductor' };
+  }
+
   async transition(
     rideId: string,
     to: RideStatus,
