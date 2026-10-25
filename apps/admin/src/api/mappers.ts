@@ -123,10 +123,11 @@ export interface ApiOutboxEvent {
 export interface ApiWahaSession {
   id: string;
   label: string;
-  phone: string;
+  phone: string | null;
   status: WahaSession['status'];
+  connected: boolean;
+  statusSince: string | null;
   lastCheckAt: string | null;
-  messagesToday: number;
 }
 
 /* -------------------------------------------------------------- traducción */
@@ -262,7 +263,9 @@ export function toWahaSession(row: ApiWahaSession): WahaSession {
     label: row.label,
     phone: row.phone,
     status: row.status,
-    lastCheckAt: row.lastCheckAt ?? new Date().toISOString(),
-    messagesToday: row.messagesToday,
+    connected: row.connected,
+    statusSince: row.statusSince,
+    // Nulo es «nunca revisada»; inventar «ahora» la haría pasar por recién vista.
+    lastCheckAt: row.lastCheckAt,
   };
 }

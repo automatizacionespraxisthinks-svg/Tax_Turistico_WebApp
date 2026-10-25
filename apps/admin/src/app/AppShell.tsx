@@ -12,12 +12,14 @@ import {
   PanelLeftOpen,
   Route as RouteIcon,
   ServerCog,
+  Smartphone,
   Users,
   WifiOff,
+  X,
 } from 'lucide-react';
-import { WAHA_STATUS_LABEL, WAHA_STATUS_TONE, formatTime } from '@tax/shared';
+import { WAHA_STATUS_LABEL, WAHA_STATUS_TONE, formatTime, type StatusTone } from '@tax/shared';
 import { Banner, LiveDot, StatusPill, ThemeToggle, cn, spring, transition } from '@tax/ui';
-import { useLive } from '../live/store';
+import { actions, useLive, type AlertaRecibida } from '../live/store';
 import { api } from '../api/client';
 import { CambiarClave } from '../components/CambiarClave';
 
@@ -105,8 +107,111 @@ export function AppShell({ children, userName }: { children: ReactNode; userName
           </div>
         ) : null}
 
+        <LineasCaidas />
+        <AvisosSueltos />
+
         <main className="min-h-0 flex-1 overflow-y-auto">{children}</main>
       </div>
+    </div>
+  );
+}
+
+/* ---------------------------------------------------------------- avisos --- */
+
+/**
+ * Una o más líneas de WhatsApp que no atienden. Es un estado, no un aviso:
+ * se queda mientras dure y se va sola cuando el monitor la ve volver. La
+ * caída en sí suena una vez (`sonarAlarma`), pero lo que hay que resolver
+ * tiene que seguir a la vista aunque nadie estuviera mirando en ese momento.
+ */
+function LineasCaidas() {
+  const sesiones = useLive((s) => s.wahaSessions);
+  const caidas = sesiones.filter((sesion) => !sesion.connected);
+  if (caidas.length === 0) return null;
+
+  const [primera] = caidas;
+  return (
+    <div className="px-5 pt-3">
+      <Banner
+        tone="critical"
+        icon={<Smartphone className="size-4" />}
+        action={
+          <NavLink to="/sistema" className="text-caption font-medium underline underline-offset-2">
+            Ver líneas
+          </NavLink>
+        }
+      >
+        <span className="font-medium">
+          {caidas.length === 1
+            ? `La línea ${primera!.label} no está atendiendo`
+            : `${caidas.length} líneas de WhatsApp no están atendiendo`}
+        </span>{' '}
+        ({[...new Set(caidas.map((sesion) => WAHA_STATUS_LABEL[sesion.status]))].join(', ')}). Los
+        clientes que escriban a {caidas.length === 1 ? 'ese número' : 'esos números'} no reciben
+        respuesta.
+      </Banner>
+    </div>
+  );
+}
+
+const TONO_AVISO: Record<AlertaRecibida['kind'], StatusTone> = {
+  no_driver: 'critical',
+  line_down: 'critical',
+  line_up: 'positive',
+  outbox_stuck: 'warning',
+  driver_no_gps: 'warning',
+};
+
+/** Una línea que vuelve se anuncia y el aviso se cierra solo. */
+const CIERRE_LINEA_RECUPERADA_MS = 15_000;
+
+/**
+ * Los avisos del servidor que no tienen ya su propio letrero. La caída de una
+ * línea y la carrera sin conductor no salen aquí: suenan, y su estado ya lo
+ * pintan «LineasCaidas» y el letrero de carreras sin asignar. Repetirlos
+ * apilaría dos letreros rojos para lo mismo.
+ */
+function AvisosSueltos() {
+  const alerts = useLive((s) => s.alerts);
+  const visibles = alerts.filter((a) => a.kind !== 'line_down' && a.kind !== 'no_driver');
+
+  useEffect(() => {
+    const temporizadores = alerts
+      .filter((a) => a.kind === 'line_up')
+      .map((a) =>
+        window.setTimeout(
+          () => actions.dismissAlert(a.id),
+          Math.max(0, CIERRE_LINEA_RECUPERADA_MS - (Date.now() - a.at)),
+        ),
+      );
+    return () => temporizadores.forEach((t) => window.clearTimeout(t));
+  }, [alerts]);
+
+  if (visibles.length === 0) return null;
+  return (
+    <div className="space-y-2 px-5 pt-3">
+      <AnimatePresence initial={false}>
+        {visibles.map((alerta) => (
+          <Banner
+            key={alerta.id}
+            tone={TONO_AVISO[alerta.kind]}
+            icon={alerta.kind === 'line_up' ? <Smartphone className="size-4" /> : <CircleDot className="size-4" />}
+            action={
+              <button
+                type="button"
+                aria-label="Cerrar aviso"
+                onClick={() => actions.dismissAlert(alerta.id)}
+                className="rounded p-0.5 opacity-70 hover:opacity-100"
+              >
+                <X className="size-3.5" />
+              </button>
+            }
+          >
+            {alerta.message}{' '}
+            <time className="tnum text-caption opacity-80">{formatTime(new Date(alerta.at))}</time>
+          </Banner>
+        ))}
+      </AnimatePresence>
     </div>
   );
 }

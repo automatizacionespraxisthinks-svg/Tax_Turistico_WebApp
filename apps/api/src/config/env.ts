@@ -68,6 +68,17 @@ const envSchema = z.object({
     .default('true')
     .transform((valor) => valor === 'true'),
 
+  /**
+   * WAHA, para vigilar las líneas de WhatsApp (§10.4). Dentro de Dokploy es
+   * el nombre del servicio en la red interna, p. ej. `http://tax-turistico-waha-xxxx:3000`.
+   *
+   * Opcional: sin ella el monitor no arranca y el panel lo dice. Antes la
+   * página de estado prometía «revisión cada minuto» sin que nada revisara.
+   */
+  WAHA_URL: z.string().url().optional(),
+  /** La clave que WAHA exige en `X-Api-Key`, si tiene una configurada. */
+  WAHA_API_KEY: z.string().min(8).optional(),
+
   /** Orígenes autorizados del panel y de la PWA. */
   PUBLIC_ORIGINS: z
     .string()

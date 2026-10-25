@@ -16,6 +16,7 @@ import { ReportsModule } from './modules/reports/reports.module';
 import { PushModule } from './modules/push/push.module';
 import { MaintenanceModule } from './modules/maintenance/maintenance.module';
 import { StatusController } from './status.controller';
+import { SystemController } from './system.controller';
 
 const env = loadEnv();
 
@@ -79,6 +80,6 @@ const env = loadEnv();
     DispatchModule,
     ReportsModule,
   ],
-  controllers: [StatusController],
+  controllers: [StatusController, SystemController],
 })
 export class AppModule {}

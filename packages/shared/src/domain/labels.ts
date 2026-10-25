@@ -61,6 +61,8 @@ export const OUTBOX_EVENT_LABEL: Record<OutboxEventType, string> = {
   'ride.completed': 'Carrera finalizada',
   'ride.cancelled': 'Carrera cancelada',
   'ride.no_driver': 'Sin conductor disponible',
+  'waha.line_down': 'Línea de WhatsApp caída',
+  'waha.line_up': 'Línea de WhatsApp recuperada',
 };
 
 export const OUTBOX_STATUS_LABEL: Record<OutboxStatus, string> = {
@@ -83,6 +85,8 @@ export const WAHA_STATUS_LABEL: Record<WahaSessionStatus, string> = {
   scan_qr: 'Esperando QR',
   failed: 'Caída',
   stopped: 'Detenida',
+  no_response: 'WAHA no responde',
+  missing: 'Ya no existe en WAHA',
 };
 
 export const WAHA_STATUS_TONE: Record<WahaSessionStatus, StatusTone> = {
@@ -90,5 +94,8 @@ export const WAHA_STATUS_TONE: Record<WahaSessionStatus, StatusTone> = {
   starting: 'info',
   scan_qr: 'warning',
   failed: 'critical',
-  stopped: 'neutral',
+  // Detenida no es neutral para la oficina: es una línea que no atiende.
+  stopped: 'warning',
+  no_response: 'critical',
+  missing: 'neutral',
 };

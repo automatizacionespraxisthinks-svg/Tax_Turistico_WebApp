@@ -4,5 +4,6 @@ export * from './domain/password';
 export * from './domain/geo';
 export * from './domain/fare';
 export * from './domain/events';
+export * from './domain/system';
 export * from './domain/labels';
 export * from './format';

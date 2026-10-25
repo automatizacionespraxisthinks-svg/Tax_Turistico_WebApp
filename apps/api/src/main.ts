@@ -80,6 +80,11 @@ async function bootstrap(): Promise<void> {
   app.enableCors({
     origin: env.PUBLIC_ORIGINS,
     credentials: true,
+    // Explícitos: @fastify/cors solo admite GET, HEAD y POST por defecto, y el
+    // panel y la PWA viven en otro dominio. Sin esto, activar o desactivar un
+    // conductor (PATCH) o quitar una línea (DELETE) fallaban en el navegador
+    // con «Failed to fetch» antes de llegar a la API.
+    methods: ['GET', 'HEAD', 'POST', 'PATCH', 'DELETE'],
     allowedHeaders: ['content-type', 'authorization', 'x-api-key', 'idempotency-key'],
   });
 

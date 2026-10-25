@@ -231,6 +231,10 @@ GOOGLE_GEOCODING_API_KEY=...
 # Solo mientras se prueba: ver la nota de abajo.
 OLEADA_FINAL_A_TODOS=true
 
+# Monitor de las líneas de WhatsApp: ver la nota de abajo.
+WAHA_URL=http://NOMBRE-DEL-SERVICIO-WAHA:3000
+WAHA_API_KEY=...
+
 PUBLIC_ORIGINS=https://panel.TUDOMINIO,https://conductor.TUDOMINIO
 
 POSITION_MAX_AGE_SECONDS=60
@@ -270,6 +274,16 @@ Tres cosas que se equivocan siempre:
   adivina direcciones y exige que la carrera llegue con coordenadas, así que
   el agente tendrá que pedirle la ubicación al cliente en todos los casos.
   Conviene restringirla por IP a la del VPS.
+- **`WAHA_URL`** enciende el monitor de las líneas de WhatsApp: cada minuto
+  le pregunta a WAHA por sus sesiones y, si una deja de atender, suena una
+  alerta en el panel, queda un letrero rojo arriba hasta que vuelva y sale el
+  evento `waha.line_down` hacia n8n. Es el nombre del **servicio** de WAHA en
+  la red interna (`docker service ls | grep waha`) con su puerto, que por
+  defecto es el 3000; no hace falta publicarlo en internet. **`WAHA_API_KEY`**
+  es la clave en texto plano que WAHA exige en `X-Api-Key`, la misma que usa
+  Chatwoot para hablarle. Sin `WAHA_URL` el monitor no arranca y *Sistema*
+  lo dice; antes la página prometía «revisión cada minuto» sin que nada
+  revisara.
 - **`ENCRYPTION_KEY`** cifra el secreto TOTP de cada operador. Si la pierdes o
   la cambias, nadie de la oficina puede entrar y hay que volver a dar de alta
   el segundo factor de todos. Guárdala en el gestor de contraseñas antes de
@@ -493,6 +507,12 @@ cópialo directo a las credenciales de n8n.
 ## 5. Comprobaciones finales
 
 - `https://api.TUDOMINIO/ready` → `ok: true`, postgres y redis en `true`.
+- En el panel, *Sistema › Estado*: cada servicio se comprueba de verdad en
+  cada consulta y dice qué vio —versión de PostgreSQL y Redis, eventos a n8n
+  atascados o en cola muerta, la clave de API que usa n8n y su antigüedad—.
+  Las líneas de WhatsApp aparecen en menos de un minuto, con el número que
+  tiene vinculado cada sesión. Si una pide el QR, *Ver QR* lo trae de WAHA
+  para escanearlo desde ahí.
 - El panel carga, entras con contraseña + código, y el mapa de Paipa se ve.
 - En la PWA, abre turno con un conductor de prueba: debe pedir permiso de
   notificaciones y de ubicación.
@@ -515,5 +535,17 @@ cópialo directo a las credenciales de n8n.
   Cambiar el VAPID invalida todas las suscripciones de push y los conductores
   tienen que volver a activarlas; cambiar el `ENCRYPTION_KEY` deja a la
   oficina fuera.
+- **Avisar al equipo técnico de una línea caída** es cosa de n8n. La API
+  manda `waha.line_down` y `waha.line_up` al mismo webhook que los eventos de
+  carrera, sin `rideId` y con un `data.message` ya redactado («Se cayó la
+  línea «principal» (+57…): pide escanear el QR otra vez»). El flujo de
+  avisos al cliente los deja pasar de largo; para que lleguen a alguien hace
+  falta una rama que los filtre y los mande por el canal que se quiera. Sin
+  ella, la alerta del panel funciona igual.
+- **La migración `0009_monitor_de_lineas` borra las tres líneas inventadas**
+  que dejaba el sembrado de desarrollo (`line-1`, `line-2`, `line-3`, con sus
+  números de mentira). Si se quedaran, el monitor no las encontraría en WAHA y
+  alertaría de la caída de dos líneas que nunca existieron. Las de verdad las
+  escribe el monitor.
 - **Borra `apps/api/.env.produccion.local`** de tu máquina cuando los secretos
   estén en Dokploy y en el gestor de contraseñas de la empresa.

@@ -72,17 +72,9 @@ async function main(): Promise<void> {
     })
     .onConflictDoNothing();
 
-  console.log('Sembrando líneas de WhatsApp…');
-  for (const line of [
-    { id: 'line-1', label: 'Línea 1', phone: '+57 310 842 1190', status: 'working' },
-    { id: 'line-2', label: 'Línea 2', phone: '+57 320 455 7731', status: 'working' },
-    { id: 'line-3', label: 'Línea 3', phone: '+57 315 668 2204', status: 'scan_qr' },
-  ]) {
-    await db
-      .insert(schema.wahaSessions)
-      .values({ ...line, lastCheckAt: new Date(), messagesToday: 0 })
-      .onConflictDoNothing();
-  }
+  // Las líneas de WhatsApp ya no se siembran: las escribe el monitor a partir
+  // de lo que dice WAHA. Unas inventadas aquí saldrían como caídas en cuanto
+  // el monitor mirara, porque WAHA no las conoce.
 
   const prefix = randomHex(4);
   const secret = randomToken(32);

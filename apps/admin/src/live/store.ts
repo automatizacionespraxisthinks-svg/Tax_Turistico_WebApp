@@ -3,6 +3,7 @@ import type { Driver, OutboxEvent, Place, Ride, WahaSession, Zone } from '@tax/s
 import { estimateEtaMinutes, haversineKm, pointInPolygon, type Point } from '@tax/shared';
 import { ApiError, api } from '../api/client';
 import { connectOfficeSocket, type OfficeAlert } from '../api/socket';
+import { sonarAlarma } from './alarma';
 import {
   toDriver,
   toOutboxEvent,
@@ -41,7 +42,8 @@ export interface LiveState {
   places: Place[];
   outbox: OutboxEvent[];
   wahaSessions: WahaSession[];
-  alerts: OfficeAlert[];
+  /** Las alertas que aún no se han cerrado, la más reciente primero. */
+  alerts: AlertaRecibida[];
   /** Carrera que acaba de cambiar; la fila la resalta un instante. */
   pulseRideId: string | null;
   /** Zona sobre la que se está lanzando una oleada; el mapa dibuja el barrido. */
@@ -51,6 +53,12 @@ export interface LiveState {
   error: string | null;
   /** Avanza cada segundo: los contadores regresivos se suscriben a esto. */
   tick: number;
+}
+
+/** Una alerta del servidor con lo que el panel necesita para cerrarla. */
+export interface AlertaRecibida extends OfficeAlert {
+  id: number;
+  at: number;
 }
 
 type Listener = () => void;
@@ -134,12 +142,17 @@ async function loadOutbox(): Promise<void> {
 }
 
 async function loadReference(): Promise<void> {
-  const [zones, waha] = await Promise.all([
-    api.get<ApiZone[]>('/v1/admin/zones'),
-    api.get<ApiWahaSession[]>('/v1/admin/waha'),
-  ]);
-  emit({ zones: zones.map(toZone), wahaSessions: waha.map(toWahaSession) });
+  const zones = await api.get<ApiZone[]>('/v1/admin/zones');
+  emit({ zones: zones.map(toZone) });
+  await loadWaha();
 }
+
+async function loadWaha(): Promise<void> {
+  const rows = await api.get<ApiWahaSession[]>('/v1/admin/waha');
+  emit({ wahaSessions: rows.map(toWahaSession) });
+}
+
+let siguienteAlerta = 1;
 
 /** Detalle completo de una carrera: historial y ofertas por oleada. */
 export async function loadRideDetail(rideId: string): Promise<Ride> {
@@ -220,8 +233,26 @@ export const actions = {
     await loadOutbox();
   },
 
-  dismissAlert(index: number) {
-    emit({ alerts: state.alerts.filter((_, i) => i !== index) });
+  dismissAlert(id: number) {
+    emit({ alerts: state.alerts.filter((alerta) => alerta.id !== id) });
+  },
+
+  /**
+   * Revisa las líneas ya, sin esperar al minuto del monitor. Devuelve la
+   * revisión para que quien la pidió pueda decir qué salió.
+   */
+  async revisarLineas() {
+    const revision = await api.post<{ ok: boolean; error: string | null; lineas: number; conectadas: number }>(
+      '/v1/admin/system/whatsapp/revisar',
+    );
+    await loadWaha();
+    return revision;
+  },
+
+  /** Quita una línea que ya no existe en WAHA (solo administradores). */
+  async quitarLinea(id: string) {
+    await api.del(`/v1/admin/waha/${encodeURIComponent(id)}`);
+    await loadWaha();
   },
 
 };
@@ -323,7 +354,17 @@ export function startLive(): () => void {
     },
 
     onAlert: (alert) => {
-      emit({ alerts: [alert, ...state.alerts].slice(0, 5) });
+      const recibida = { ...alert, id: siguienteAlerta++, at: Date.now() };
+      // Si una línea vuelve, la alerta de su caída ya no tiene sentido.
+      const vigentes =
+        alert.kind === 'line_up'
+          ? state.alerts.filter((a) => !(a.kind === 'line_down' && a.lineId === alert.lineId))
+          : state.alerts;
+      emit({ alerts: [recibida, ...vigentes].slice(0, 5) });
+      // Suena lo que necesita a alguien ya: una línea que dejó de atender o
+      // una carrera que se quedó sin conductor.
+      if (alert.kind === 'line_down' || alert.kind === 'no_driver') sonarAlarma();
+      if (alert.kind === 'line_down' || alert.kind === 'line_up') void loadWaha().catch(reportError);
     },
   });
 
@@ -333,11 +374,19 @@ export function startLive(): () => void {
     void loadDrivers().catch(() => undefined);
   }, 15_000);
 
+  // Las líneas las escribe el monitor cada minuto; la alerta llega por el
+  // socket, pero si el panel estaba reconectando justo entonces, esto la
+  // recoge igual.
+  const wahaPoll = window.setInterval(() => {
+    void loadWaha().catch(() => undefined);
+  }, 30_000);
+
   const ticker = window.setInterval(() => emit({ tick: state.tick + 1 }), 1000);
 
   return () => {
     disconnect();
     window.clearInterval(driversPoll);
+    window.clearInterval(wahaPoll);
     window.clearInterval(ticker);
     started = false;
   };

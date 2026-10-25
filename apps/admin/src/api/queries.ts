@@ -1,5 +1,5 @@
 import { useQuery } from '@tanstack/react-query';
-import type { FareRule, Place } from '@tax/shared';
+import type { FareRule, Place, SystemChecks } from '@tax/shared';
 import { api } from './client';
 
 /**
@@ -163,6 +163,18 @@ export function useSystemStatus() {
         slo: { assignmentP95Seconds: number | null };
         process: { rssMb: number; heapMb: number; uptimeSeconds: number };
       }>('/status'),
+    refetchInterval: 15_000,
+  });
+}
+
+/**
+ * Las comprobaciones reales de cada servicio. Solo para la oficina: dice
+ * versiones y nombres que `/status`, que es público, no enseña.
+ */
+export function useSystemChecks() {
+  return useQuery({
+    queryKey: ['system-checks'],
+    queryFn: () => api.get<SystemChecks>('/v1/admin/system'),
     refetchInterval: 15_000,
   });
 }

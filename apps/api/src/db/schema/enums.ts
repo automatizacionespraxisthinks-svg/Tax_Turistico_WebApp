@@ -56,6 +56,8 @@ export const outboxEventTypeValues = [
   'ride.completed',
   'ride.cancelled',
   'ride.no_driver',
+  'waha.line_down',
+  'waha.line_up',
 ] as const;
 
 export const userRoleValues = ['administrador', 'operador'] as const;

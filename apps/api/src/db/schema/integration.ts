@@ -1,4 +1,14 @@
-import { index, integer, jsonb, pgTable, text, timestamp, uniqueIndex, uuid } from 'drizzle-orm/pg-core';
+import {
+  boolean,
+  index,
+  integer,
+  jsonb,
+  pgTable,
+  text,
+  timestamp,
+  uniqueIndex,
+  uuid,
+} from 'drizzle-orm/pg-core';
 import { outboxEventType, outboxStatus } from './enums';
 
 /**
@@ -57,14 +67,34 @@ export const idempotencyKeys = pgTable(
   (table) => [index('idempotency_expires_idx').on(table.expiresAt)],
 );
 
-/** Estado de las tres líneas de WhatsApp, para la página de estado (§10.4). */
+/**
+ * Las líneas de WhatsApp, tal como las ve el monitor (§10.4).
+ *
+ * Cada sesión de WAHA es una línea; el identificador es el nombre de la
+ * sesión. La tabla la escribe el monitor cada minuto: antes solo la llenaba
+ * el sembrado de desarrollo, y en producción la página de estado salía vacía.
+ */
 export const wahaSessions = pgTable(
   'waha_sessions',
   {
     id: text('id').primaryKey(),
     label: text('label').notNull(),
-    phone: text('phone').notNull(),
+    /** Nulo mientras la sesión no tiene número vinculado (pide el QR). */
+    phone: text('phone'),
+    /**
+     * Lo último que se vio, traducido (`WahaSessionStatus`): `working`,
+     * `scan_qr`, `failed`… o, puestos por el monitor, `no_response` y `missing`.
+     */
     status: text('status').notNull(),
+    /**
+     * Si la línea se da por conectada. No es lo mismo que `status`: un
+     * STARTING suelto o un WAHA que no contesta una vez no la tumban, porque
+     * un reinicio de WAHA dura segundos y alertaría de caída y de vuelta.
+     * Solo cambia cuando el monitor está seguro, y es lo que dispara alertas.
+     */
+    connected: boolean('connected').notNull().default(true),
+    /** Desde cuándo está en el estado actual de `connected`. */
+    statusSince: timestamp('status_since', { withTimezone: true }),
     lastCheckAt: timestamp('last_check_at', { withTimezone: true }),
     messagesToday: integer('messages_today').notNull().default(0),
   },

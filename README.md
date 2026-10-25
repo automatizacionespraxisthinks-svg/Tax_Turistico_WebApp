@@ -125,6 +125,15 @@ El panel no inventa acciones: cada botón sale de la tabla de transiciones.
   presenta como *tarifa estimada*.
 - **Outbox**: estados de entrega, reintentos y cola muerta visibles en
   *Sistema*, con reenvío manual.
+- **Líneas de WhatsApp vigiladas**: un monitor pregunta a WAHA cada minuto.
+  Una caída clara (FAILED, STOPPED, pide QR, la sesión desapareció) alerta en
+  el acto; una dudosa (STARTING, WAHA sin contestar) solo si se repite en la
+  revisión siguiente, porque un reinicio de WAHA pasa por ahí en segundos y
+  alertaría de una caída y una vuelta cada vez. La lógica está aparte, en
+  `waha-monitor.ts`, con sus pruebas.
+- **Página de estado sin textos fijos**: PostgreSQL, Redis, los webhooks de
+  n8n, WAHA y la clave de API se comprueban en cada consulta, y la memoria
+  se compara con el límite real del contenedor.
 - **Privacidad**: el conductor no ve el teléfono del cliente hasta aceptar; el
   GPS solo existe con turno abierto.
 
@@ -157,8 +166,9 @@ Pendiente de las siguientes fases, en orden:
 
 1. **Cola sin conexión**: ya funciona sobre `localStorage`; pasa a IndexedDB
    el día que haya que encolar fotos y no solo comandos.
-2. **Chatwoot y WAHA** tras la capa anticorrupción, y las exportaciones a
-   Excel y PDF en segundo plano.
+2. **Chatwoot** tras la capa anticorrupción (de WAHA ya se vigilan las
+   líneas y se trae el QR), y las exportaciones a Excel y PDF en segundo
+   plano.
 3. **Retención de las demás tablas de §9.3**: fotos del lugar, conversaciones
    de Chatwoot y el archivado a cinco años. El histórico de GPS ya se purga
    solo, de madrugada y por lotes.
