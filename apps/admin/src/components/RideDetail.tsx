@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { AnimatePresence, motion } from 'motion/react';
 import { Ban, Car, MessageSquare, RefreshCw, ShieldCheck } from 'lucide-react';
 import type { Driver, Ride, RideOffer, WaveLogEntry } from '@tax/shared';
@@ -45,6 +45,14 @@ function formatKm(km: number): string {
 
 export function RideDetail({ ride }: { ride: Ride }) {
   const [tab, setTab] = useState<DetailTab>('resumen');
+  const pestanas = useRef<HTMLDivElement>(null);
+
+  // La pestaña de oleadas puede ser larga. Sin esto, al pasar a la bitácora
+  // el panel se quedaba donde terminaban las oleadas y se veía en blanco.
+  const cambiarPestana = (siguiente: DetailTab) => {
+    setTab(siguiente);
+    pestanas.current?.scrollIntoView({ block: 'nearest' });
+  };
   const drivers = useLive((s) => s.drivers);
 
   /*
@@ -61,15 +69,17 @@ export function RideDetail({ ride }: { ride: Ride }) {
     <div className="space-y-5">
       <Header ride={ride} driver={driver} />
 
-      <Tabs
-        value={tab}
-        onChange={setTab}
-        options={[
-          { value: 'resumen', label: 'Resumen' },
-          { value: 'oleadas', label: 'Oleadas', count: ride.waveLog?.length || ride.offers.length },
-          { value: 'bitacora', label: 'Bitácora', count: ride.history.length },
-        ]}
-      />
+      <div ref={pestanas}>
+        <Tabs
+          value={tab}
+          onChange={cambiarPestana}
+          options={[
+            { value: 'resumen', label: 'Resumen' },
+            { value: 'oleadas', label: 'Oleadas', count: ride.waveLog?.length || ride.offers.length },
+            { value: 'bitacora', label: 'Bitácora', count: ride.history.length },
+          ]}
+        />
+      </div>
 
       <AnimatePresence mode="wait" initial={false}>
         <motion.div
@@ -400,6 +410,28 @@ function useAhora(activo: boolean): number {
   return ahora;
 }
 
+/**
+ * Parte el registro en lanzamientos: el primero, y uno por cada «Relanzar».
+ *
+ * Las entradas nuevas dicen a qué intento pertenecen. Las de antes no, y ahí
+ * cada oleada 1 marca el comienzo de uno: el despacho siempre arranca por la
+ * oleada 1, así que es la misma regla dicha de otra forma. Se agrupa por
+ * secuencia y no por número para que un registro viejo seguido de uno nuevo
+ * no mezcle dos lanzamientos distintos que compartan número.
+ */
+function agruparPorIntento(registro: WaveLogEntry[]): WaveLogEntry[][] {
+  const grupos: WaveLogEntry[][] = [];
+  for (const entrada of registro) {
+    const previa = grupos.at(-1)?.at(-1);
+    const abreOtro =
+      previa === undefined ||
+      (entrada.intento !== undefined ? entrada.intento !== previa.intento : entrada.wave === 1);
+    if (abreOtro) grupos.push([entrada]);
+    else grupos.at(-1)!.push(entrada);
+  }
+  return grupos;
+}
+
 function mmss(ms: number): string {
   const total = Math.max(0, Math.ceil(ms / 1000));
   return `${Math.floor(total / 60)}:${String(total % 60).padStart(2, '0')}`;
@@ -411,6 +443,17 @@ function Oleadas({ ride }: { ride: Ride }) {
   const enCurso =
     ride.status === 'NOTIFIED' && ultima !== undefined && ultima.expiresAt !== null ? ultima : undefined;
   const ahora = useAhora(Boolean(enCurso));
+  const grupos = agruparPorIntento(registro);
+
+  /*
+   * Una oleada que no halló a nadie no tiene ofertas, aunque haya otras de
+   * su mismo número en otro lanzamiento. Sin esta guarda, los relanzamientos
+   * vacíos mostraban las ofertas del primero como si fueran suyas.
+   */
+  const ofertasDe = (entrada: WaveLogEntry) =>
+    entrada.candidates === 0
+      ? []
+      : ride.offers.filter((o) => o.wave === entrada.wave && o.intento === (entrada.intento ?? 1));
 
   // Carreras de antes de que existiera el registro: solo hay ofertas, así
   // que se agrupan por oleada como se hacía siempre.
@@ -433,19 +476,27 @@ function Oleadas({ ride }: { ride: Ride }) {
         esperar el reloj.
       </p>
 
-      <ol className="space-y-3">
-        {registro.map((entrada, i) => (
-          <OleadaFila
-            key={`${entrada.wave}-${entrada.startedAt}`}
-            entrada={entrada}
-            ofertas={ride.offers.filter((o) => o.wave === entrada.wave)}
-            enCurso={entrada === enCurso}
-            ahora={ahora}
-            esLaUltima={i === registro.length - 1}
-            estado={ride.status}
-          />
-        ))}
-      </ol>
+      {grupos.map((grupo, g) => (
+        <section key={grupo[0]!.startedAt} className="space-y-2">
+          {/* Con un solo lanzamiento, el título sobra. */}
+          {grupos.length > 1 ? (
+            <SectionLabel>{g === 0 ? 'Primer lanzamiento' : `Relanzamiento ${g}`}</SectionLabel>
+          ) : null}
+          <ol className="space-y-3">
+            {grupo.map((entrada) => (
+              <OleadaFila
+                key={`${entrada.wave}-${entrada.startedAt}`}
+                entrada={entrada}
+                ofertas={ofertasDe(entrada)}
+                enCurso={entrada === enCurso}
+                ahora={ahora}
+                esLaUltima={entrada === ultima}
+                estado={ride.status}
+              />
+            ))}
+          </ol>
+        </section>
+      ))}
 
       {/* Agotadas todas: que se lea el final, no solo que paró de moverse. */}
       {ride.status === 'UNASSIGNED' ? (
@@ -488,6 +539,8 @@ function OleadaFila({
   else if (aceptada) lateral = 'Aceptada';
   else if (enCurso) lateral = restante > 0 ? mmss(restante) : 'Pasando…';
   else if (esLaUltima && estado === 'NOTIFIED') lateral = 'Pasando…';
+  // Si todos dijeron que no, la oleada no venció: la cerraron antes de tiempo.
+  else if (ofertas.length > 0 && ofertas.every((o) => o.response === 'rejected')) lateral = 'Rechazada';
   else lateral = 'Venció';
 
   const disponiblesSinGps = entrada.sinGps ?? 0;

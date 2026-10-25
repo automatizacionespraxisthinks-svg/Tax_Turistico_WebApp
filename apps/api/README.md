@@ -138,6 +138,18 @@ oleada, aceptación simultánea— y comprueba que exactamente un conductor gana
 los demás reciben `RIDE_ALREADY_TAKEN`.
 
 ```bash
+pnpm --filter @tax/api exec tsx src/test/e2e-relanzar.ts <clave-de-api>
+```
+
+Relanzar una carrera que nadie aceptó. Cada lanzamiento es un intento propio
+(`rides.intento_despacho`, `ride_offers.intento`): dentro de un intento no se
+repite conductor, pero un relanzamiento vuelve a contar con quien no contestó.
+Quien rechazó la carrera queda fuera en todos. Antes el índice único no
+llevaba el intento, y relanzar tras una ronda final vencida daba 500 al
+intentar ofrecérsela otra vez al mismo conductor en la misma oleada. Tarda
+unos tres minutos: espera vencimientos reales.
+
+```bash
 pnpm --filter @tax/api exec tsx src/test/e2e-oleadas.ts <clave-de-api>
 ```
 

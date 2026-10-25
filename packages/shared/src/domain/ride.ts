@@ -216,6 +216,12 @@ export const OLEADA_A_TODOS = 4 as const;
  */
 export interface WaveLogEntry {
   wave: Oleada;
+  /**
+   * El lanzamiento al que pertenece: 1 al crear la carrera, y uno más por
+   * cada «Relanzar». Ausente en las entradas anteriores a que existiera;
+   * ahí cada oleada 1 marca el comienzo de un intento.
+   */
+  intento?: number;
   startedAt: string;
   /** Cuándo vence. Nulo si no encontró a nadie y escaló en el acto. */
   expiresAt: string | null;
@@ -234,6 +240,8 @@ export interface RideOffer {
   driverId: string;
   driverName: string;
   wave: Oleada;
+  /** El lanzamiento al que pertenece. Ver `WaveLogEntry.intento`. */
+  intento: number;
   sentAt: string;
   expiresAt: string;
   etaMinutes: number;

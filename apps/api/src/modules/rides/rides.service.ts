@@ -478,6 +478,7 @@ export class RidesService {
           driverId: rideOffers.driverId,
           driverName: drivers.name,
           wave: rideOffers.wave,
+          intento: rideOffers.intento,
           sentAt: rideOffers.sentAt,
           expiresAt: rideOffers.expiresAt,
           etaMinutes: rideOffers.etaMinutes,

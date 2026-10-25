@@ -71,6 +71,8 @@ export interface ApiRideDetail extends ApiRide {
     driverId: string;
     driverName: string;
     wave: number;
+    /** Ausente si la API todavía no se ha actualizado. */
+    intento?: number;
     sentAt: string;
     expiresAt: string;
     etaMinutes: number;
@@ -192,6 +194,7 @@ export function toRideDetail(row: ApiRideDetail): Ride {
       driverId: offer.driverId,
       driverName: offer.driverName,
       wave: offer.wave as Oleada,
+      intento: offer.intento ?? 1,
       sentAt: offer.sentAt,
       expiresAt: offer.expiresAt,
       etaMinutes: offer.etaMinutes,

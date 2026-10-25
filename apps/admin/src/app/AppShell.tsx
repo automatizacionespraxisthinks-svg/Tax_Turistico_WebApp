@@ -100,7 +100,7 @@ export function AppShell({ children, userName }: { children: ReactNode; userName
               <span className="font-medium">
                 {unassigned} {unassigned === 1 ? 'carrera sin asignar' : 'carreras sin asignar'}
               </span>{' '}
-              tras agotar las tres oleadas.
+              tras agotar las oleadas.
             </Banner>
           </div>
         ) : null}

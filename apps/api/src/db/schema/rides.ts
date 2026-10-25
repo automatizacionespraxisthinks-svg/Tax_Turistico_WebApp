@@ -129,6 +129,12 @@ export const rides = pgTable(
      * no encontro a nadie y paso a la siguiente.
      */
     waveLog: jsonb('wave_log').$type<WaveLogEntry[]>().notNull().default([]),
+    /**
+     * Cuantas veces se lanzo el despacho: 1 al crearla, y uno mas por cada
+     * «Relanzar» de la oficina. Las ofertas se cuentan por intento, para que
+     * un relanzamiento pueda volver a contar con quien no contesto antes.
+     */
+    intentoDespacho: integer('intento_despacho').notNull().default(0),
     cancelReason: text('cancel_reason'),
 
     /**
@@ -206,6 +212,8 @@ export const rideOffers = pgTable(
       .notNull()
       .references(() => drivers.id),
     wave: integer('wave').notNull(),
+    /** El lanzamiento al que pertenece. Ver `rides.intentoDespacho`. */
+    intento: integer('intento').notNull().default(1),
     distanceKm: doublePrecision('distance_km').notNull(),
     etaMinutes: integer('eta_minutes').notNull(),
     sentAt: timestamp('sent_at', { withTimezone: true }).notNull().defaultNow(),
@@ -218,7 +226,18 @@ export const rideOffers = pgTable(
     index('ride_offers_ride_idx').on(table.rideId, table.wave),
     /* La consulta del UPDATE atómico busca por carrera + conductor vigente. */
     index('ride_offers_driver_open_idx').on(table.driverId, table.expiresAt),
-    uniqueIndex('one_offer_per_driver_per_wave').on(table.rideId, table.driverId, table.wave),
+    /*
+     * Una oferta por conductor, oleada e INTENTO. Antes no llevaba el
+     * intento, y al relanzar una carrera la ronda final intentaba ofrecersela
+     * otra vez al mismo conductor en la misma oleada: el indice lo rechazaba
+     * y el relanzamiento entero caia con un 500.
+     */
+    uniqueIndex('one_offer_per_driver_per_wave').on(
+      table.rideId,
+      table.driverId,
+      table.wave,
+      table.intento,
+    ),
   ],
 );
 

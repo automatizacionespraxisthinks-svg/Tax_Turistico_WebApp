@@ -22,9 +22,9 @@ export class DispatchProcessor extends WorkerHost {
   async process(job: Job<WaveTimeoutJob>): Promise<void> {
     if (job.name !== WAVE_TIMEOUT_JOB) return;
 
-    const { rideId, wave } = job.data;
+    const { rideId, wave, intento } = job.data;
     try {
-      await this.dispatch.expireWave(rideId, wave);
+      await this.dispatch.expireWave(rideId, wave, intento);
     } catch (error) {
       // Se registra y se deja caer: reintentar un vencimiento ya procesado
       // podría saltarse una oleada.

@@ -1,7 +1,7 @@
 import { Inject, Injectable, Logger, forwardRef } from '@nestjs/common';
 import { InjectQueue } from '@nestjs/bullmq';
 import type { Queue } from 'bullmq';
-import { and, eq, isNull, sql } from 'drizzle-orm';
+import { and, eq, isNull, or, sql } from 'drizzle-orm';
 import { uuidv7 } from 'uuidv7';
 import { DB, type Database } from '../../db/db.module';
 import { AuditService } from '../audit/audit.service';
@@ -23,6 +23,11 @@ export const WAVE_TIMEOUT_JOB = 'wave-timeout';
 export interface WaveTimeoutJob {
   rideId: string;
   wave: Oleada;
+  /**
+   * El lanzamiento que lo programo. Si la oficina relanza la carrera, el
+   * temporizador de un intento anterior no debe escalar el nuevo.
+   */
+  intento?: number;
 }
 
 const SYSTEM: Actor = { kind: 'system', name: 'Despacho', role: 'sistema' };
@@ -67,13 +72,32 @@ export class DispatchService {
   async startWave(rideId: string, wave: Oleada): Promise<void> {
     const ride = await this.ridesService.byId(rideId);
 
-    if (ride.status !== 'PENDING' && ride.status !== 'NOTIFIED' && ride.status !== 'UNASSIGNED') {
+    // Una carrera sin asignar solo vuelve al despacho por `redispatch`, que
+    // hace la transicion en nombre de quien relanza. Si se llegara aqui
+    // directamente, el sistema no tiene permiso para sacarla de ahi.
+    if (ride.status !== 'PENDING' && ride.status !== 'NOTIFIED') {
       this.logger.debug({ rideId, status: ride.status }, 'La carrera ya no admite oleadas');
       return;
     }
 
     if (!ride.pickupLat || !ride.pickupLng || !ride.zoneId) {
       throw new AppError('MISSING_LOCATION', 'La carrera no tiene punto de recogida');
+    }
+
+    /*
+     * La oleada 1 abre un intento nuevo: al crear la carrera, y en cada
+     * «Relanzar» de la oficina. Las demas siguen dentro del intento en curso.
+     * Se incrementa en la propia sentencia para que dos relanzamientos
+     * simultaneos no acaben con el mismo numero.
+     */
+    let intento = ride.intentoDespacho;
+    if (wave === 1) {
+      const [fila] = await this.db
+        .update(rides)
+        .set({ intentoDespacho: sql`${rides.intentoDespacho} + 1` })
+        .where(eq(rides.id, rideId))
+        .returning({ intento: rides.intentoDespacho });
+      intento = fila!.intento;
     }
 
     const pickup = { lat: ride.pickupLat, lng: ride.pickupLng };
@@ -90,7 +114,8 @@ export class DispatchService {
        * Aqui si se le vuelve a ofrecer a quien no contesto antes: no
        * contestar no es decir que no, y en pruebas con un solo telefono es
        * justo el conductor al que se quiere ver recibir el aviso. Solo se
-       * excluye a quien rechazo la carrera de forma expresa.
+       * excluye a quien rechazo la carrera de forma expresa, en cualquier
+       * intento: un «no» a esta carrera sigue valiendo si se relanza.
        */
       const rechazaron = await this.db
         .select({ driverId: rideOffers.driverId })
@@ -104,11 +129,23 @@ export class DispatchService {
       candidates = todos.candidates;
       sinGps = todos.sinGps;
     } else {
-      // A quien ya se le ofreció no se le vuelve a ofrecer en esta carrera.
+      /*
+       * Dentro de un intento no se repite conductor: si no contesto en la
+       * oleada 1, la 2 busca a otros. Pero entre intentos si: si la oficina
+       * relanza, es justo para volver a probar con quien no contesto. Antes
+       * se excluia a todo el que alguna vez la vio, y con pocos conductores
+       * relanzar no encontraba nunca a nadie. Quien la rechazo queda fuera
+       * siempre.
+       */
       const alreadyOffered = await this.db
         .select({ driverId: rideOffers.driverId })
         .from(rideOffers)
-        .where(eq(rideOffers.rideId, rideId));
+        .where(
+          and(
+            eq(rideOffers.rideId, rideId),
+            or(eq(rideOffers.intento, intento), eq(rideOffers.response, 'rejected')),
+          ),
+        );
 
       candidates = await this.fleet.findCandidates(
         pickup,
@@ -123,6 +160,7 @@ export class DispatchService {
       this.logger.log({ rideId, wave }, 'Oleada sin candidatos: se escala de inmediato');
       await this.registrarOleada(rideId, {
         wave,
+        intento,
         startedAt: new Date().toISOString(),
         expiresAt: null,
         radiusKm: aTodos ? null : config.radiusKm,
@@ -135,12 +173,39 @@ export class DispatchService {
 
     const expiresAt = new Date(Date.now() + config.timeoutSeconds * 1000);
 
+    /*
+     * El temporizador va ANTES que las ofertas, no despues.
+     *
+     * Si la cola falla al final, la carrera ya esta Notificada, los
+     * conductores ya recibieron el aviso y nadie la va a vencer nunca: se
+     * queda colgada para siempre sin pasar a «sin asignar». Programandolo
+     * primero, si la cola falla, la oleada falla entera y el error sube.
+     *
+     * El identificador fijo evita dos temporizadores para la misma oleada si
+     * `startWave` se llamara dos veces, y lleva el intento para que el de un
+     * relanzamiento no choque con el del anterior. Va SIN dos puntos: BullMQ
+     * 6 rechaza un identificador propio con «:» salvo que tenga exactamente
+     * tres partes. El formato anterior, `<id>:wave:<n>`, las tenia por pura
+     * casualidad; al anadirle el intento paso a cuatro y BullMQ lo rechazo.
+     */
+    await this.queue.add(
+      WAVE_TIMEOUT_JOB,
+      { rideId, wave, intento },
+      {
+        jobId: `${rideId}_i${intento}_w${wave}`,
+        delay: config.timeoutSeconds * 1000,
+        removeOnComplete: true,
+        removeOnFail: true,
+      },
+    );
+
     await this.db.insert(rideOffers).values(
       candidates.map((candidate) => ({
         id: uuidv7(),
         rideId,
         driverId: candidate.driverId,
         wave,
+        intento,
         distanceKm: candidate.distanceKm,
         etaMinutes: candidate.etaMinutes,
         expiresAt,
@@ -161,6 +226,7 @@ export class DispatchService {
 
     await this.registrarOleada(rideId, {
       wave,
+      intento,
       startedAt: new Date().toISOString(),
       expiresAt: expiresAt.toISOString(),
       radiusKm: aTodos ? null : config.radiusKm,
@@ -204,19 +270,6 @@ export class DispatchService {
         });
     }
 
-    await this.queue.add(
-      WAVE_TIMEOUT_JOB,
-      { rideId, wave },
-      {
-        // El identificador fijo evita dos temporizadores para la misma oleada
-        // si `startWave` se llamara dos veces.
-        jobId: `${rideId}:wave:${wave}`,
-        delay: config.timeoutSeconds * 1000,
-        removeOnComplete: true,
-        removeOnFail: true,
-      },
-    );
-
     this.logger.log(
       { rideId, wave, candidatos: candidates.length, radioKm: config.radiusKm },
       'Oleada lanzada',
@@ -239,10 +292,42 @@ export class DispatchService {
     this.realtime.rideWave(rideId, entrada);
   }
 
+  /**
+   * Relanzar el despacho de una carrera sin asignar (§5.3).
+   *
+   * La maquina de estados solo deja que un OPERADOR saque una carrera de
+   * «sin asignar»: es el quien decide volver a intentarlo, y asi tiene que
+   * quedar en la bitacora. Antes se relanzaba llamando a `startWave`, que
+   * hace las transiciones en nombre del sistema, y la maquina la rechazaba.
+   * Relanzar no funciono nunca cuando encontraba a alguien: si no habia
+   * nadie en el radio, pasaba en silencio; si lo habia, daba error.
+   *
+   * Si el relanzamiento no encuentra a nadie, la carrera vuelve sola a «sin
+   * asignar» por el camino de siempre, y la bitacora cuenta que se intento.
+   */
+  async redispatch(rideId: string, actor: Actor): Promise<void> {
+    const ride = await this.ridesService.byId(rideId);
+    if (ride.status !== 'UNASSIGNED') {
+      throw new AppError(
+        'INVALID_TRANSITION',
+        `Solo se relanza una carrera sin asignar; esta está en ${ride.status}`,
+      );
+    }
+
+    await this.ridesService.transition(rideId, 'NOTIFIED', actor, { note: 'Relanzar despacho' });
+    await this.startWave(rideId, 1);
+  }
+
   /** Vence la oleada: si nadie aceptó, amplía el radio o se da por agotada. */
-  async expireWave(rideId: string, wave: Oleada): Promise<void> {
+  async expireWave(rideId: string, wave: Oleada, intento?: number): Promise<void> {
     const ride = await this.ridesService.byId(rideId);
     if (ride.status !== 'NOTIFIED') return;
+
+    // Un temporizador de un intento anterior no toca el actual.
+    if (intento !== undefined && intento !== ride.intentoDespacho) {
+      this.logger.debug({ rideId, wave, intento }, 'Temporizador de un intento anterior: se ignora');
+      return;
+    }
 
     await this.db
       .update(rideOffers)
@@ -270,8 +355,8 @@ export class DispatchService {
       return;
     }
 
-    // Agotadas las tres oleadas: estado Sin asignar, evento y alerta sonora
-    // en el panel (§5.2, punto 5).
+    // Agotadas las oleadas: estado Sin asignar, evento y alerta sonora en el
+    // panel (§5.2, punto 5).
     const ride = await this.ridesService.byId(rideId);
 
     // Puede llegar aquí desde Notificada (nadie aceptó) o desde Pendiente
@@ -279,11 +364,22 @@ export class DispatchService {
     // la carrera muda si no se contempla.
     if (ride.status !== 'NOTIFIED' && ride.status !== 'PENDING') return;
 
+    /*
+     * La nota distingue «nadie la vio» de «la vieron y nadie la tomo»: son
+     * problemas distintos —faltan conductores, o sobran y no la quieren— y
+     * la oficina no los arregla igual. Se cuentan las ofertas del intento en
+     * curso, porque un relanzamiento sin nadie en el radio pasa por
+     * Notificada sin haber avisado a nadie. Y sin numeros: con la ronda
+     * final las oleadas ya no son siempre tres.
+     */
+    const [ofertas] = await this.db
+      .select({ n: sql<number>`count(*)::int` })
+      .from(rideOffers)
+      .where(and(eq(rideOffers.rideId, rideId), eq(rideOffers.intento, ride.intentoDespacho)));
+    const nadieLaVio = ride.status === 'PENDING' || (ofertas?.n ?? 0) === 0;
+
     await this.ridesService.transition(rideId, 'UNASSIGNED', SYSTEM, {
-      note:
-        ride.status === 'PENDING'
-          ? 'Ninguna oleada encontró candidatos'
-          : 'Tres oleadas vencidas',
+      note: nadieLaVio ? 'Ninguna oleada encontró conductores' : 'Nadie aceptó la carrera',
       event: { type: 'ride.no_driver' },
     });
 
@@ -291,7 +387,9 @@ export class DispatchService {
       kind: 'no_driver',
       rideId,
       code: ride.code,
-      message: `${ride.code} se quedó sin conductor tras tres oleadas`,
+      message: nadieLaVio
+        ? `${ride.code}: no hay conductores disponibles`
+        : `${ride.code}: nadie aceptó la carrera`,
     });
   }
 

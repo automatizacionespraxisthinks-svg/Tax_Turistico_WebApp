@@ -57,6 +57,13 @@
       "when": 1792798527726,
       "tag": "0007_registro_de_oleadas",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1792936405778,
+      "tag": "0008_intentos_de_despacho",
+      "breakpoints": true
     }
   ]
 }

@@ -86,8 +86,8 @@ export class AdminRidesController {
 
   /** Relanzar el despacho desde la oleada 1 (§5.3). */
   @Post(':rideId/redispatch')
-  async redispatch(@Param('rideId', ParseUUIDPipe) rideId: string) {
-    await this.dispatch.startWave(rideId, 1);
+  async redispatch(@Req() request: FastifyRequest, @Param('rideId', ParseUUIDPipe) rideId: string) {
+    await this.dispatch.redispatch(rideId, operator(request));
     return { ok: true };
   }
 

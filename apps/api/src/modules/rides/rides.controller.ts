@@ -103,8 +103,10 @@ export class RidesController {
   /** Relanzar el despacho de una carrera sin asignar (§5.3, operador). */
   @Post(':rideId/redispatch')
   @Scopes('rides:write')
-  async redispatch(@Param('rideId', ParseUUIDPipe) rideId: string) {
-    await this.dispatch.startWave(rideId, 1);
+  async redispatch(@Req() request: FastifyRequest, @Param('rideId', ParseUUIDPipe) rideId: string) {
+    // Relanzar es un acto de operador (§5.3); por esta via lo hace una
+    // integracion en su nombre, y la bitacora dira cual.
+    await this.dispatch.redispatch(rideId, actorFrom(request, 'operator'));
     return { ok: true };
   }
 
