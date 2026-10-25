@@ -578,5 +578,11 @@ cópialo directo a las credenciales de n8n.
   números de mentira). Si se quedaran, el monitor no las encontraría en WAHA y
   alertaría de la caída de dos líneas que nunca existieron. Las de verdad las
   escribe el monitor.
+- **Las exportaciones no necesitan volumen.** Los Excel y PDF se guardan en
+  la tabla `report_exports` (migración `0011_exportaciones`) y se borran solos
+  a los siete días. Llevan nombres y teléfonos de clientes, así que viajan con
+  las copias de la base, como el resto de los datos. Las librerías nuevas
+  (`exceljs`, `pdfkit`) están en `pnpm-lock.yaml`: sin él, el
+  `--frozen-lockfile` del Dockerfile rechaza el despliegue.
 - **Borra `apps/api/.env.produccion.local`** de tu máquina cuando los secretos
   estén en Dokploy y en el gestor de contraseñas de la empresa.

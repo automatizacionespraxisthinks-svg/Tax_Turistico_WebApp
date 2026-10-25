@@ -78,6 +78,13 @@
       "when": 1792943037717,
       "tag": "0010_clave_temporal",
       "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "7",
+      "when": 1792944728341,
+      "tag": "0011_exportaciones",
+      "breakpoints": true
     }
   ]
 }

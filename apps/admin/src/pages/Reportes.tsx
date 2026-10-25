@@ -1,11 +1,12 @@
 import { useState } from 'react';
 import { motion } from 'motion/react';
-import { CheckCircle2, Download, FileSpreadsheet, FileText, Loader2 } from 'lucide-react';
-import { formatMoney } from '@tax/shared';
+import { AlertTriangle, CheckCircle2, Download, FileSpreadsheet, FileText, Loader2 } from 'lucide-react';
+import { formatMoney, formatRelative } from '@tax/shared';
 import {
   Button,
   Card,
   CardHeader,
+  EmptyState,
   Segmented,
   Skeleton,
   Stat,
@@ -13,6 +14,13 @@ import {
   staggerList,
   useToast,
 } from '@tax/ui';
+import {
+  descargarExportacion,
+  useExportaciones,
+  useExportar,
+  type Exportacion,
+} from '../api/exportaciones';
+import { ApiError } from '../api/client';
 import { ChartFrame, DataTable, HorizontalBars, Lines, StackedBars } from '../components/charts';
 import {
   useAssignmentTimes,
@@ -29,7 +37,7 @@ const DAYS: Record<Range, number> = { hoy: 1, '7d': 7, '30d': 30 };
 export function Reportes() {
   const [range, setRange] = useState<Range>('7d');
   const rides = useLive((s) => s.rides);
-  const { push } = useToast();
+  const { exportar, generando } = useExportar();
 
   const days = DAYS[range];
   const ridesByHour = useRidesByHour(range === 'hoy' ? 1 : days);
@@ -62,28 +70,21 @@ export function Reportes() {
             { value: '30d', label: '30 días' },
           ]}
         />
+        {/* Del periodo elegido arriba: lo mismo que se está viendo. */}
         <div className="flex gap-2">
           <Button
             icon={<FileSpreadsheet className="size-3.5" />}
-            onClick={() =>
-              push({
-                tone: 'info',
-                title: 'Excel en cola',
-                description: 'Se genera en segundo plano; avisamos al terminar.',
-              })
-            }
+            loading={generando('resumen-xlsx')}
+            title="Todas las carreras del periodo, y las tablas por conductor, zona, día y hora"
+            onClick={() => void exportar({ kind: 'resumen', format: 'xlsx', days })}
           >
             Excel
           </Button>
           <Button
             icon={<FileText className="size-3.5" />}
-            onClick={() =>
-              push({
-                tone: 'info',
-                title: 'PDF en cola',
-                description: 'Se genera en segundo plano; avisamos al terminar.',
-              })
-            }
+            loading={generando('resumen-pdf')}
+            title="Resumen del periodo para imprimir o enviar"
+            onClick={() => void exportar({ kind: 'resumen', format: 'pdf', days })}
           >
             PDF
           </Button>
@@ -228,13 +229,30 @@ export function Reportes() {
   );
 }
 
-/** Las exportaciones pesadas corren en segundo plano y aparecen aquí. */
+const tamano = (bytes: number | null) =>
+  bytes === null ? '' : bytes < 1024 * 1024 ? `${Math.max(1, Math.round(bytes / 1024))} KB` : `${(bytes / 1024 / 1024).toFixed(1)} MB`;
+
+/** Lo que se ha exportado en los últimos siete días, de cualquiera de la oficina. */
 function ExportQueue() {
-  const jobs = [
-    { id: 'j-3', name: 'Carreras · octubre 2026.xlsx', status: 'ready', size: '248 KB', at: 'hace 4 min' },
-    { id: 'j-2', name: 'Tiempos de asignación · semana 42.pdf', status: 'running', size: '—', at: 'en curso' },
-    { id: 'j-1', name: 'Liquidación conductores · semana 41.xlsx', status: 'ready', size: '612 KB', at: 'ayer' },
-  ] as const;
+  const exportaciones = useExportaciones();
+  const { push } = useToast();
+  const [bajando, setBajando] = useState<string | null>(null);
+  const filas = exportaciones.data ?? [];
+
+  const descargar = async (e: Exportacion) => {
+    setBajando(e.id);
+    try {
+      await descargarExportacion(e);
+    } catch (causa) {
+      push({
+        tone: 'critical',
+        title: 'No se pudo descargar',
+        description: causa instanceof ApiError ? causa.message : undefined,
+      });
+    } finally {
+      setBajando(null);
+    }
+  };
 
   return (
     <Card className="space-y-3">
@@ -242,37 +260,61 @@ function ExportQueue() {
         title="Exportaciones"
         subtitle="Se generan en segundo plano para no frenar la operación"
       />
-      <ul className="space-y-1.5">
-        {jobs.map((job) => (
-          <li
-            key={job.id}
-            className="flex items-center gap-3 rounded-md border border-line px-3 py-2.5"
-          >
-            {job.status === 'running' ? (
-              <Loader2 className="size-4 shrink-0 animate-spin text-ink-muted" />
-            ) : (
-              <CheckCircle2 className="size-4 shrink-0 text-[var(--t-positive-ink)]" />
-            )}
-            <div className="min-w-0 flex-1">
-              <p className="truncate text-base text-ink">{job.name}</p>
-              <p className="text-micro text-ink-muted">
-                {job.at} · {job.size}
-              </p>
-            </div>
-            <Button
-              size="sm"
-              variant="ghost"
-              disabled={job.status === 'running'}
-              icon={<Download className="size-3.5" />}
-            >
-              Descargar
-            </Button>
-          </li>
-        ))}
-      </ul>
+
+      {exportaciones.isLoading ? (
+        <Skeleton className="h-24" />
+      ) : filas.length === 0 ? (
+        <EmptyState
+          icon={<FileSpreadsheet className="size-4" />}
+          title="Nada exportado esta semana"
+          description="Los botones Excel y PDF de arriba, y Exportar en Carreras, dejan aquí sus archivos."
+        />
+      ) : (
+        <ul className="space-y-1.5">
+          {filas.map((e) => (
+            <li key={e.id} className="flex items-center gap-3 rounded-md border border-line px-3 py-2.5">
+              {e.status === 'ready' ? (
+                <CheckCircle2 className="size-4 shrink-0 text-[var(--t-positive-ink)]" />
+              ) : e.status === 'failed' ? (
+                <AlertTriangle className="size-4 shrink-0 text-[var(--t-critical-ink)]" />
+              ) : (
+                <Loader2 className="size-4 shrink-0 animate-spin text-ink-muted" />
+              )}
+              <div className="min-w-0 flex-1">
+                <p className="truncate text-base text-ink">
+                  {e.title}
+                  <span className="ml-1.5 font-mono text-micro uppercase text-ink-muted">{e.format}</span>
+                </p>
+                <p
+                  className={
+                    e.status === 'failed' ? 'text-micro text-[var(--t-critical-ink)]' : 'text-micro text-ink-muted'
+                  }
+                >
+                  {e.status === 'failed'
+                    ? `Falló: ${e.error ?? 'sin detalle'}`
+                    : e.status === 'ready'
+                      ? `${formatRelative(e.createdAt)} · ${e.requestedByName} · ${tamano(e.sizeBytes)}`
+                      : `Generando · pedido por ${e.requestedByName}`}
+                </p>
+              </div>
+              <Button
+                size="sm"
+                variant="ghost"
+                disabled={e.status !== 'ready'}
+                loading={bajando === e.id}
+                icon={<Download className="size-3.5" />}
+                onClick={() => void descargar(e)}
+              >
+                Descargar
+              </Button>
+            </li>
+          ))}
+        </ul>
+      )}
+
       <p className="text-micro text-ink-muted">
-        <span className="font-semibold uppercase tracking-[0.07em]">URL firmada</span> · los archivos
-        se sirven desde un volumen privado con enlaces que caducan a los 10 minutos.
+        Se guardan 7 días y luego se borran solas. Llevan nombres y teléfonos de clientes: compártelas
+        solo con quien las necesite.
       </p>
     </Card>
   );

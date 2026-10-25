@@ -35,11 +35,18 @@ const queryClient = new QueryClient({
  */
 function AnimatedRoutes() {
   const location = useLocation();
+  /*
+   * La transición es por sección, no por dirección: `/carreras` y
+   * `/carreras/<id>` son la misma página con una ficha abierta. Con la
+   * dirección entera como clave, abrir una carrera desmontaba la página y el
+   * filtro volvía a «Activas» por debajo de la ficha.
+   */
+  const seccion = `/${location.pathname.split('/')[1] ?? ''}`;
 
   return (
     <AnimatePresence mode="wait" initial={false}>
       <motion.div
-        key={location.pathname}
+        key={seccion}
         variants={routeTransition}
         initial="hidden"
         animate="visible"

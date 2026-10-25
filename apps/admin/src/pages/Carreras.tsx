@@ -1,10 +1,11 @@
-import { useMemo, useState } from 'react';
+import { useMemo } from 'react';
 import type { ReactNode } from 'react';
-import { useNavigate, useParams } from 'react-router';
+import { useLocation, useNavigate, useParams, useSearchParams } from 'react-router';
 import { AnimatePresence, motion } from 'motion/react';
 import { Download, Search, SlidersHorizontal } from 'lucide-react';
 import type { RideStatus } from '@tax/shared';
 import {
+  RIDE_STATUSES,
   RIDE_STATUS_LABEL,
   RIDE_STATUS_TONE,
   formatMoney,
@@ -21,8 +22,8 @@ import {
   StatusPill,
   cn,
   transition,
-  useToast,
 } from '@tax/ui';
+import { useExportar } from '../api/exportaciones';
 import { RideDetail } from '../components/RideDetail';
 import { useLive } from '../live/store';
 
@@ -43,15 +44,40 @@ const FILTERS: { value: Filter; label: string; match: (status: RideStatus) => bo
 export function Carreras() {
   const { rideId } = useParams();
   const navigate = useNavigate();
-  const { push } = useToast();
+  const location = useLocation();
+  const { exportar, generando } = useExportar();
 
   const rides = useLive((s) => s.rides);
   const drivers = useLive((s) => s.drivers);
   const pulseRideId = useLive((s) => s.pulseRideId);
 
-  const [filter, setFilter] = useState<Filter>('activas');
-  const [query, setQuery] = useState('');
-  const [zoneId, setZoneId] = useState('');
+  /*
+   * Los filtros viven en la dirección (`?estado=canceladas&zona=…`), no en
+   * el estado del componente: sobreviven a abrir y cerrar una ficha, a
+   * recargar la página y al botón de atrás. Revisar las canceladas una por
+   * una no puede obligar a volver a elegir «Canceladas» cada vez.
+   */
+  const [params, setParams] = useSearchParams();
+  const estado = params.get('estado');
+  const filter: Filter = FILTERS.some((f) => f.value === estado) ? (estado as Filter) : 'activas';
+  const query = params.get('q') ?? '';
+  const zoneId = params.get('zona') ?? '';
+
+  const cambiarFiltro = (clave: 'estado' | 'q' | 'zona', valor: string, porDefecto = '') => {
+    setParams(
+      (previos) => {
+        const siguientes = new URLSearchParams(previos);
+        if (!valor || valor === porDefecto) siguientes.delete(clave);
+        else siguientes.set(clave, valor);
+        return siguientes;
+      },
+      // Escribir en el buscador no llena el historial de pasos de atrás.
+      { replace: true },
+    );
+  };
+  const setFilter = (valor: Filter) => cambiarFiltro('estado', valor, 'activas');
+  const setQuery = (valor: string) => cambiarFiltro('q', valor);
+  const setZoneId = (valor: string) => cambiarFiltro('zona', valor);
   const zones = useLive((s) => s.zones);
 
   const active = FILTERS.find((f) => f.value === filter) ?? FILTERS[0]!;
@@ -115,13 +141,21 @@ export function Carreras() {
           ))}
         </select>
 
+        {/* Lo que se está viendo: el mismo estado, zona y búsqueda, de los
+            últimos 30 días. La lista de arriba solo trae las 300 más recientes. */}
         <Button
           icon={<Download className="size-3.5" />}
+          loading={generando('carreras-xlsx')}
+          title="Excel con las carreras de los últimos 30 días que cumplen estos filtros"
           onClick={() =>
-            push({
-              tone: 'info',
-              title: 'Exportación en cola',
-              description: 'El archivo se genera en segundo plano y aparece en Reportes.',
+            void exportar({
+              kind: 'carreras',
+              format: 'xlsx',
+              days: 30,
+              statuses: filter === 'todas' ? undefined : RIDE_STATUSES.filter((s) => active.match(s)),
+              zoneId: zoneId || undefined,
+              query: query.trim() || undefined,
+              filterLabel: filter === 'todas' ? undefined : active.label,
             })
           }
         >
@@ -155,7 +189,9 @@ export function Carreras() {
                       animate={{ opacity: 1 }}
                       exit={{ opacity: 0 }}
                       transition={transition.fast}
-                      onClick={() => navigate(`/carreras/${ride.id}`)}
+                      onClick={() =>
+                        navigate({ pathname: `/carreras/${ride.id}`, search: location.search })
+                      }
                       className={cn(
                         'cursor-pointer border-b border-line last:border-0',
                         'transition-colors duration-150 ease-[var(--ease-standard)] hover:bg-surface-sunk',
@@ -192,11 +228,7 @@ export function Carreras() {
             description="Prueba con otro estado, otra zona o limpia la búsqueda."
             action={
               <Button
-                onClick={() => {
-                  setQuery('');
-                  setZoneId('');
-                  setFilter('todas');
-                }}
+                onClick={() => setParams({ estado: 'todas' }, { replace: true })}
               >
                 Limpiar filtros
               </Button>
@@ -211,7 +243,7 @@ export function Carreras() {
 
       <Sheet
         open={selected !== null}
-        onClose={() => navigate('/carreras')}
+        onClose={() => navigate({ pathname: '/carreras', search: location.search })}
         title={selected?.code ?? ''}
         subtitle={
           selected ? `${selected.customerName} · creada ${formatRelative(selected.createdAt)}` : undefined

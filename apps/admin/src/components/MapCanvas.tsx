@@ -8,6 +8,7 @@ import {
 } from 'maplibre-gl';
 import { Protocol } from 'pmtiles';
 import type { FeatureCollection } from 'geojson';
+import { User } from 'lucide-react';
 import type { Driver, Ride } from '@tax/shared';
 import { DRIVER_STATUS_LABEL, RIDE_STATUS_LABEL, RIDE_STATUS_TONE } from '@tax/shared';
 import { cn } from '@tax/ui';
@@ -45,6 +46,38 @@ function registerPmtiles(): void {
 /** Color de un tono del sistema de diseño, resuelto para MapLibre. */
 function toneColor(tone: string): string {
   return token(`--t-${tone}-solid`, '#888888');
+}
+
+/*
+ * El icono de las carreras: una persona, como el de «Flota» en el menú pero
+ * de una sola. Es el cliente que espera la recogida, y así no se confunde con
+ * los puntos de los conductores.
+ *
+ * Las capas de MapLibre no leen SVG: se dibuja en un lienzo y se registra como
+ * imagen. Va en blanco y a doble resolución; el color lo pone el círculo de
+ * debajo, que es el del estado de la carrera.
+ */
+const ICONO_PERSONA = 'persona';
+const ICONO_PIXEL_RATIO = 2;
+
+function iconoPersona(): ImageData {
+  const lado = 20 * ICONO_PIXEL_RATIO;
+  const canvas = document.createElement('canvas');
+  canvas.width = lado;
+  canvas.height = lado;
+  const ctx = canvas.getContext('2d')!;
+
+  // La figura de lucide «user» en su caja de 24, rellena y al 60 % del lado.
+  const escala = (lado * 0.6) / 24;
+  ctx.translate((lado - 24 * escala) / 2, (lado - 24 * escala) / 2);
+  ctx.scale(escala, escala);
+  ctx.fillStyle = '#ffffff';
+  ctx.beginPath();
+  ctx.arc(12, 7, 4.5, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.fill(new Path2D('M3.5 21.5v-1.5a5.5 5.5 0 0 1 5.5-5.5h6a5.5 5.5 0 0 1 5.5 5.5v1.5z'));
+
+  return ctx.getImageData(0, 0, lado, lado);
 }
 
 const DRIVER_TONE: Record<Driver['status'], string> = {
@@ -217,6 +250,11 @@ export function MapCanvas({ rides, selectedRideId, onSelectRide, className }: Ma
         }
       }
 
+      // Las imágenes se pierden con el estilo, igual que las capas.
+      if (!instance.hasImage(ICONO_PERSONA)) {
+        instance.addImage(ICONO_PERSONA, iconoPersona(), { pixelRatio: ICONO_PIXEL_RATIO });
+      }
+
       instance.addLayer({
         id: 'zonas-relleno',
         type: 'fill',
@@ -279,17 +317,31 @@ export function MapCanvas({ rides, selectedRideId, onSelectRide, className }: Ma
         type: 'circle',
         source: 'pines',
         filter: ['get', 'esperando'],
-        paint: { 'circle-radius': 16, 'circle-color': ['get', 'color'], 'circle-opacity': 0.14 },
+        paint: { 'circle-radius': 20, 'circle-color': ['get', 'color'], 'circle-opacity': 0.14 },
       });
+      // El círculo lleva el color del estado y recibe los clics; la persona
+      // va encima, en blanco.
       instance.addLayer({
         id: 'pines',
         type: 'circle',
         source: 'pines',
         paint: {
-          'circle-radius': ['case', ['get', 'seleccionada'], 9, 6],
+          'circle-radius': ['case', ['get', 'seleccionada'], 13, 10],
           'circle-color': ['get', 'color'],
           'circle-stroke-color': colors.surface,
           'circle-stroke-width': ['case', ['get', 'seleccionada'], 3, 2],
+        },
+      });
+      instance.addLayer({
+        id: 'pines-persona',
+        type: 'symbol',
+        source: 'pines',
+        layout: {
+          'icon-image': ICONO_PERSONA,
+          'icon-size': ['case', ['get', 'seleccionada'], 1.3, 1],
+          // Un cliente esperando no se esconde porque haya otro cerca.
+          'icon-allow-overlap': true,
+          'icon-ignore-placement': true,
         },
       });
 
@@ -576,6 +628,12 @@ function Legend() {
           {item.label}
         </span>
       ))}
+      <span className="flex items-center gap-1.5 border-l border-line pl-3 text-micro text-ink-secondary">
+        <span className="flex size-3.5 items-center justify-center rounded-full bg-ink-secondary">
+          <User className="size-2.5 text-surface" strokeWidth={3} />
+        </span>
+        Cliente por recoger
+      </span>
     </div>
   );
 }

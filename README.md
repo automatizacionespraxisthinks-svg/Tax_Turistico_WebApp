@@ -131,6 +131,12 @@ El panel no inventa acciones: cada botón sale de la tabla de transiciones.
   revisión siguiente, porque un reinicio de WAHA pasa por ahí en segundos y
   alertaría de una caída y una vuelta cada vez. La lógica está aparte, en
   `waha-monitor.ts`, con sus pruebas.
+- **Exportaciones a Excel y PDF**: las genera una cola en segundo plano
+  (`exportaciones`), se guardan en la base siete días y el panel las descarga
+  solas al terminar. El Excel del periodo trae todas las carreras y las tablas
+  por conductor, zona, día y hora; el PDF es el resumen para imprimir; desde
+  *Carreras* se exporta lo que se está viendo, con sus filtros. Horas y fechas
+  en hora de Paipa. Prueba: `src/test/e2e-exportaciones.ts`.
 - **Alta de operadores desde el panel**, hasta cinco activos: contraseña
   temporal de 72 horas que se muestra una vez, y al entrar, primero el cambio
   de contraseña y después el segundo factor, los dos impuestos por el servidor.
@@ -171,8 +177,7 @@ Pendiente de las siguientes fases, en orden:
 1. **Cola sin conexión**: ya funciona sobre `localStorage`; pasa a IndexedDB
    el día que haya que encolar fotos y no solo comandos.
 2. **Chatwoot** tras la capa anticorrupción (de WAHA ya se vigilan las
-   líneas y se trae el QR), y las exportaciones a Excel y PDF en segundo
-   plano.
+   líneas y se trae el QR).
 3. **Retención de las demás tablas de §9.3**: fotos del lugar, conversaciones
    de Chatwoot y el archivado a cinco años. El histórico de GPS ya se purga
    solo, de madrugada y por lotes.

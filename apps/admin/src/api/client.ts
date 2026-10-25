@@ -89,9 +89,39 @@ async function request<T>(path: string, options: RequestOptions = {}): Promise<T
   return payload as T;
 }
 
+/**
+ * Descarga un archivo de la API y se lo entrega al navegador.
+ *
+ * No basta con un enlace: la sesión va en una cookie de la API, que está en
+ * otro dominio, y un `<a href>` a ella no puede decir qué hacer si la sesión
+ * caducó. Con `fetch` se comprueba la respuesta y el error se ve en el panel.
+ */
+async function download(path: string, fileName: string): Promise<void> {
+  const response = await fetch(`${API_BASE}${path}`, { credentials: 'include' });
+  if (!response.ok) {
+    const problem = (await response.json().catch(() => null)) as Partial<ProblemDocument> | null;
+    throw new ApiError({
+      type: problem?.type ?? 'about:blank',
+      title: problem?.title ?? response.statusText,
+      status: response.status,
+      code: problem?.code ?? 'INTERNAL',
+      detail: problem?.detail,
+    });
+  }
+
+  const url = URL.createObjectURL(await response.blob());
+  const enlace = document.createElement('a');
+  enlace.href = url;
+  enlace.download = fileName;
+  enlace.click();
+  // Un instante de margen: algunos navegadores leen el blob después del clic.
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
 export const api = {
   get: <T>(path: string, signal?: AbortSignal) => request<T>(path, { signal }),
   post: <T>(path: string, body?: unknown) => request<T>(path, { method: 'POST', body }),
   patch: <T>(path: string, body?: unknown) => request<T>(path, { method: 'PATCH', body }),
   del: <T>(path: string) => request<T>(path, { method: 'DELETE' }),
+  download,
 };
