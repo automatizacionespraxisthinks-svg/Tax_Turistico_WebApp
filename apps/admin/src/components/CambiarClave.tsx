@@ -23,7 +23,7 @@ import { useSesion } from '../api/queries';
  * escribiría algo que a sus ojos vale y recibiría un error sin entender nada.
  */
 
-function Medidor({ fuerza }: { fuerza: number }) {
+export function Medidor({ fuerza }: { fuerza: number }) {
   // Cuatro tramos y no un porcentaje: un número exacto invita a pelearse con
   // el medidor en vez de a escribir algo más largo.
   const tonos = [

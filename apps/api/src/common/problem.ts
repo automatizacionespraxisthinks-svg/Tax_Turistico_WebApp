@@ -39,6 +39,17 @@ export const ERROR_CODES = {
   TOTP_INVALID: 'Código del segundo factor incorrecto o ya usado',
   TOTP_SETUP_REQUIRED: 'Hay que activar el segundo factor antes de usar el panel',
 
+  /*
+   * Contraseña temporal (§8.1): la que genera otra persona al crear o
+   * reiniciar una cuenta. El panel ramifica por estos dos: uno lleva al
+   * cambio obligatorio, el otro dice que hay que pedir otra.
+   */
+  PASSWORD_CHANGE_REQUIRED: 'Hay que cambiar la contraseña temporal antes de usar el panel',
+  TEMP_PASSWORD_EXPIRED: 'La contraseña temporal caducó',
+
+  LOGIN_TAKEN: 'Ya existe una cuenta con ese usuario',
+  OPERATOR_LIMIT_REACHED: 'Se alcanzó el máximo de operadores activos',
+
   INVALID_TRANSITION: 'La máquina de estados no permite ese cambio',
   RIDE_ALREADY_TAKEN: 'Otro conductor aceptó la carrera primero',
   OFFER_NOT_VALID: 'La oferta venció o fue revocada',
@@ -66,6 +77,12 @@ const STATUS_BY_CODE: Record<ErrorCode, HttpStatus> = {
   TOTP_REQUIRED: HttpStatus.UNAUTHORIZED,
   TOTP_INVALID: HttpStatus.UNAUTHORIZED,
   TOTP_SETUP_REQUIRED: HttpStatus.FORBIDDEN,
+
+  PASSWORD_CHANGE_REQUIRED: HttpStatus.FORBIDDEN,
+  TEMP_PASSWORD_EXPIRED: HttpStatus.UNAUTHORIZED,
+
+  LOGIN_TAKEN: HttpStatus.CONFLICT,
+  OPERATOR_LIMIT_REACHED: HttpStatus.CONFLICT,
 
   INVALID_TRANSITION: HttpStatus.CONFLICT,
   RIDE_ALREADY_TAKEN: HttpStatus.CONFLICT,

@@ -71,6 +71,13 @@
       "when": 1792939496260,
       "tag": "0009_monitor_de_lineas",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1792943037717,
+      "tag": "0010_clave_temporal",
+      "breakpoints": true
     }
   ]
 }

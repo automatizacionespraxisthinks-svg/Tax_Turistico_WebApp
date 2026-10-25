@@ -4,15 +4,19 @@ import { Pool } from 'pg';
 import { drizzle } from 'drizzle-orm/node-postgres';
 import { eq } from 'drizzle-orm';
 import { uuidv7 } from 'uuidv7';
+import { TEMP_PASSWORD_HOURS, isValidLogin, normalizeLogin } from '@tax/shared';
 import { users } from '../db/schema';
 import { hashSecret } from '../common/crypto';
 
 /**
  * Crea un usuario de la oficina (§8.1).
  *
- * Existe para no tener que sembrar el de ejemplo en producción. La
- * contraseña se genera aquí y se imprime una sola vez: en la base queda solo
- * el hash Argon2.
+ * Existe para no tener que sembrar el de ejemplo en producción, y es la
+ * única forma de crear administradores: el panel solo da de alta operadores.
+ * La contraseña se genera aquí, se imprime una sola vez y es temporal: caduca
+ * a las 72 horas y al entrar hay que cambiarla.
+ *
+ * El usuario puede ser un correo o un nombre de usuario (`marcela.ruiz`).
  *
  * El segundo factor NO se activa aquí. Lo da de alta la propia persona al
  * entrar al panel por primera vez, escaneando el QR con su teléfono, y hasta
@@ -26,7 +30,7 @@ async function main(): Promise<void> {
   const [email, name, role = 'operador'] = process.argv.slice(2);
 
   if (!email || !name) {
-    console.error('Uso: crear-usuario.js <correo> "<nombre>" [administrador|operador]');
+    console.error('Uso: crear-usuario.js <correo-o-usuario> "<nombre>" [administrador|operador]');
     process.exitCode = 1;
     return;
   }
@@ -43,10 +47,15 @@ async function main(): Promise<void> {
   const db = drizzle(pool);
 
   try {
-    const correo = email.trim().toLowerCase();
+    const correo = normalizeLogin(email);
+    if (!isValidLogin(correo)) {
+      console.error(`«${correo}» no es un correo ni un nombre de usuario válido.`);
+      process.exitCode = 1;
+      return;
+    }
     const [existe] = await db.select({ id: users.id }).from(users).where(eq(users.email, correo)).limit(1);
     if (existe) {
-      console.error(`Ya existe un usuario con el correo ${correo}.`);
+      console.error(`Ya existe un usuario ${correo}.`);
       process.exitCode = 1;
       return;
     }
@@ -60,11 +69,12 @@ async function main(): Promise<void> {
       name,
       passwordHash: await hashSecret(password),
       role,
+      tempPasswordExpiresAt: new Date(Date.now() + TEMP_PASSWORD_HOURS * 3600_000),
     });
 
     console.log(`\nUsuario creado: ${name} <${correo}> · ${role}`);
-    console.log(`Contraseña (no se vuelve a mostrar):\n\n  ${password}\n`);
-    console.log('Al entrar al panel le pedirá activar el segundo factor antes de nada.');
+    console.log(`Contraseña temporal (no se vuelve a mostrar, caduca en ${TEMP_PASSWORD_HOURS} h):\n\n  ${password}\n`);
+    console.log('Al entrar al panel le pedirá cambiarla y después activar el segundo factor.');
   } finally {
     await pool.end();
   }

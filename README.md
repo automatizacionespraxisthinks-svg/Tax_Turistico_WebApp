@@ -131,6 +131,10 @@ El panel no inventa acciones: cada botón sale de la tabla de transiciones.
   revisión siguiente, porque un reinicio de WAHA pasa por ahí en segundos y
   alertaría de una caída y una vuelta cada vez. La lógica está aparte, en
   `waha-monitor.ts`, con sus pruebas.
+- **Alta de operadores desde el panel**, hasta cinco activos: contraseña
+  temporal de 72 horas que se muestra una vez, y al entrar, primero el cambio
+  de contraseña y después el segundo factor, los dos impuestos por el servidor.
+  Los administradores siguen creándose solo desde el terminal.
 - **Página de estado sin textos fijos**: PostgreSQL, Redis, los webhooks de
   n8n, WAHA y la clave de API se comprueban en cada consulta, y la memoria
   se compara con el límite real del contenedor.

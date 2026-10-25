@@ -79,6 +79,12 @@ const envSchema = z.object({
   /** La clave que WAHA exige en `X-Api-Key`, si tiene una configurada. */
   WAHA_API_KEY: z.string().min(8).optional(),
 
+  /**
+   * Cuántos operadores activos puede haber a la vez. Los administradores no
+   * cuentan: se crean desde el terminal del servidor, no desde el panel.
+   */
+  MAX_OPERADORES: z.coerce.number().int().min(1).max(50).default(5),
+
   /** Orígenes autorizados del panel y de la PWA. */
   PUBLIC_ORIGINS: z
     .string()

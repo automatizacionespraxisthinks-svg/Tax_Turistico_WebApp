@@ -116,7 +116,7 @@ async function main(): Promise<void> {
     const lista = await admin.call('/v1/admin/users');
     assert(lista.status < 400, 'lista los usuarios');
 
-    const usuarios = lista.body as { id: string; email: string; totpEnabled: boolean }[];
+    const usuarios = (lista.body as { users: { id: string; email: string; totpEnabled: boolean }[] }).users;
     const objetivo = usuarios.find((u) => u.email === OPERADOR);
     assert(Boolean(objetivo), 'el operador aparece en la lista');
     assert(objetivo!.totpEnabled === true, 'y se ve que tiene segundo factor activo');

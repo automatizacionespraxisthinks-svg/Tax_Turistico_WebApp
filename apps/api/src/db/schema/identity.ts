@@ -17,9 +17,21 @@ export const users = pgTable(
   'users',
   {
     id: uuid('id').primaryKey(),
+    /**
+     * El usuario de acceso: un correo o un nombre de usuario (`marcela.ruiz`),
+     * siempre en minúsculas. Se llama `email` por historia; las reglas están
+     * en `@tax/shared` (`isValidLogin`).
+     */
     email: text('email').notNull(),
     name: text('name').notNull(),
     passwordHash: text('password_hash').notNull(),
+    /**
+     * Si no es nulo, la contraseña actual la generó otra persona —al crear la
+     * cuenta o al reiniciarla— y caduca en ese momento. Hasta cambiarla, la
+     * sesión solo sirve para eso: quien la generó la ha visto, y una
+     * contraseña que conocen dos no identifica a nadie.
+     */
+    tempPasswordExpiresAt: timestamp('temp_password_expires_at', { withTimezone: true }),
     role: userRole('role').notNull().default('operador'),
     /** Secreto TOTP cifrado; el 2FA es obligatorio para la oficina. */
     totpSecretEncrypted: text('totp_secret_encrypted'),

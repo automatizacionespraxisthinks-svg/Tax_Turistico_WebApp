@@ -16,7 +16,7 @@ import {
 } from '../../common/crypto';
 import { base32Decode, generateTotpSecret, otpauthUri, verifyTotp } from '../../common/totp';
 import { loadEnv } from '../../config/env';
-import { evaluatePassword } from '@tax/shared';
+import { evaluatePassword, normalizeLogin } from '@tax/shared';
 import { AuditService } from '../audit/audit.service';
 
 export interface ApiPrincipal {
@@ -35,6 +35,11 @@ export interface UserPrincipal {
   role: 'administrador' | 'operador';
   /** Si no, la sesión solo sirve para darlo de alta (§8.1). */
   totpEnabled: boolean;
+  /**
+   * Entró con una contraseña que generó otra persona. Hasta cambiarla, la
+   * sesión solo sirve para eso (`AllowWithTemporaryPassword`).
+   */
+  mustChangePassword: boolean;
 }
 
 export interface DriverPrincipal {
@@ -337,7 +342,7 @@ export class IdentityService {
     const [user] = await this.db
       .select()
       .from(users)
-      .where(and(eq(users.email, email.toLowerCase()), eq(users.active, true)))
+      .where(and(eq(users.email, normalizeLogin(email)), eq(users.active, true)))
       .limit(1);
 
     const invalid = new AppError('UNAUTHORIZED', 'Correo o contraseña incorrectos');
@@ -357,6 +362,15 @@ export class IdentityService {
         })
         .where(eq(users.id, user.id));
       throw invalid;
+    }
+
+    // Después de comprobarla, no antes: decir «caducó» a quien no la sabe
+    // revelaría que la cuenta existe y que tiene una temporal pendiente.
+    if (user.tempPasswordExpiresAt && user.tempPasswordExpiresAt <= new Date()) {
+      throw new AppError(
+        'TEMP_PASSWORD_EXPIRED',
+        'La contraseña temporal caducó: pide otra a un administrador',
+      );
     }
 
     /*
@@ -440,6 +454,7 @@ export class IdentityService {
         email: user.email,
         role: user.role,
         totpEnabled: user.totpEnabled,
+        mustChangePassword: user.tempPasswordExpiresAt !== null,
       },
       token,
       expiresAt,
@@ -455,6 +470,7 @@ export class IdentityService {
         role: users.role,
         active: users.active,
         totpEnabled: users.totpEnabled,
+        tempPasswordExpiresAt: users.tempPasswordExpiresAt,
         expiresAt: sessions.expiresAt,
         revokedAt: sessions.revokedAt,
       })
@@ -471,6 +487,7 @@ export class IdentityService {
       email: row.email,
       role: row.role,
       totpEnabled: row.totpEnabled,
+      mustChangePassword: row.tempPasswordExpiresAt !== null,
     };
   }
 
@@ -641,7 +658,8 @@ export class IdentityService {
     await this.db.transaction(async (tx) => {
       await tx
         .update(users)
-        .set({ passwordHash: hashNuevo, failedAttempts: 0, lockedUntil: null })
+        // Elegida por su dueño: deja de ser temporal.
+        .set({ passwordHash: hashNuevo, failedAttempts: 0, lockedUntil: null, tempPasswordExpiresAt: null })
         .where(eq(users.id, userId));
 
       await tx
@@ -660,7 +678,9 @@ export class IdentityService {
           actorId: user.id,
           actorName: user.name,
           role: user.role,
-          action: 'Cambió su propia contraseña',
+          action: user.tempPasswordExpiresAt
+            ? 'Cambió su contraseña temporal por una propia'
+            : 'Cambió su propia contraseña',
           entity: 'users',
           entityId: user.email,
           ip,

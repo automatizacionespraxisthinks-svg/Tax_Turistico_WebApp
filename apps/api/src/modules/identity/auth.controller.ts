@@ -1,10 +1,11 @@
 import { Body, Controller, Get, HttpCode, Post, Req, Res, UseGuards } from '@nestjs/common';
 import type { FastifyReply, FastifyRequest } from 'fastify';
 import { z } from 'zod';
+import { isValidLogin, normalizeLogin } from '@tax/shared';
 import { zodBody } from '../../common/zod.pipe';
 import { loadEnv } from '../../config/env';
 import { IdentityService } from './identity.service';
-import { AllowWithoutTotp, SESSION_COOKIE, SessionGuard } from './guards';
+import { AllowWithTemporaryPassword, AllowWithoutTotp, SESSION_COOKIE, SessionGuard } from './guards';
 
 const driverLoginSchema = z.object({
   code: z.string().min(1),
@@ -20,7 +21,11 @@ const driverLoginSchema = z.object({
 });
 
 const userLoginSchema = z.object({
-  email: z.string().email(),
+  /** El usuario de acceso: un correo o un nombre de usuario. */
+  email: z
+    .string()
+    .transform(normalizeLogin)
+    .refine(isValidLogin, 'Usuario o correo no válido'),
   password: z.string().min(8),
   /**
    * El código del segundo factor. Un solo campo para los seis dígitos del
@@ -91,6 +96,7 @@ export class AuthController {
   @Get('me')
   @UseGuards(SessionGuard)
   @AllowWithoutTotp()
+  @AllowWithTemporaryPassword()
   async me(@Req() request: FastifyRequest) {
     const user = request.user!;
     return {
@@ -111,6 +117,10 @@ export class AuthController {
    */
   @Post('password')
   @UseGuards(SessionGuard)
+  // Es justo lo que tiene que hacer quien entra con una temporal, y antes de
+  // tener segundo factor: ese orden lo impone el guardia.
+  @AllowWithoutTotp()
+  @AllowWithTemporaryPassword()
   @HttpCode(204)
   async changePassword(
     @Req() request: FastifyRequest,

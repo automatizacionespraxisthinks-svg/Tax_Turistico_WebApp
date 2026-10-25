@@ -237,6 +237,9 @@ WAHA_API_KEY=...
 
 PUBLIC_ORIGINS=https://panel.TUDOMINIO,https://conductor.TUDOMINIO
 
+# Operadores activos a la vez; los administradores no cuentan.
+MAX_OPERADORES=5
+
 POSITION_MAX_AGE_SECONDS=60
 ARRIVAL_RADIUS_METERS=150
 OUTBOX_MAX_ATTEMPTS=10
@@ -417,12 +420,39 @@ reglas tarifarias vigentes. Es idempotente: repetirlo no duplica nada.
 node dist/cli/crear-usuario.js ana@TUDOMINIO "Ana Gómez" administrador
 ```
 
-Imprime una contraseña aleatoria **una sola vez**; en la base queda solo el
-hash Argon2. El tercer argumento es `administrador` u `operador`.
+El primero tiene que ser un administrador, y **los administradores solo se
+crean así**, desde el terminal. El usuario puede ser un correo o un nombre de
+usuario corto (`ana.gomez`); el tercer argumento es `administrador` u
+`operador`.
+
+Imprime una contraseña **temporal** una sola vez: caduca a las 72 horas y, al
+entrar con ella, el panel obliga a cambiarla antes de nada. En la base solo
+queda el hash Argon2.
 
 El segundo factor no se activa aquí a propósito: lo da de alta la propia
-persona al entrar, escaneando el QR con su teléfono. Así el secreto TOTP nunca
-pasa por las manos de quien crea la cuenta.
+persona al entrar, justo después de cambiar la contraseña, escaneando el QR
+con su teléfono. Así el secreto TOTP nunca pasa por las manos de quien crea la
+cuenta.
+
+### 4.2.0 Los operadores, desde el panel
+
+Con el administrador dentro, los operadores se crean en *Sistema › Usuarios ›
+Nuevo operador*: nombre y usuario (correo o nombre corto). El panel enseña la
+contraseña temporal una sola vez, con un botón que copia un mensaje listo para
+mandárselo por WhatsApp: la dirección del panel, el usuario, la contraseña y
+cuándo caduca.
+
+Al entrar, el operador pasa por dos pantallas antes del panel: elegir su
+contraseña y activar el segundo factor. No son avisos de la interfaz: hasta
+cambiar la temporal, el servidor responde `PASSWORD_CHANGE_REQUIRED` a todo
+salvo al propio cambio; y hasta activar el segundo factor, `TOTP_SETUP_REQUIRED`.
+El orden importa: quien creó la cuenta conoce la temporal, y si el segundo
+factor fuera primero podría adelantarse y dar de alta su propio teléfono.
+
+Caben **cinco operadores activos** (`MAX_OPERADORES`). Para dar de alta a otro
+con el cupo lleno, se desactiva a quien ya no esté en la oficina: deja de poder
+entrar en el acto y sus sesiones se cierran, pero no se borra, porque su
+nombre sigue en la bitácora y en las carreras que despachó.
 
 ### 4.2.1 Si pierdes la contraseña
 
@@ -441,9 +471,10 @@ El correo no es secreto; la contraseña no aparece por ninguna parte.
 node dist/cli/usuarios.js ana@TUDOMINIO
 ```
 
-Genera una contraseña nueva y la imprime una vez. **Conserva el segundo
-factor**, así que seguirás necesitando el código de tu aplicación o uno de tus
-códigos de respaldo.
+Genera una contraseña temporal y la imprime una vez: al entrar habrá que
+cambiarla. **Conserva el segundo factor**, así que seguirás necesitando el
+código de tu aplicación o uno de tus códigos de respaldo. Lo mismo hace
+*Reiniciar contraseña* en *Sistema › Usuarios*.
 
 Si además perdiste el teléfono y los códigos de respaldo:
 

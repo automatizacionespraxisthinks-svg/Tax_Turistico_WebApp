@@ -4,6 +4,7 @@ import { Module } from '@nestjs/common';
 import { NestFactory } from '@nestjs/core';
 import { Inject, Injectable } from '@nestjs/common';
 import { desc, eq } from 'drizzle-orm';
+import { TEMP_PASSWORD_HOURS } from '@tax/shared';
 import { DB, DbModule, type Database } from '../db/db.module';
 import { users, userRecoveryCodes } from '../db/schema';
 import { hashSecret } from '../common/crypto';
@@ -100,6 +101,8 @@ class UsuariosCli {
           // intentos fallidos, lo más probable es que la hubiera olvidado.
           failedAttempts: 0,
           lockedUntil: null,
+          // Temporal: quien ejecuta el comando la ha visto.
+          tempPasswordExpiresAt: new Date(Date.now() + TEMP_PASSWORD_HOURS * 3600_000),
           ...(tambienSegundoFactor
             ? { totpEnabled: false, totpSecretEncrypted: null, totpLastCounter: null }
             : {}),
@@ -127,7 +130,8 @@ class UsuariosCli {
     });
 
     console.log(`\nContraseña nueva para ${usuario.name} <${email}> · ${usuario.role}`);
-    console.log(`No se vuelve a mostrar:\n\n  ${password}\n`);
+    console.log(`Es temporal: no se vuelve a mostrar y caduca en ${TEMP_PASSWORD_HOURS} h.\n\n  ${password}\n`);
+    console.log('Al entrar tendrá que cambiarla por una suya.');
 
     if (tambienSegundoFactor) {
       console.log('Su segundo factor quedó desactivado: al entrar tendrá que darlo de alta');

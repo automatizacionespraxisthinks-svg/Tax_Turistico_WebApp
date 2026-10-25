@@ -1,17 +1,23 @@
 import { useEffect, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
 import { motion } from 'motion/react';
-import { Check, Copy, Download, KeyRound, ShieldCheck, Smartphone } from 'lucide-react';
+import { Check, Copy, Download, KeyRound, LockKeyhole, ShieldCheck, Smartphone } from 'lucide-react';
 import QRCode from 'qrcode';
-import { Button, Field, Input, transition } from '@tax/ui';
+import { PASSWORD_MIN_LENGTH, evaluatePassword } from '@tax/shared';
+import { Banner, Button, Field, Input, transition } from '@tax/ui';
 import { ApiError, api } from '../api/client';
+import { Medidor } from '../components/CambiarClave';
 
 interface User {
   id: string;
   name: string;
+  /** El usuario de acceso: un correo o un nombre de usuario. */
+  email: string;
   role: 'administrador' | 'operador';
   /** Si no, la sesión solo sirve para darlo de alta (§8.1). */
   totpEnabled: boolean;
+  /** Entró con una contraseña temporal: primero tiene que cambiarla. */
+  mustChangePassword: boolean;
 }
 
 /**
@@ -21,13 +27,21 @@ interface User {
  * el navegador la tiene pero JavaScript no puede leerla. Un 401 significa
  * «muestra el acceso», y es la única señal fiable.
  *
- * Hay un tercer estado entre «sin sesión» y «dentro»: con sesión pero sin
- * segundo factor. El servidor responde `TOTP_SETUP_REQUIRED` a todo lo demás,
- * así que no es una recomendación de la interfaz sino una puerta cerrada.
+ * Entre «sin sesión» y «dentro» hay dos estados más, en este orden: con una
+ * contraseña temporal que hay que cambiar, y sin segundo factor. El servidor
+ * responde `PASSWORD_CHANGE_REQUIRED` y `TOTP_SETUP_REQUIRED` a todo lo demás,
+ * así que no son recomendaciones de la interfaz sino puertas cerradas.
  */
 export function AuthGate({ children }: { children: (user: User) => ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
   const [checking, setChecking] = useState(true);
+  /*
+   * La temporal que acaba de escribir, para no pedírsela otra vez dos
+   * segundos después. Solo vive en memoria: si recarga la página, se le pide.
+   */
+  const [claveTemporal, setClaveTemporal] = useState<string>();
+  // Si viene de cambiar la temporal, el alta del 2FA es el paso 2 de 2.
+  const [vieneDeCambiarla, setVieneDeCambiarla] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -57,10 +71,39 @@ export function AuthGate({ children }: { children: (user: User) => ReactNode }) 
     );
   }
 
-  if (!user) return <LoginScreen onSuccess={setUser} />;
+  if (!user) {
+    return (
+      <LoginScreen
+        onSuccess={(entrado, password) => {
+          if (entrado.mustChangePassword) setClaveTemporal(password);
+          setUser(entrado);
+        }}
+      />
+    );
+  }
+
+  if (user.mustChangePassword) {
+    return (
+      <CambioObligatorio
+        user={user}
+        claveTemporal={claveTemporal}
+        conSegundoFactorPendiente={!user.totpEnabled}
+        onDone={() => {
+          setClaveTemporal(undefined);
+          setVieneDeCambiarla(true);
+          setUser({ ...user, mustChangePassword: false });
+        }}
+      />
+    );
+  }
 
   if (!user.totpEnabled) {
-    return <TotpEnrollment onDone={() => setUser({ ...user, totpEnabled: true })} />;
+    return (
+      <TotpEnrollment
+        paso={vieneDeCambiarla ? 'Paso 2 de 2' : undefined}
+        onDone={() => setUser({ ...user, totpEnabled: true })}
+      />
+    );
   }
 
   return <>{children(user)}</>;
@@ -104,8 +147,10 @@ function Logo() {
 
 /* ----------------------------------------------------------- el acceso --- */
 
-function LoginScreen({ onSuccess }: { onSuccess: (user: User) => void }) {
-  const [email, setEmail] = useState('operadora@taxturistico.local');
+function LoginScreen({ onSuccess }: { onSuccess: (user: User, password: string) => void }) {
+  // El de ejemplo solo en desarrollo: en producción, un correo inventado en
+  // la casilla confunde a quien entra por primera vez.
+  const [email, setEmail] = useState(import.meta.env.DEV ? 'operadora@taxturistico.local' : '');
   const [password, setPassword] = useState('');
   const [totp, setTotp] = useState('');
   // El código no se pide de entrada: hasta que la contraseña no es correcta,
@@ -129,7 +174,7 @@ function LoginScreen({ onSuccess }: { onSuccess: (user: User) => void }) {
         password,
         totp: totp.trim() || undefined,
       });
-      onSuccess(response.user);
+      onSuccess(response.user, password);
     } catch (cause) {
       const code = cause instanceof ApiError ? cause.code : undefined;
 
@@ -146,12 +191,17 @@ function LoginScreen({ onSuccess }: { onSuccess: (user: User) => void }) {
         return;
       }
 
+      if (code === 'TEMP_PASSWORD_EXPIRED') {
+        setError('Tu contraseña temporal caducó. Pide otra a un administrador de la oficina.');
+        return;
+      }
+
       // El mensaje no distingue si el correo existe: enumerar usuarios es el
       // primer paso de cualquier ataque por fuerza bruta (§8.2).
       setError(
         code === 'NETWORK'
           ? 'No hay conexión con el servidor.'
-          : 'Correo o contraseña incorrectos.',
+          : 'Usuario o contraseña incorrectos.',
       );
     } finally {
       setSubmitting(false);
@@ -167,10 +217,12 @@ function LoginScreen({ onSuccess }: { onSuccess: (user: User) => void }) {
       </div>
 
       <div className="space-y-4">
-        <Field label="Correo" htmlFor="email" required>
+        <Field label="Usuario o correo" htmlFor="email" required>
           <Input
             id="email"
-            type="email"
+            type="text"
+            autoCapitalize="none"
+            spellCheck={false}
             autoComplete="username"
             disabled={needsCode}
             value={email}
@@ -238,6 +290,149 @@ function LoginScreen({ onSuccess }: { onSuccess: (user: User) => void }) {
   );
 }
 
+/* --------------------------------------------- la contraseña temporal --- */
+
+/**
+ * Cambio obligatorio de una contraseña temporal, antes de nada más.
+ *
+ * La temporal la generó otra persona y la ha visto; puede haber viajado por
+ * WhatsApp. Hasta cambiarla, el servidor no deja hacer otra cosa, ni siquiera
+ * el alta del segundo factor: si no, quien la generó podría adelantarse y dar
+ * de alta su propio teléfono.
+ */
+function CambioObligatorio({
+  user,
+  claveTemporal,
+  conSegundoFactorPendiente,
+  onDone,
+}: {
+  user: User;
+  claveTemporal: string | undefined;
+  conSegundoFactorPendiente: boolean;
+  onDone: () => void;
+}) {
+  const [actual, setActual] = useState(claveTemporal ?? '');
+  const [nueva, setNueva] = useState('');
+  const [repetida, setRepetida] = useState('');
+  const [error, setError] = useState<string>();
+  const [submitting, setSubmitting] = useState(false);
+
+  // La misma política que aplica el servidor, para que no rechace algo que
+  // aquí parecía válido.
+  const veredicto = evaluatePassword(nueva, { email: user.email, name: user.name });
+  const coinciden = nueva.length > 0 && nueva === repetida;
+  const puedeEnviar = actual.length > 0 && veredicto.ok && coinciden;
+
+  const cambiar = async () => {
+    if (!puedeEnviar) return;
+    setSubmitting(true);
+    setError(undefined);
+    try {
+      await api.post('/v1/auth/password', { currentPassword: actual, newPassword: nueva });
+      onDone();
+    } catch (cause) {
+      setError(
+        cause instanceof ApiError
+          ? cause.status === 401
+            ? 'La contraseña temporal no es correcta.'
+            : cause.message
+          : 'No se pudo cambiar. Inténtalo de nuevo.',
+      );
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  return (
+    <Shell wide>
+      <div>
+        <Logo />
+        {conSegundoFactorPendiente ? (
+          <p className="mb-1 text-micro font-medium uppercase tracking-[0.06em] text-ink-muted">
+            Paso 1 de 2
+          </p>
+        ) : null}
+        <h1 className="text-title font-semibold text-ink">Elige tu contraseña</h1>
+        <p className="mt-1 text-base text-ink-secondary">
+          Hola, {user.name.split(' ')[0]}. La que te dieron es temporal: la conoce quien creó tu
+          cuenta. Cámbiala por una que solo sepas tú.
+        </p>
+      </div>
+
+      <div className="space-y-4">
+        {/* Si acaba de escribirla no se le pide otra vez; si recargó la
+            página, sí, porque el panel no la guarda en ningún sitio. */}
+        {claveTemporal ? null : (
+          <Field label="Contraseña temporal" htmlFor="temporal" required>
+            <Input
+              id="temporal"
+              type="password"
+              autoComplete="current-password"
+              value={actual}
+              onChange={(event) => setActual(event.target.value)}
+            />
+          </Field>
+        )}
+
+        <Field
+          label="Contraseña nueva"
+          htmlFor="nueva"
+          required
+          hint={`Al menos ${PASSWORD_MIN_LENGTH} caracteres. Una frase que recuerdes vale más que algo corto con símbolos.`}
+        >
+          <Input
+            id="nueva"
+            type="password"
+            autoComplete="new-password"
+            value={nueva}
+            onChange={(event) => setNueva(event.target.value)}
+          />
+        </Field>
+
+        {nueva ? <Medidor fuerza={veredicto.fuerza} /> : null}
+
+        {nueva && veredicto.problemas.length > 0 ? (
+          <ul className="space-y-1 rounded-md border border-[var(--t-warning-line)] bg-[var(--t-warning-bg)] p-3 text-caption text-[var(--t-warning-ink)]">
+            {veredicto.problemas.map((p) => (
+              <li key={p}>{p}</li>
+            ))}
+          </ul>
+        ) : null}
+
+        <Field
+          label="Repite la nueva"
+          htmlFor="repetida"
+          required
+          error={repetida && !coinciden ? 'No coinciden.' : undefined}
+        >
+          <Input
+            id="repetida"
+            type="password"
+            autoComplete="new-password"
+            value={repetida}
+            onChange={(event) => setRepetida(event.target.value)}
+            onKeyDown={(event) => event.key === 'Enter' && void cambiar()}
+          />
+        </Field>
+
+        {error ? <Banner tone="critical">{error}</Banner> : null}
+      </div>
+
+      <Button
+        variant="primary"
+        size="lg"
+        className="w-full"
+        icon={<LockKeyhole className="size-4" />}
+        loading={submitting}
+        disabled={!puedeEnviar}
+        onClick={() => void cambiar()}
+      >
+        {conSegundoFactorPendiente ? 'Guardar y seguir' : 'Guardar y entrar'}
+      </Button>
+    </Shell>
+  );
+}
+
 /* -------------------------------------------------------------- el alta --- */
 
 /**
@@ -247,7 +442,7 @@ function LoginScreen({ onSuccess }: { onSuccess: (user: User) => void }) {
  * se puede repetir —en la base solo queda el hash— y por eso hay que marcar
  * explícitamente que se guardaron.
  */
-function TotpEnrollment({ onDone }: { onDone: () => void }) {
+function TotpEnrollment({ onDone, paso }: { onDone: () => void; paso?: string }) {
   const [secret, setSecret] = useState<string>();
   const [qr, setQr] = useState<string>();
   const [code, setCode] = useState('');
@@ -302,6 +497,11 @@ function TotpEnrollment({ onDone }: { onDone: () => void }) {
     <Shell wide>
       <div>
         <Logo />
+        {paso ? (
+          <p className="mb-1 text-micro font-medium uppercase tracking-[0.06em] text-ink-muted">
+            {paso}
+          </p>
+        ) : null}
         <h1 className="text-title font-semibold text-ink">Activa el segundo factor</h1>
         <p className="mt-1 text-base text-ink-secondary">
           El panel ve el teléfono y la dirección de todos los clientes. Una contraseña sola no

@@ -22,6 +22,16 @@ export const ALLOW_WITHOUT_TOTP = 'tax:allow-without-totp';
  */
 export const AllowWithoutTotp = () => SetMetadata(ALLOW_WITHOUT_TOTP, true);
 
+export const ALLOW_WITH_TEMP_PASSWORD = 'tax:allow-with-temp-password';
+
+/**
+ * Las rutas que una sesión abierta con contraseña temporal puede usar: ver
+ * quién soy y cambiarla. Ni siquiera el alta del segundo factor: primero la
+ * contraseña, porque quien generó la temporal también la conoce y podría
+ * adelantarse a dar de alta su propio teléfono.
+ */
+export const AllowWithTemporaryPassword = () => SetMetadata(ALLOW_WITH_TEMP_PASSWORD, true);
+
 declare module 'fastify' {
   interface FastifyRequest {
     user?: UserPrincipal;
@@ -51,6 +61,20 @@ export class SessionGuard implements CanActivate {
     if (!user) throw new AppError('UNAUTHORIZED', 'Sesión expirada o revocada');
 
     request.user = user;
+
+    if (user.mustChangePassword) {
+      const permitida = this.reflector.getAllAndOverride<boolean>(ALLOW_WITH_TEMP_PASSWORD, [
+        context.getHandler(),
+        context.getClass(),
+      ]);
+
+      if (!permitida) {
+        throw new AppError(
+          'PASSWORD_CHANGE_REQUIRED',
+          'Cambia la contraseña temporal antes de seguir',
+        );
+      }
+    }
 
     if (!user.totpEnabled) {
       const permitida = this.reflector.getAllAndOverride<boolean>(ALLOW_WITHOUT_TOTP, [
