@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { motion } from 'motion/react';
 import { AlertTriangle, CheckCircle2, Download, FileSpreadsheet, FileText, Loader2 } from 'lucide-react';
-import { formatMoney, formatRelative } from '@tax/shared';
+import { formatRelative } from '@tax/shared';
 import {
   Button,
   Card,
@@ -26,9 +26,9 @@ import {
   useAssignmentTimes,
   useAutomationRate,
   useDemandByZone,
+  useReportSummary,
   useRidesByHour,
 } from '../api/queries';
-import { useLive } from '../live/store';
 
 type Range = '7d' | '30d' | 'hoy';
 
@@ -36,17 +36,14 @@ const DAYS: Record<Range, number> = { hoy: 1, '7d': 7, '30d': 30 };
 
 export function Reportes() {
   const [range, setRange] = useState<Range>('7d');
-  const rides = useLive((s) => s.rides);
   const { exportar, generando } = useExportar();
 
   const days = DAYS[range];
+  const resumen = useReportSummary(days);
   const ridesByHour = useRidesByHour(range === 'hoy' ? 1 : days);
   const assignment = useAssignmentTimes(days);
   const demand = useDemandByZone(days);
   const automation = useAutomationRate(days);
-
-  const completed = rides.filter((r) => r.status === 'COMPLETED');
-  const billed = completed.reduce((sum, r) => sum + r.fareEstimate, 0);
 
   // Las series llegan de la API; mientras tanto se dibuja el esqueleto en vez
   // de una gráfica vacía, que se leería como «no hubo carreras».
@@ -56,6 +53,7 @@ export function Reportes() {
   const automationRate = automation.data ?? [];
   const cargando =
     ridesByHour.isLoading || assignment.isLoading || demand.isLoading || automation.isLoading;
+  const r = resumen.data;
 
   return (
     <div className="space-y-4 p-5">
@@ -91,35 +89,80 @@ export function Reportes() {
         </div>
       </div>
 
+      {/*
+        Las cifras salen de la API con la misma cuenta que el Excel y el PDF.
+        Antes dos eran números fijos (8,4 min y 83 %) y otra contaba solo las
+        carreras cargadas en pantalla; ahora todas son del periodo elegido.
+      */}
       <motion.div
-        variants={staggerList(4)}
+        variants={staggerList(8)}
         initial="hidden"
         animate="visible"
         className="grid grid-cols-2 gap-3 xl:grid-cols-4"
       >
         <motion.div variants={staggerItem}>
-          <Stat label="Carreras finalizadas" value={completed.length} hint="En el periodo" />
-        </motion.div>
-        <motion.div variants={staggerItem}>
-          <Stat label="Facturación estimada" value={formatMoney(billed)} tone="positive" hint="Suma de tarifas" />
+          <Stat
+            label="Carreras"
+            value={r?.creadas ?? 0}
+            hint={r ? `${r.finalizadas} finalizadas · ${r.canceladas} canceladas` : 'En el periodo'}
+          />
         </motion.div>
         <motion.div variants={staggerItem}>
           <Stat
-            label="Tiempo medio a recogida"
-            value={8.4}
+            label="Hora pico"
+            value={r?.horaPico ? `${r.horaPico.hora}:00` : '—'}
+            tone="warning"
+            hint={r?.horaPico ? `${r.horaPico.carreras} carreras en esa hora` : 'Sin carreras en el periodo'}
+          />
+        </motion.div>
+        <motion.div variants={staggerItem}>
+          <Stat
+            label="Llegada al cliente"
+            value={r?.llegadaP50 != null ? Math.round(r.llegadaP50 / 6) / 10 : 0}
             unit="min"
             tone="info"
-            hint="Objetivo de la empresa: 10 min"
+            hint="Mediana, de aceptar a «Llegué» · objetivo 10 min"
           />
         </motion.div>
         <motion.div variants={staggerItem}>
           <Stat
             label="Sin intervención humana"
-            value={83}
+            value={r?.sinIntervencion != null ? Math.round(r.sinIntervencion * 100) : 0}
             unit="%"
             tone="progress"
             hint="Meta inicial 80 %"
             trend={automationRate.map((d) => d.rate * 100)}
+          />
+        </motion.div>
+        <motion.div variants={staggerItem}>
+          <Stat
+            label="Asignación"
+            value={r?.asignacionP50 ?? 0}
+            unit="s"
+            hint="Mediana, de crearla a que un conductor la acepte"
+          />
+        </motion.div>
+        <motion.div variants={staggerItem}>
+          <Stat
+            label="Duración a bordo"
+            value={r?.duracionP50 ?? 0}
+            unit="min"
+            hint="Mediana de las carreras finalizadas"
+          />
+        </motion.div>
+        <motion.div variants={staggerItem}>
+          <Stat
+            label="Sin asignar"
+            value={r?.sinAsignar ?? 0}
+            tone={(r?.sinAsignar ?? 0) > 0 ? 'critical' : 'positive'}
+            hint="Agotaron las oleadas sin conductor"
+          />
+        </motion.div>
+        <motion.div variants={staggerItem}>
+          <Stat
+            label="Conductores activos"
+            value={r?.conductores ?? 0}
+            hint={r ? `${r.kmRecorridos.toLocaleString('es-CO')} km recorridos` : 'Con alguna carrera'}
           />
         </motion.div>
       </motion.div>
@@ -191,7 +234,7 @@ export function Reportes() {
               data={zoneDemand.map((d) => ({
                 label: d.zone,
                 value: d.rides,
-                hint: d.kind === 'rural' ? 'Vereda · tarifa rural' : undefined,
+                hint: d.kind === 'rural' ? 'Vereda' : undefined,
               }))}
             />
           )}

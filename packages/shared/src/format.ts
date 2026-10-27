@@ -1,9 +1,3 @@
-const COP = new Intl.NumberFormat('es-CO', {
-  style: 'currency',
-  currency: 'COP',
-  maximumFractionDigits: 0,
-});
-
 const TIME = new Intl.DateTimeFormat('es-CO', { hour: '2-digit', minute: '2-digit', hour12: false });
 
 const DATE_TIME = new Intl.DateTimeFormat('es-CO', {
@@ -13,10 +7,6 @@ const DATE_TIME = new Intl.DateTimeFormat('es-CO', {
   minute: '2-digit',
   hour12: false,
 });
-
-export function formatMoney(value: number): string {
-  return COP.format(value);
-}
 
 export function formatTime(iso: string | Date): string {
   return TIME.format(typeof iso === 'string' ? new Date(iso) : iso);

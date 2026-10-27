@@ -8,9 +8,10 @@ import {
   Post,
   Query,
   Req,
+  Res,
   UseGuards,
 } from '@nestjs/common';
-import type { FastifyRequest } from 'fastify';
+import type { FastifyReply, FastifyRequest } from 'fastify';
 import { z } from 'zod';
 import { RIDE_STATUSES, pointSchema, type RideStatus } from '@tax/shared';
 import { zodBody } from '../../common/zod.pipe';
@@ -18,6 +19,7 @@ import { AppError } from '../../common/problem';
 import { SessionGuard } from '../identity/guards';
 import { RidesService, type Actor } from './rides.service';
 import { DispatchService } from '../dispatch/dispatch.service';
+import { FotosService } from './fotos.service';
 
 const listQuerySchema = z.object({
   status: z
@@ -54,6 +56,7 @@ export class AdminRidesController {
   constructor(
     private readonly rides: RidesService,
     private readonly dispatch: DispatchService,
+    private readonly fotos: FotosService,
   ) {}
 
   @Get()
@@ -64,6 +67,15 @@ export class AdminRidesController {
   @Get(':rideId')
   detail(@Param('rideId', ParseUUIDPipe) rideId: string) {
     return this.rides.detail(rideId);
+  }
+
+  /** La foto del lugar, para la ficha de la carrera. */
+  @Get(':rideId/photo')
+  async photo(@Param('rideId', ParseUUIDPipe) rideId: string, @Res({ passthrough: true }) reply: FastifyReply) {
+    const foto = await this.fotos.leer(rideId);
+    if (!foto) throw new AppError('NOT_FOUND', 'Esta carrera no tiene foto');
+    void reply.header('content-type', foto.mimeType).header('cache-control', 'private, no-store');
+    return foto.content;
   }
 
   @Patch(':rideId/address')

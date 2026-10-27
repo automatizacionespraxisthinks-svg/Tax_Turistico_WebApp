@@ -125,8 +125,25 @@ async function request<T>(
   return payload as T;
 }
 
+/**
+ * Una imagen protegida, como la foto del lugar. Un `<img src>` no puede
+ * mandar el token del conductor, así que se pide aquí y se pinta desde el
+ * blob.
+ */
+async function imagen(path: string): Promise<Blob> {
+  const token = storedToken();
+  const response = await fetch(`${API_BASE}${path}`, {
+    headers: token ? { authorization: `Bearer ${token}` } : {},
+  });
+  if (!response.ok) {
+    throw new ApiError({ title: response.statusText, status: response.status, code: 'NOT_FOUND' });
+  }
+  return response.blob();
+}
+
 export const api = {
   get: <T>(path: string) => request<T>(path),
+  imagen,
   post: <T>(path: string, body?: unknown) => request<T>(path, { method: 'POST', body }),
   delete: <T>(path: string) => request<T>(path, { method: 'DELETE' }),
   /** Sin token: el acceso es lo que lo obtiene. */

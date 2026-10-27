@@ -46,14 +46,14 @@ export class PushService implements OnModuleInit {
   /**
    * Aviso de oferta.
    *
-   * El contenido es deliberadamente pobre: zona y tarifa, nunca la dirección
+   * El contenido es deliberadamente pobre: solo la zona, nunca la dirección
    * ni el teléfono del cliente. Una notificación se ve en la pantalla
    * bloqueada de un taxi aparcado en la calle, y el detalle solo aparece
    * dentro de la aplicación, tras aceptar (§8.1, minimización del §7.2).
    */
   async notifyOffer(
     driverId: string,
-    offer: { rideId: string; code: string; zona?: string; fareEstimate: number; expiresAt: string },
+    offer: { rideId: string; code: string; zona?: string; expiresAt: string },
   ): Promise<void> {
     await this.send(driverId, {
       tipo: 'oferta',

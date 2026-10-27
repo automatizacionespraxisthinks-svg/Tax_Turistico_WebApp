@@ -1,5 +1,5 @@
-import { Body, Controller, Get, Param, ParseUUIDPipe, Post, Req, UseGuards } from '@nestjs/common';
-import type { FastifyRequest } from 'fastify';
+import { Body, Controller, Get, Param, ParseUUIDPipe, Post, Req, Res, UseGuards } from '@nestjs/common';
+import type { FastifyReply, FastifyRequest } from 'fastify';
 import { z } from 'zod';
 import { pointSchema, haversineKm } from '@tax/shared';
 import { zodBody } from '../../common/zod.pipe';
@@ -9,6 +9,7 @@ import { DriverGuard } from '../identity/guards';
 import { RidesService, type Actor } from './rides.service';
 import { DispatchService } from '../dispatch/dispatch.service';
 import { FleetService } from '../fleet/fleet.service';
+import { FotosService } from './fotos.service';
 
 const atSchema = z.object({ at: pointSchema.optional() });
 
@@ -27,7 +28,28 @@ export class DriverRidesController {
     private readonly rides: RidesService,
     private readonly dispatch: DispatchService,
     private readonly fleet: FleetService,
+    private readonly fotos: FotosService,
   ) {}
+
+  /**
+   * La foto del lugar que mandó el cliente. Solo para el conductor de la
+   * carrera, y solo mientras va a recogerlo: es la puerta de una casa.
+   */
+  @Get(':rideId/photo')
+  async photo(
+    @Req() request: FastifyRequest,
+    @Param('rideId', ParseUUIDPipe) rideId: string,
+    @Res({ passthrough: true }) reply: FastifyReply,
+  ) {
+    const ride = await this.ownRide(rideId, requireDriver(request).id);
+    if (ride.status !== 'ASSIGNED' && ride.status !== 'DRIVER_ARRIVED') {
+      throw new AppError('NOT_FOUND', 'La foto solo se ve mientras vas a recoger al cliente');
+    }
+    const foto = await this.fotos.leer(rideId);
+    if (!foto) throw new AppError('NOT_FOUND', 'Esta carrera no tiene foto');
+    void reply.header('content-type', foto.mimeType).header('cache-control', 'private, no-store');
+    return foto.content;
+  }
 
   /**
    * Lo que la PWA necesita al abrir: quién es, si tiene carrera en curso y si
@@ -47,6 +69,9 @@ export class DriverRidesController {
       driver: { id: driver.id, code: driver.code, name: driver.name },
       shift,
       totals,
+      // La PWA bloquea «Finalizar» estos minutos. Viene de aquí para que
+      // cambiar la regla en la API no deje a la PWA contando otra cosa.
+      rules: { minRideMinutes: this.env.MIN_DURACION_CARRERA_MIN },
       ...session,
     };
   }
@@ -121,6 +146,24 @@ export class DriverRidesController {
     const ride = await this.ownRide(rideId, driver.id);
 
     /*
+     * Tiempo mínimo a bordo. La PWA tiene el botón bloqueado esos minutos,
+     * pero eso es cortesía: quien quiera saltárselo llama a la API sin la
+     * PWA, y aquí es donde de verdad se impide. La oficina sí puede cerrar
+     * antes desde el panel, que es otra ruta: para eso está.
+     */
+    const minimoMs = this.env.MIN_DURACION_CARRERA_MIN * 60_000;
+    if (ride.status === 'IN_PROGRESS' && ride.startedAt) {
+      const faltanMs = ride.startedAt.getTime() + minimoMs - Date.now();
+      if (faltanMs > 0) {
+        const minutos = Math.ceil(faltanMs / 60_000);
+        throw new AppError(
+          'RIDE_TOO_SHORT',
+          `Todavía no se puede finalizar: falta${minutos === 1 ? '' : 'n'} ${minutos} ${minutos === 1 ? 'minuto' : 'minutos'}`,
+        );
+      }
+    }
+
+    /*
      * Aqui es donde la carrera consigue su destino. Casi nadie lo dice por
      * WhatsApp —lo dice ya montado en el carro—, asi que hasta este momento
      * la mayoria de carreras solo tienen punto de partida. La posicion del
@@ -135,7 +178,7 @@ export class DriverRidesController {
       patch: { finishedAt: new Date(), ...cierre.patch },
       event: {
         type: 'ride.completed',
-        payload: { distanceKm: cierre.patch.distanceKm, fareFinal: cierre.patch.fareFinal },
+        payload: { distanceKm: cierre.patch.distanceKm },
       },
     });
 

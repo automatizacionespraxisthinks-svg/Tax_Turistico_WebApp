@@ -27,7 +27,6 @@ export interface OfferedRide {
   pickupPoint: Point;
   distanceKm: number;
   etaMinutes: number;
-  fareEstimate: number;
   passengers: number;
   vehicleType: VehicleType;
   notes?: string;
@@ -38,6 +37,13 @@ export interface OfferedRide {
    */
   customerPhone?: string;
   customerName?: string;
+  /**
+   * Cuándo subió el pasajero, en milisegundos. De él sale la cuenta atrás
+   * de «Finalizar»: el servidor no deja cerrar antes del mínimo.
+   */
+  startedAt?: number;
+  /** Cuándo llegó la foto del lugar; ausente si el cliente no mandó ninguna. */
+  pickupPhotoAt?: string;
   /** Fin de la ventana de la oferta, en milisegundos. */
   expiresAt: number;
   wave: Oleada;
@@ -53,8 +59,8 @@ export interface SessionState {
   queued: number;
   shiftStartedAt: number | null;
   ridesToday: number;
-  earnedToday: number;
-  lastFare: number;
+  /** Minutos a bordo antes de poder finalizar; los dice la API al abrir. */
+  minRideMinutes: number;
   /** Distancia al punto de recogida; bajo 150 m se habilita "Llegué" (§5.3). */
   metersToPickup: number;
 }
@@ -69,8 +75,7 @@ export const initialSession: SessionState = {
   queued: 0,
   shiftStartedAt: null,
   ridesToday: 0,
-  earnedToday: 0,
-  lastFare: 0,
+  minRideMinutes: 10,
   metersToPickup: 1240,
 };
 
@@ -98,7 +103,8 @@ export type SessionAction =
       offer: OfferedRide | null;
       rideStatus?: SessionState['rideStatus'];
       shiftStartedAt?: number | null;
-      totals?: { rides: number; earned: number };
+      totals?: { rides: number };
+      minRideMinutes?: number;
     }
   | { type: 'shift_opened' }
   | { type: 'logged_out' };
@@ -139,18 +145,15 @@ export function sessionReducer(state: SessionState, action: SessionAction): Sess
       return { ...state, rideStatus: 'DRIVER_ARRIVED' };
 
     case 'passenger_on_board':
-      return { ...state, rideStatus: 'IN_PROGRESS' };
-
-    case 'finish': {
-      const fare = state.offer?.fareEstimate ?? 0;
+      // La hora del teléfono, hasta que la API diga la suya al recuperar.
       return {
         ...state,
-        phase: 'summary',
-        lastFare: fare,
-        ridesToday: state.ridesToday + 1,
-        earnedToday: state.earnedToday + fare,
+        rideStatus: 'IN_PROGRESS',
+        offer: state.offer ? { ...state.offer, startedAt: state.offer.startedAt ?? Date.now() } : null,
       };
-    }
+
+    case 'finish':
+      return { ...state, phase: 'summary', ridesToday: state.ridesToday + 1 };
 
     case 'back_to_available':
       return { ...state, phase: 'available', offer: null, rideStatus: 'ASSIGNED' };
@@ -173,13 +176,13 @@ export function sessionReducer(state: SessionState, action: SessionAction): Sess
        * El resumen de la carrera lo cierra el conductor, no el servidor. Al
        * finalizar llega un `ride:changed` que dispara una recuperación, y sin
        * esta guarda el resumen se borraría en el mismo instante en que
-       * aparece: el conductor no llegaría a ver lo que acaba de ganar.
+       * aparece: el conductor no llegaría a ver que la carrera quedó cerrada.
        */
       if (state.phase === 'summary' && action.phase !== 'ride' && action.phase !== 'offer') {
         return {
           ...state,
           ridesToday: action.totals?.rides ?? state.ridesToday,
-          earnedToday: action.totals?.earned ?? state.earnedToday,
+          minRideMinutes: action.minRideMinutes ?? state.minRideMinutes,
         };
       }
 
@@ -190,7 +193,7 @@ export function sessionReducer(state: SessionState, action: SessionAction): Sess
         rideStatus: action.rideStatus ?? state.rideStatus,
         shiftStartedAt: action.shiftStartedAt ?? state.shiftStartedAt,
         ridesToday: action.totals?.rides ?? state.ridesToday,
-        earnedToday: action.totals?.earned ?? state.earnedToday,
+        minRideMinutes: action.minRideMinutes ?? state.minRideMinutes,
       };
 
     case 'shift_opened':
@@ -215,13 +218,14 @@ interface ApiRide {
   pickupLat: number | null;
   pickupLng: number | null;
   dropoffText: string | null;
-  fareEstimate: number;
   passengers: number;
   vehicleType: VehicleType;
   notes: string | null;
   etaMinutes: number | null;
   customerName?: string | null;
   customerPhone?: string;
+  startedAt?: string | null;
+  pickupPhotoAt?: string | null;
 }
 
 /** Oferta recibida por socket (sin cliente). */
@@ -231,7 +235,6 @@ export interface ApiOffer {
   pickupText: string;
   pickupReference?: string | null;
   dropoffText?: string | null;
-  fareEstimate: number;
   passengers: number;
   distanceKm: number;
   etaMinutes: number;
@@ -249,7 +252,6 @@ export function offerFromSocket(push: ApiOffer): OfferedRide {
     pickupPoint: { lat: 0, lng: 0 },
     distanceKm: push.distanceKm,
     etaMinutes: push.etaMinutes,
-    fareEstimate: push.fareEstimate,
     passengers: push.passengers,
     vehicleType: 'sedan',
     expiresAt: new Date(push.expiresAt).getTime(),
@@ -271,12 +273,13 @@ export function offerFromRide(ride: ApiRide): OfferedRide {
         : { lat: 0, lng: 0 },
     distanceKm: 0,
     etaMinutes: ride.etaMinutes ?? 0,
-    fareEstimate: ride.fareEstimate,
     passengers: ride.passengers,
     vehicleType: ride.vehicleType,
     notes: ride.notes ?? undefined,
     customerName: ride.customerName ?? undefined,
     customerPhone: ride.customerPhone,
+    startedAt: ride.startedAt ? new Date(ride.startedAt).getTime() : undefined,
+    pickupPhotoAt: ride.pickupPhotoAt ?? undefined,
     expiresAt: Date.now(),
     wave: 1,
   };

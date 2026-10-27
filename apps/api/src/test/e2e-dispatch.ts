@@ -1,4 +1,5 @@
 import 'dotenv/config';
+import { Pool } from 'pg';
 
 /**
  * Prueba de extremo a extremo del despacho, contra la API en marcha.
@@ -7,6 +8,9 @@ import 'dotenv/config';
  * carrera por el contrato de n8n y hacer que varios conductores acepten EN EL
  * MISMO INSTANTE. Lo que se comprueba es RF-23: exactamente uno gana y los
  * demás reciben «carrera ya tomada».
+ *
+ * Para finalizar adelanta en la base la hora de abordaje: no se puede cerrar
+ * una carrera antes de diez minutos a bordo, y la prueba no los espera.
  *
  *   pnpm --filter @tax/api exec tsx src/test/e2e-dispatch.ts <clave-de-api>
  */
@@ -137,9 +141,10 @@ async function main(): Promise<void> {
   });
 
   assert(created.status < 400, `carrera creada (HTTP ${created.status})`, created);
-  const ride = created.body as { id: string; code: string; fareEstimate: number };
+  const ride = created.body as { id: string; code: string; fareEstimate: number | null };
   assert(Boolean(ride.id), `tiene identificador: ${ride.code}`);
-  assert(ride.fareEstimate > 0, `tarifa estimada calculada: ${ride.fareEstimate}`);
+  // La empresa no maneja tarifas desde el sistema: no se calcula ninguna.
+  assert(ride.fareEstimate === null, 'sin tarifa: el sistema ya no calcula precios');
 
   console.log('\n3. Esperando a que salga la oleada 1');
   let offers: unknown[] = [];
@@ -196,6 +201,11 @@ async function main(): Promise<void> {
     ['board', 'pasajero a bordo'],
     ['finish', 'finalizó la carrera'],
   ] as const) {
+    if (step === 'finish') {
+      const pool = new Pool({ connectionString: process.env.DATABASE_URL, max: 1 });
+      await pool.query(`update rides set started_at = now() - interval '11 minutes' where id = $1`, [ride.id]);
+      await pool.end();
+    }
     const response = await call(`/v1/driver/rides/${ride.id}/${step}`, {
       method: 'POST',
       token: winnerToken,

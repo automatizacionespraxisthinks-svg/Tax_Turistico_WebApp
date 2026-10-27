@@ -11,16 +11,18 @@ import {
   rideOffers,
   rideStatusHistory,
   rides,
+  vehicles,
 } from '../../db/schema';
 import { AppError } from '../../common/problem';
 import { AuditService } from '../audit/audit.service';
 import { OutboxService } from '../integrations/outbox.service';
-import { FaresService } from '../pricing/fares.service';
+import { TrayectosService } from '../pricing/trayectos.service';
 import { GeocodingService } from '../pricing/geocoding.service';
 import { ZonesService } from '../pricing/zones.service';
 import { DispatchService } from '../dispatch/dispatch.service';
 import { isUniqueViolation } from '../../common/pg-errors';
 import { RealtimeGateway } from '../../realtime/realtime.gateway';
+import { FotosService } from './fotos.service';
 
 export interface Actor {
   kind: TransitionActor;
@@ -65,10 +67,11 @@ export class RidesService {
     @Inject(DB) private readonly db: Database,
     private readonly outbox: OutboxService,
     private readonly audit: AuditService,
-    private readonly fares: FaresService,
+    private readonly trayectos: TrayectosService,
     private readonly geocoding: GeocodingService,
     private readonly zones: ZonesService,
     private readonly realtime: RealtimeGateway,
+    private readonly fotos: FotosService,
     @Inject(forwardRef(() => DispatchService))
     private readonly dispatch: DispatchService,
   ) {}
@@ -122,7 +125,7 @@ export class RidesService {
       throw new AppError('MISSING_LOCATION', 'No hay zonas configuradas para despachar');
     }
 
-    const quote = await this.fares.quote(point, input.dropoff?.point);
+    const trayecto = this.trayectos.medir(point, input.dropoff?.point);
     const rideId = uuidv7();
     const pendingEvents: string[] = [];
 
@@ -160,12 +163,10 @@ export class RidesService {
             // Solo cuenta como dicho por el cliente si trae coordenadas: un
             // destino en palabras no sirve para medir nada.
             dropoffSource: input.dropoff?.point ? 'cliente' : undefined,
-            zoneId: quote.originZoneId,
+            zoneId: trayecto.originZoneId,
             vehicleType: input.vehicleType,
             passengers: input.passengers,
-            fareEstimate: quote.amount,
-            fareRuleVersion: quote.ruleVersion,
-            etaMinutes: quote.etaMinutes,
+            etaMinutes: trayecto.etaMinutes,
             notes: input.notes,
           })
           .returning();
@@ -194,9 +195,7 @@ export class RidesService {
               // entendio, sin tener que geocodificar el por su cuenta.
               direccionResuelta,
               dropoff: input.dropoff,
-              fareEstimate: quote.amount,
-              fareApproximate: true,
-              zone: quote.originZoneName,
+              zone: trayecto.originZoneName,
             },
           }),
         );
@@ -209,7 +208,7 @@ export class RidesService {
             action: 'Creó carrera',
             entity: 'rides',
             entityId: code,
-            after: { code, status: 'PENDING', fareEstimate: quote.amount },
+            after: { code, status: 'PENDING' },
             ip: actor.ip,
           },
           tx as unknown as Database,
@@ -230,6 +229,11 @@ export class RidesService {
     // Fuera de la transacción: antes del commit el trabajador no vería la fila.
     await this.outbox.notify(pendingEvents);
     this.realtime.rideChanged(created);
+
+    // La foto del lugar baja después, sin que nadie la espere.
+    if (input.pickupPhotoUrl) {
+      this.fotos.enSegundoPlano(rideId, input.pickupPhotoUrl, actor, (ride) => this.realtime.rideChanged(ride));
+    }
 
     // El despacho arranca en segundo plano; crear la carrera no debe esperar
     // a que se resuelva la primera oleada (objetivo: oferta visible < 3 s).
@@ -267,16 +271,12 @@ export class RidesService {
    * actualizada.
    */
   /**
-   * Lo que se guarda al finalizar: destino, distancia y tarifa real.
+   * Lo que se guarda al finalizar: destino y distancia.
    *
    * Casi nadie dice a donde va por WhatsApp; lo dice ya montado en el carro.
    * Por eso el destino se da por conocido cuando el taxi para: la posicion
    * del conductor al marcar finalizada es el destino. Si el cliente si lo
    * habia dicho, ese manda y la posicion del conductor no lo pisa.
-   *
-   * `fareEstimate` no se toca. Esa es la que se le prometio al cliente
-   * cuando pidio el taxi y tiene que poder consultarse tal cual; lo que
-   * resulto de verdad va en `fareFinal`.
    *
    * Nada de esto puede impedir cerrar una carrera. Sin GPS, con una lectura
    * absurda o con las zonas cambiadas, el conductor cierra igual y la
@@ -312,8 +312,8 @@ export class RidesService {
 
     /*
      * Guarda contra lecturas basura. Un GPS que devuelve (0, 0) pone el
-     * destino en el golfo de Guinea: serian miles de kilometros y una tarifa
-     * de millones, y ese numero acabaria en un informe como si fuera cierto.
+     * destino en el golfo de Guinea: serian miles de kilometros, y ese numero
+     * acabaria en un informe como si fuera cierto.
      */
     const enLineaRecta = haversineKm(origen, destino);
     if (enLineaRecta > RidesService.DISTANCIA_MAXIMA_KM) {
@@ -323,19 +323,16 @@ export class RidesService {
       };
     }
 
-    let quote;
+    let trayecto;
     try {
-      quote = await this.fares.quote(origen, destino);
+      trayecto = this.trayectos.medir(origen, destino);
     } catch (error) {
-      // Zona fuera de cobertura o tabla de tarifas sin regla: se cierra igual.
-      this.logger.warn({ rideId: ride.id, error }, 'No se pudo calcular la tarifa final');
+      // La zona de origen ya no existe o cambió: se cierra igual.
+      this.logger.warn({ rideId: ride.id, error }, 'No se pudo medir la carrera al finalizar');
       return { patch: {}, note: 'No se pudo calcular la distancia al finalizar' };
     }
 
-    const patch: Partial<typeof rides.$inferInsert> = {
-      distanceKm: quote.distanceKm,
-      fareFinal: quote.amount,
-    };
+    const patch: Partial<typeof rides.$inferInsert> = { distanceKm: trayecto.distanceKm };
 
     if (loDijoElCliente) return { patch };
 
@@ -491,7 +488,21 @@ export class RidesService {
         .orderBy(rideOffers.sentAt),
     ]);
 
-    return { ...RidesService.flatten(row), history, offers };
+    /*
+     * Quién la lleva, con lo que el cliente necesita para reconocer el taxi:
+     * nombre, código interno y placa. El flujo de avisos de n8n lo lee de
+     * aquí; antes tenía que buscarlo entre las ofertas, y la placa no estaba.
+     */
+    const [driver] = row.ride.driverId
+      ? await this.db
+          .select({ id: drivers.id, code: drivers.code, name: drivers.name, plate: vehicles.plate })
+          .from(drivers)
+          .leftJoin(vehicles, eq(vehicles.id, sql`${row.ride.vehicleId}::uuid`))
+          .where(eq(drivers.id, row.ride.driverId))
+          .limit(1)
+      : [];
+
+    return { ...RidesService.flatten(row), driver: driver ?? null, history, offers };
   }
 
   async list(status?: RideStatus[], limit = 100) {
@@ -555,9 +566,8 @@ export class RidesService {
   /* ----------------------------------------------- edición de dirección */
 
   /**
-   * RF-11. Cambiar el punto puede cambiar la zona y, con ella, la tarifa; por
-   * eso se recalcula y se avisa a n8n con `ride.eta_updated`, en vez de dejar
-   * al cliente con un número que ya no es.
+   * RF-11. Cambiar el punto puede cambiar la zona y el tiempo estimado; por
+   * eso se recalcula y se avisa a n8n con `ride.eta_updated`.
    */
   async updateAddress(
     rideId: string,
@@ -571,7 +581,7 @@ export class RidesService {
     }
 
     const point = update.point ?? { lat: ride.pickupLat!, lng: ride.pickupLng! };
-    const quote = await this.fares.quote(
+    const trayecto = this.trayectos.medir(
       point,
       ride.dropoffLat && ride.dropoffLng ? { lat: ride.dropoffLat, lng: ride.dropoffLng } : undefined,
     );
@@ -586,10 +596,8 @@ export class RidesService {
           pickupReference: update.reference,
           pickupLat: point.lat,
           pickupLng: point.lng,
-          zoneId: quote.originZoneId,
-          fareEstimate: quote.amount,
-          fareRuleVersion: quote.ruleVersion,
-          etaMinutes: quote.etaMinutes,
+          zoneId: trayecto.originZoneId,
+          etaMinutes: trayecto.etaMinutes,
           version: ride.version + 1,
           updatedAt: new Date(),
         })
@@ -615,8 +623,7 @@ export class RidesService {
           payload: {
             code: ride.code,
             pickup: { text: update.text, reference: update.reference, point },
-            fareEstimate: quote.amount,
-            etaMinutes: quote.etaMinutes,
+            etaMinutes: trayecto.etaMinutes,
           },
         }),
       );
@@ -629,8 +636,8 @@ export class RidesService {
           action: 'Editó dirección de recogida',
           entity: 'rides',
           entityId: ride.code,
-          before: { pickupText: ride.pickupText, fareEstimate: ride.fareEstimate },
-          after: { pickupText: update.text, fareEstimate: quote.amount },
+          before: { pickupText: ride.pickupText },
+          after: { pickupText: update.text },
           ip: actor.ip,
         },
         tx as unknown as Database,

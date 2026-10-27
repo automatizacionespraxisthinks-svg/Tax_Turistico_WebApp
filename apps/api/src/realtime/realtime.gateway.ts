@@ -16,7 +16,6 @@ export interface OfferPush {
   pickupText: string;
   pickupReference?: string | null;
   dropoffText?: string | null;
-  fareEstimate: number;
   passengers: number;
   distanceKm: number;
   etaMinutes: number;

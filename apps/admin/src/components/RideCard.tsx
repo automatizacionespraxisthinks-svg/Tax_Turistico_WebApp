@@ -1,7 +1,7 @@
 import { motion } from 'motion/react';
 import { Clock, MapPin, User } from 'lucide-react';
 import type { Driver, Ride } from '@tax/shared';
-import { RIDE_STATUS_LABEL, RIDE_STATUS_TONE, formatMoney, formatRelative } from '@tax/shared';
+import { RIDE_STATUS_LABEL, RIDE_STATUS_TONE, formatRelative } from '@tax/shared';
 import { StatusPill, cn, spring, staggerItem } from '@tax/ui';
 
 export function RideCard({
@@ -56,9 +56,6 @@ export function RideCard({
             {driver.code} · {driver.vehicle.plate}
           </span>
         ) : null}
-        <span className="ml-auto tnum font-medium text-ink-secondary">
-          {formatMoney(ride.fareEstimate)}
-        </span>
       </div>
     </motion.button>
   );

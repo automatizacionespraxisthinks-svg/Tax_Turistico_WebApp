@@ -93,6 +93,13 @@ const envSchema = z.object({
 
   /** Posición: antigüedad máxima para considerar a un conductor (§5.2). */
   POSITION_MAX_AGE_SECONDS: z.coerce.number().int().min(10).max(600).default(60),
+  /**
+   * Minutos que tienen que pasar desde «Pasajero a bordo» para poder
+   * finalizar. Una carrera de dos minutos en Paipa no existe: si aparece, es
+   * un conductor cerrando carreras que no hizo.
+   */
+  MIN_DURACION_CARRERA_MIN: z.coerce.number().int().min(0).max(120).default(10),
+
   /** Radio en el que «Llegué» no cuenta como excepción (§5.3). */
   ARRIVAL_RADIUS_METERS: z.coerce.number().int().min(20).max(1000).default(150),
 
@@ -105,6 +112,8 @@ const envSchema = z.object({
    * con la empresa»: cambiarlo es una decisión suya, no del código.
    */
   POSITION_RETENTION_DAYS: z.coerce.number().int().min(1).max(3650).default(180),
+  /** Fotos del lugar que manda el cliente: puede verse su casa (§9.3). */
+  PHOTO_RETENTION_DAYS: z.coerce.number().int().min(1).max(365).default(30),
   /** Filas por lote. Pequeño para no inflar el WAL ni retener bloqueos. */
   POSITION_PURGE_BATCH: z.coerce.number().int().min(100).max(50_000).default(5_000),
   /** Pausa entre lotes: deja respirar al despacho y a autovacuum. */

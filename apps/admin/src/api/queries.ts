@@ -1,5 +1,5 @@
 import { useQuery } from '@tanstack/react-query';
-import type { FareRule, Place, SystemChecks } from '@tax/shared';
+import type { Place, SystemChecks } from '@tax/shared';
 import { api } from './client';
 
 /**
@@ -19,20 +19,6 @@ interface ApiPlace {
   lng: number;
   aliases: string[];
   uses: number;
-}
-
-interface ApiFareRule {
-  id: string;
-  version: string;
-  originKind: 'urbano' | 'rural';
-  destinationKind: 'urbano' | 'rural';
-  baseFare: number;
-  perKm: number;
-  minimumFare: number;
-  surcharges: FareRule['surcharges'];
-  legalReference: string;
-  effectiveFrom: string;
-  effectiveTo: string | null;
 }
 
 export interface AuditEntry {
@@ -67,27 +53,6 @@ export function usePlaces() {
   });
 }
 
-export function useFareRules() {
-  return useQuery({
-    queryKey: ['fare-rules'],
-    queryFn: async (): Promise<FareRule[]> => {
-      const rows = await api.get<ApiFareRule[]>('/v1/admin/fare-rules');
-      return rows.map((row) => ({
-        version: row.version,
-        effectiveFrom: row.effectiveFrom,
-        effectiveTo: row.effectiveTo ?? undefined,
-        legalReference: row.legalReference,
-        originKind: row.originKind,
-        destinationKind: row.destinationKind,
-        baseFare: row.baseFare,
-        perKm: row.perKm,
-        minimumFare: row.minimumFare,
-        surcharges: row.surcharges,
-      }));
-    },
-    staleTime: 5 * 60_000,
-  });
-}
 
 export function useAuditLog(limit = 50) {
   return useQuery({
@@ -149,6 +114,30 @@ export function useAutomationRate(days = 7) {
     queryKey: ['reports', 'automation-rate', days],
     queryFn: () =>
       api.get<{ day: string; rate: number }[]>(`/v1/reports/automation-rate?days=${days}`),
+    staleTime: 60_000,
+  });
+}
+
+/** Las cifras de arriba de Reportes, contadas igual que el Excel y el PDF. */
+export interface ResumenOperacion {
+  creadas: number;
+  finalizadas: number;
+  canceladas: number;
+  sinAsignar: number;
+  enCurso: number;
+  horaPico: { hora: string; carreras: number } | null;
+  asignacionP50: number | null;
+  llegadaP50: number | null;
+  duracionP50: number | null;
+  kmRecorridos: number;
+  sinIntervencion: number | null;
+  conductores: number;
+}
+
+export function useReportSummary(days = 7) {
+  return useQuery({
+    queryKey: ['reports', 'summary', days],
+    queryFn: () => api.get<ResumenOperacion>(`/v1/reports/summary?days=${days}`),
     staleTime: 60_000,
   });
 }

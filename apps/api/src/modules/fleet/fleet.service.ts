@@ -192,18 +192,20 @@ export class FleetService {
     return { ...resto, paused: status === 'PAUSED' };
   }
 
-  /** Lo que el conductor lleva hoy: carreras finalizadas y suma de tarifas. */
-  async todayTotals(driverId: string): Promise<{ rides: number; earned: number }> {
-    const result = await this.db.execute<{ rides: number; earned: number }>(sql`
-      select count(*)::int as rides,
-             coalesce(sum(fare_estimate), 0)::int as earned
+  /**
+   * Carreras que el conductor lleva hoy. Hoy en Paipa: la base corre en UTC,
+   * y a las siete de la tarde allí ya es el día siguiente.
+   */
+  async todayTotals(driverId: string): Promise<{ rides: number }> {
+    const result = await this.db.execute<{ rides: number }>(sql`
+      select count(*)::int as rides
         from rides
        where driver_id = ${driverId}
          and status = 'COMPLETED'
-         and finished_at >= date_trunc('day', now())
+         and finished_at >= date_trunc('day', now() at time zone 'America/Bogota') at time zone 'America/Bogota'
     `);
 
-    return result.rows[0] ?? { rides: 0, earned: 0 };
+    return result.rows[0] ?? { rides: 0 };
   }
 
   private async openShiftOf(driverId: string): Promise<{ id: string; vehicleId: string } | null> {

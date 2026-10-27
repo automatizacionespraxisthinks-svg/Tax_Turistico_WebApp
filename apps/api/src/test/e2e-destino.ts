@@ -1,4 +1,5 @@
 import 'dotenv/config';
+import { Pool } from 'pg';
 import { haversineKm } from '@tax/shared';
 
 /**
@@ -7,17 +8,18 @@ import { haversineKm } from '@tax/shared';
  * Casi nadie dice a donde va por WhatsApp: lo dice ya montado en el carro.
  * Asi que la mayoria de carreras nacen con punto de partida y nada mas, y el
  * destino aparece cuando el conductor marca finalizada, donde quiera que
- * este. De ahi salen la distancia y la tarifa real.
+ * este. De ahi sale la distancia recorrida.
  *
  * Lo que se comprueba aqui no es que el numero se guarde, sino las tres
  * cosas que pueden salir mal:
  *
  *  - que la posicion del conductor pise un destino que el cliente SI habia
  *    dicho, y acabe midiendo otra cosa;
- *  - que `fareEstimate` se sobrescriba y se pierda lo que se le prometio al
- *    cliente cuando pidio el taxi;
  *  - que un GPS sin senal o con una lectura absurda deje al conductor sin
  *    poder cerrar la carrera, con el cliente ya bajandose del carro.
+ *
+ * Como no se puede finalizar antes de diez minutos a bordo, la prueba
+ * adelanta en la base la hora de abordaje en vez de esperarlos.
  *
  *   pnpm --filter @tax/api exec tsx src/test/e2e-destino.ts <clave-de-api>
  */
@@ -31,6 +33,13 @@ const APARTADOS = [
   { code: '103', plate: 'SVM903' },
 ];
 const PIN = '4821';
+
+const pool = new Pool({ connectionString: process.env.DATABASE_URL, max: 1 });
+
+/** Como si el pasajero llevara once minutos a bordo: el mínimo para finalizar son diez. */
+async function pasarTiempoABordo(rideId: string): Promise<void> {
+  await pool.query(`update rides set started_at = now() - interval '11 minutes' where id = $1`, [rideId]);
+}
 
 const CENTRO = { lat: 5.7803, lng: -73.1142 };
 /** Unos 2 km al noreste, dentro de la zona Centro. */
@@ -106,6 +115,7 @@ async function hastaABordo(token: string, dropoff?: unknown): Promise<string> {
   assert(llegue.status < 400, 'marca que llego', llegue.body);
   const abordo = await call(`/v1/driver/rides/${rideId}/board`, { method: 'POST', token, body: { at: CENTRO } });
   assert(abordo.status < 400, 'el pasajero sube', abordo.body);
+  await pasarTiempoABordo(rideId);
   return rideId;
 }
 
@@ -137,24 +147,19 @@ async function main(): Promise<void> {
   console.log('\n1. Sin destino: lo pone el conductor al finalizar');
   const r1 = await hastaABordo(token);
   const antes = await call(`/v1/rides/${r1}`, { apiKey: true });
-  const estimada = (antes.body as { fareEstimate: number }).fareEstimate;
   assert((antes.body as { dropoffLat: number | null }).dropoffLat === null, 'nace sin destino');
-  assert(estimada > 0, `con tarifa estimada de ${estimada}`);
 
   const fin1 = await call(`/v1/driver/rides/${r1}/finish`, { method: 'POST', token, body: { at: DONDE_TERMINA } });
   assert(fin1.status < 400, 'el conductor la finaliza', fin1.body);
 
   const d1 = (await call(`/v1/rides/${r1}`, { apiKey: true })).body as {
     dropoffLat: number; dropoffLng: number; dropoffSource: string;
-    distanceKm: number; fareFinal: number; fareEstimate: number; status: string;
+    distanceKm: number; status: string;
   };
   assert(d1.status === 'COMPLETED', 'queda completada');
   assert(d1.dropoffLat === DONDE_TERMINA.lat && d1.dropoffLng === DONDE_TERMINA.lng, 'el destino es donde paro el taxi');
   assert(d1.dropoffSource === 'conductor', 'y queda anotado que lo puso el conductor');
   assert(d1.distanceKm > 0, `con distancia de ${d1.distanceKm} km`);
-  assert(d1.fareFinal > 0, `y tarifa real de ${d1.fareFinal}`);
-  // Lo que se le prometio al cliente no se toca.
-  assert(d1.fareEstimate === estimada, `la estimada sigue siendo ${estimada}, no la pisa la final`);
 
   /* ------------------------------------------------------------------ 2 */
   console.log('\n2. Con destino dicho por el cliente: no se pisa');
@@ -166,7 +171,7 @@ async function main(): Promise<void> {
   assert(fin2.status < 400, 'la finaliza en otro sitio distinto', fin2.body);
 
   const d2 = (await call(`/v1/rides/${r2}`, { apiKey: true })).body as {
-    dropoffLat: number; dropoffSource: string; distanceKm: number; fareFinal: number;
+    dropoffLat: number; dropoffSource: string; distanceKm: number;
   };
   assert(d2.dropoffLat === DESTINO_DICHO.lat, 'el destino sigue siendo el que dijo el cliente');
   assert(d2.dropoffSource === 'cliente', 'y asi queda anotado');
@@ -187,7 +192,6 @@ async function main(): Promise<void> {
     `la distancia es ${d2.distanceKm} km, la del destino dicho (${esperada}), no la de donde paro (${hastaDondeParo})`,
     d2,
   );
-  assert(d2.fareFinal > 0, `y la tarifa real es ${d2.fareFinal}`);
 
   /* ------------------------------------------------------------------ 3 */
   console.log('\n3. Sin GPS: el conductor cierra igual');
@@ -211,11 +215,11 @@ async function main(): Promise<void> {
   assert(fin4.status < 400, 'cierra aunque el GPS devuelva (0, 0)', fin4.body);
 
   const d4 = (await call(`/v1/rides/${r4}`, { apiKey: true })).body as {
-    status: string; distanceKm: number | null; dropoffLat: number | null; fareFinal: number | null;
+    status: string; distanceKm: number | null; dropoffLat: number | null;
   };
   assert(d4.status === 'COMPLETED', 'la carrera queda completada');
   assert(d4.dropoffLat === null, 'el punto absurdo NO se guardo como destino');
-  assert(d4.distanceKm === null && d4.fareFinal === null, 'ni se invento una distancia de once mil kilometros');
+  assert(d4.distanceKm === null, 'ni se invento una distancia de once mil kilometros');
 
   console.log('\n5. Limpieza');
   await call('/v1/driver/shift/close', { method: 'POST', token });
@@ -224,7 +228,9 @@ async function main(): Promise<void> {
   console.log('\nok La distancia queda registrada sin estorbarle al conductor\n');
 }
 
-main().catch((e) => {
-  console.error('\nLa prueba fallo:', e instanceof Error ? e.message : e);
-  process.exitCode = 1;
-});
+main()
+  .catch((e) => {
+    console.error('\nLa prueba fallo:', e instanceof Error ? e.message : e);
+    process.exitCode = 1;
+  })
+  .finally(() => pool.end());

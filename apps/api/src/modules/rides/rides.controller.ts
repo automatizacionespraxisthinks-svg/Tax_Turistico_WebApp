@@ -20,6 +20,8 @@ import { IdempotencyInterceptor } from '../../common/idempotency.interceptor';
 import { ApiKeyGuard, Scopes } from '../identity/api-key.guard';
 import { RidesService, type Actor } from './rides.service';
 import { DispatchService } from '../dispatch/dispatch.service';
+import { RealtimeGateway } from '../../realtime/realtime.gateway';
+import { FotosService } from './fotos.service';
 
 const addressSchema = z.object({
   text: z.string().min(3),
@@ -53,6 +55,8 @@ export class RidesController {
   constructor(
     private readonly rides: RidesService,
     private readonly dispatch: DispatchService,
+    private readonly fotos: FotosService,
+    private readonly realtime: RealtimeGateway,
   ) {}
 
   @Post()
@@ -110,6 +114,30 @@ export class RidesController {
     return { ok: true };
   }
 
+  /**
+   * La foto del lugar, para cuando el cliente la manda después de pedir el
+   * taxi. Dos formas, según lo que tenga n8n a mano:
+   *
+   * - el archivo tal cual, con `content-type: image/jpeg` (o png, webp) y la
+   *   imagen como cuerpo: es «n8n Binary File» en el nodo HTTP Request;
+   * - `{ "url": "…" }` en JSON, y la API la descarga.
+   *
+   * Hasta 5 MB. Si ya había una, la reemplaza. El conductor la ve al momento.
+   */
+  @Post(':rideId/photo')
+  @Scopes('rides:write')
+  async photo(@Req() request: FastifyRequest, @Param('rideId', ParseUUIDPipe) rideId: string) {
+    const actor = actorFrom(request, 'customer');
+    const cuerpo: unknown = request.body;
+
+    const ride = Buffer.isBuffer(cuerpo)
+      ? await this.fotos.guardar(rideId, cuerpo, 'archivo', actor)
+      : await this.fotos.desdeEnlace(rideId, fotoSchema.parse(cuerpo).url, actor);
+
+    this.realtime.rideChanged(ride);
+    return { ok: true, code: ride.code, pickupPhotoAt: ride.pickupPhotoAt };
+  }
+
   /** Asignación manual (RF-41). */
   @Post(':rideId/assign')
   @Scopes('rides:write')
@@ -122,6 +150,10 @@ export class RidesController {
     return this.dispatch.assignManually(rideId, body.driverId, actorFrom(request, 'operator'));
   }
 }
+
+const fotoSchema = z.object({ url: z.string().url().max(2000) }, {
+  error: 'Manda la imagen como cuerpo (image/jpeg) o un JSON con { "url": "…" }',
+});
 
 function actorFrom(request: FastifyRequest, kind: Actor['kind']): Actor {
   const principal = request.principal;

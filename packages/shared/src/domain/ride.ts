@@ -186,6 +186,13 @@ export const createRideSchema = z.object({
   vehicleType: z.enum(VEHICLE_TYPES).default('sedan'),
   passengers: z.number().int().min(1).max(8).default(1),
   notes: z.string().max(280).optional(),
+  /**
+   * Enlace a la foto del lugar que mandó el cliente (el `data_url` del
+   * adjunto en Chatwoot). La API la descarga después de crear la carrera; si
+   * falla, la carrera sigue adelante sin foto. También se puede mandar luego,
+   * con `POST /v1/rides/:id/photo`.
+   */
+  pickupPhotoUrl: z.string().url().max(2000).optional(),
 });
 export type CreateRideInput = z.infer<typeof createRideSchema>;
 
@@ -264,17 +271,15 @@ export interface Ride {
   zoneId: string;
   vehicleType: VehicleType;
   passengers: number;
-  /** Tarifa estimada en pesos; se comunica siempre como aproximada (Ley 1480). */
-  fareEstimate: number;
-  fareRuleVersion: string;
   /**
-   * Lo que resultó, una vez conocido el destino. Ausentes mientras la carrera
-   * no ha terminado, y también después si el conductor cerró sin GPS.
+   * Lo que se recorrió, una vez conocido el destino. Ausente mientras la
+   * carrera no ha terminado, y también después si el conductor cerró sin GPS.
    */
   distanceKm?: number;
-  fareFinal?: number;
   /** Quién puso el destino: el cliente al pedirla, o el conductor al cerrar. */
   dropoffSource?: 'cliente' | 'conductor';
+  /** Cuándo llegó la foto del lugar que mandó el cliente; ausente si no hay. */
+  pickupPhotoAt?: string;
   driverId?: string;
   line: string;
   chatwootConversationId?: number;

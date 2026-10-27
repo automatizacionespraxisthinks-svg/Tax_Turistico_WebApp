@@ -26,10 +26,13 @@ export interface FilaCarrera {
   conductorCodigo: string | null;
   conductor: string | null;
   placa: string | null;
-  tarifaEstimada: number;
-  tarifaFinal: number | null;
   distanciaKm: number | null;
+  /** De crear la carrera a que un conductor la acepte. */
   asignacionSegundos: number | null;
+  /** De aceptarla a marcar «Llegué»: lo que esperó el cliente al taxi. */
+  llegadaSegundos: number | null;
+  /** De «Pasajero a bordo» a finalizar. */
+  duracionMinutos: number | null;
   linea: string | null;
   intentos: number;
   motivoCancelacion: string | null;
@@ -81,10 +84,10 @@ export async function leerPeriodo(db: Database, params: ExportParams): Promise<P
     conductor_codigo: string | null;
     conductor: string | null;
     placa: string | null;
-    tarifa_estimada: number;
-    tarifa_final: number | null;
     distancia_km: number | null;
     asignacion_s: number | null;
+    llegada_s: number | null;
+    duracion_s: number | null;
     linea: string | null;
     intentos: number;
     motivo_cancelacion: string | null;
@@ -106,10 +109,10 @@ export async function leerPeriodo(db: Database, params: ExportParams): Promise<P
            d.code as conductor_codigo,
            d.name as conductor,
            v.plate as placa,
-           r.fare_estimate as tarifa_estimada,
-           r.fare_final as tarifa_final,
            r.distance_km as distancia_km,
            extract(epoch from r.assigned_at - r.created_at)::int as asignacion_s,
+           extract(epoch from r.arrived_at - r.assigned_at)::int as llegada_s,
+           extract(epoch from r.finished_at - r.started_at)::int as duracion_s,
            r.line as linea,
            r.intento_despacho as intentos,
            r.cancel_reason as motivo_cancelacion,
@@ -153,10 +156,12 @@ export async function leerPeriodo(db: Database, params: ExportParams): Promise<P
       conductorCodigo: f.conductor_codigo,
       conductor: f.conductor,
       placa: f.placa,
-      tarifaEstimada: f.tarifa_estimada,
-      tarifaFinal: f.tarifa_final,
       distanciaKm: f.distancia_km === null ? null : Number(f.distancia_km),
       asignacionSegundos: f.asignacion_s,
+      llegadaSegundos: f.llegada_s,
+      // Solo las que de verdad terminaron con el pasajero: una cancelada a
+      // bordo no tiene una duración que signifique nada.
+      duracionMinutos: f.estado === 'COMPLETED' && f.duracion_s !== null ? Math.round(f.duracion_s / 60) : null,
       linea: f.linea,
       intentos: f.intentos,
       motivoCancelacion: f.motivo_cancelacion,
@@ -167,9 +172,6 @@ export async function leerPeriodo(db: Database, params: ExportParams): Promise<P
 }
 
 /* --------------------------------------------------------- agregados --- */
-
-/** Lo que se cobró: la tarifa final si la hay, si no la que se le dijo al cliente. */
-export const facturado = (f: FilaCarrera) => f.tarifaFinal ?? f.tarifaEstimada;
 
 function percentil(valores: number[], p: number): number | null {
   if (valores.length === 0) return null;
@@ -187,14 +189,25 @@ export interface Resumen {
   canceladas: number;
   sinAsignar: number;
   enCurso: number;
-  facturado: number;
-  tarifaMedia: number | null;
   kmRecorridos: number;
   asignacionP50: number | null;
   asignacionP95: number | null;
+  /** Mediana, en segundos, de aceptar a llegar al punto. */
+  llegadaP50: number | null;
+  /** Mediana, en minutos, de las carreras finalizadas. */
+  duracionP50: number | null;
   sinIntervencion: number | null;
-  porZona: { zona: string; tipo: string; carreras: number; finalizadas: number; canceladas: number; facturado: number }[];
-  porConductor: { codigo: string; nombre: string; finalizadas: number; facturado: number; km: number }[];
+  /** La hora con más carreras: el pico del periodo. */
+  horaPico: { hora: string; carreras: number } | null;
+  porZona: { zona: string; tipo: string; carreras: number; finalizadas: number; canceladas: number }[];
+  porConductor: {
+    codigo: string;
+    nombre: string;
+    finalizadas: number;
+    km: number;
+    duracionP50: number | null;
+    llegadaP50: number | null;
+  }[];
   porHora: { hora: string; carreras: number }[];
   porDia: { dia: string; carreras: number; finalizadas: number; p50: number | null; p95: number | null }[];
 }
@@ -210,35 +223,40 @@ const diaLocal = new Intl.DateTimeFormat('en-CA', { timeZone: ZONA_HORARIA, year
 export function resumir(filas: FilaCarrera[]): Resumen {
   const finalizadas = filas.filter((f) => f.estado === 'COMPLETED');
   const asignaciones = filas.flatMap((f) => (f.asignacionSegundos === null ? [] : [f.asignacionSegundos]));
-  const totalFacturado = finalizadas.reduce((s, f) => s + facturado(f), 0);
+  const llegadas = filas.flatMap((f) => (f.llegadaSegundos === null ? [] : [f.llegadaSegundos]));
+  const duraciones = filas.flatMap((f) => (f.duracionMinutos === null ? [] : [f.duracionMinutos]));
 
   const porZona = new Map<string, Resumen['porZona'][number]>();
-  const porConductor = new Map<string, Resumen['porConductor'][number]>();
+  const porConductor = new Map<
+    string,
+    { codigo: string; nombre: string; finalizadas: number; km: number; duraciones: number[]; llegadas: number[] }
+  >();
   const porHora = new Map<string, number>();
   const porDia = new Map<string, { carreras: number; finalizadas: number; asignaciones: number[] }>();
 
   for (const f of filas) {
     const zona = f.zona ?? 'Sin zona';
-    const z = porZona.get(zona) ?? { zona, tipo: f.zonaTipo ?? '—', carreras: 0, finalizadas: 0, canceladas: 0, facturado: 0 };
+    const z = porZona.get(zona) ?? { zona, tipo: f.zonaTipo ?? '—', carreras: 0, finalizadas: 0, canceladas: 0 };
     z.carreras += 1;
-    if (f.estado === 'COMPLETED') {
-      z.finalizadas += 1;
-      z.facturado += facturado(f);
-    }
+    if (f.estado === 'COMPLETED') z.finalizadas += 1;
     if (f.estado === 'CANCELLED') z.canceladas += 1;
     porZona.set(zona, z);
 
-    if (f.estado === 'COMPLETED' && f.conductorCodigo) {
+    if (f.conductorCodigo) {
       const c = porConductor.get(f.conductorCodigo) ?? {
         codigo: f.conductorCodigo,
         nombre: f.conductor ?? '',
         finalizadas: 0,
-        facturado: 0,
         km: 0,
+        duraciones: [],
+        llegadas: [],
       };
-      c.finalizadas += 1;
-      c.facturado += facturado(f);
-      c.km += f.distanciaKm ?? 0;
+      if (f.estado === 'COMPLETED') {
+        c.finalizadas += 1;
+        c.km += f.distanciaKm ?? 0;
+      }
+      if (f.duracionMinutos !== null) c.duraciones.push(f.duracionMinutos);
+      if (f.llegadaSegundos !== null) c.llegadas.push(f.llegadaSegundos);
       porConductor.set(f.conductorCodigo, c);
     }
 
@@ -253,24 +271,37 @@ export function resumir(filas: FilaCarrera[]): Resumen {
     porDia.set(dia, d);
   }
 
+  const horas = Array.from({ length: 24 }, (_, h) => {
+    const hora = String(h).padStart(2, '0');
+    return { hora, carreras: porHora.get(hora) ?? 0 };
+  });
+  const pico = horas.reduce<Resumen['horaPico']>((max, h) => (h.carreras > (max?.carreras ?? 0) ? h : max), null);
+
   return {
     creadas: filas.length,
     finalizadas: finalizadas.length,
     canceladas: filas.filter((f) => f.estado === 'CANCELLED').length,
     sinAsignar: filas.filter((f) => f.estado === 'UNASSIGNED').length,
     enCurso: filas.filter((f) => !['COMPLETED', 'CANCELLED', 'UNASSIGNED'].includes(f.estado)).length,
-    facturado: totalFacturado,
-    tarifaMedia: finalizadas.length ? Math.round(totalFacturado / finalizadas.length) : null,
     kmRecorridos: Math.round(finalizadas.reduce((s, f) => s + (f.distanciaKm ?? 0), 0) * 10) / 10,
     asignacionP50: percentil(asignaciones, 0.5),
     asignacionP95: percentil(asignaciones, 0.95),
+    llegadaP50: percentil(llegadas, 0.5),
+    duracionP50: percentil(duraciones, 0.5),
     sinIntervencion: filas.length ? filas.filter((f) => !f.intervenida).length / filas.length : null,
+    horaPico: pico,
     porZona: [...porZona.values()].sort((a, b) => b.carreras - a.carreras),
-    porConductor: [...porConductor.values()].sort((a, b) => b.facturado - a.facturado),
-    porHora: Array.from({ length: 24 }, (_, h) => {
-      const hora = String(h).padStart(2, '0');
-      return { hora, carreras: porHora.get(hora) ?? 0 };
-    }),
+    porConductor: [...porConductor.values()]
+      .map((c) => ({
+        codigo: c.codigo,
+        nombre: c.nombre,
+        finalizadas: c.finalizadas,
+        km: Math.round(c.km * 10) / 10,
+        duracionP50: percentil(c.duraciones, 0.5),
+        llegadaP50: percentil(c.llegadas, 0.5),
+      }))
+      .sort((a, b) => b.finalizadas - a.finalizadas),
+    porHora: horas,
     porDia: [...porDia.entries()]
       .sort(([a], [b]) => a.localeCompare(b))
       .map(([dia, d]) => ({

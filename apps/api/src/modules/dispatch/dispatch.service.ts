@@ -5,7 +5,7 @@ import { and, eq, isNull, or, sql } from 'drizzle-orm';
 import { uuidv7 } from 'uuidv7';
 import { DB, type Database } from '../../db/db.module';
 import { AuditService } from '../audit/audit.service';
-import { drivers, rideOffers, rideStatusHistory, rides } from '../../db/schema';
+import { drivers, rideOffers, rideStatusHistory, rides, vehicles } from '../../db/schema';
 import { AppError } from '../../common/problem';
 import { isUniqueViolation } from '../../common/pg-errors';
 import { OutboxService } from '../integrations/outbox.service';
@@ -243,7 +243,6 @@ export class DispatchService {
         pickupText: ride.pickupText,
         pickupReference: ride.pickupReference,
         dropoffText: ride.dropoffText,
-        fareEstimate: ride.fareEstimate,
         passengers: ride.passengers,
         distanceKm: candidate.distanceKm,
         etaMinutes: candidate.etaMinutes,
@@ -262,7 +261,6 @@ export class DispatchService {
           rideId,
           code: ride.code,
           zona: zoneName,
-          fareEstimate: ride.fareEstimate,
           expiresAt: expiresAt.toISOString(),
         })
         .catch((error: unknown) => {
@@ -413,6 +411,13 @@ export class DispatchService {
           update rides
              set status = 'ASSIGNED',
                  driver_id = ${driverId},
+                 -- El taxi con el que va: el del turno abierto. Sin esto la
+                 -- carrera no sabía qué placa la llevó.
+                 vehicle_id = (
+                   select s.vehicle_id from driver_shifts s
+                    where s.driver_id = ${driverId} and s.ended_at is null
+                    limit 1
+                 ),
                  assigned_at = now(),
                  version = version + 1,
                  updated_at = now()
@@ -460,8 +465,10 @@ export class DispatchService {
          * la asignación) y la que explica quién tomó la carrera.
          */
         const driver = await tx
-          .select({ name: drivers.name })
+          .select({ name: drivers.name, code: drivers.code, plate: vehicles.plate, vehicleType: vehicles.type })
           .from(drivers)
+          .leftJoin(rides, eq(rides.id, rideId))
+          .leftJoin(vehicles, eq(vehicles.id, rides.vehicleId))
           .where(eq(drivers.id, driverId))
           .limit(1);
 
@@ -519,7 +526,22 @@ export class DispatchService {
             rideId,
             rideCode: row.code,
             rideVersion: row.version,
-            payload: { code: row.code, driverId },
+            /*
+             * Lo que el cliente necesita para reconocer el taxi: quién va, su
+             * código interno y la placa. n8n lo usa para el aviso de
+             * «ya va en camino» sin tener que pedir el detalle de la carrera.
+             */
+            payload: {
+              code: row.code,
+              driverId,
+              driver: {
+                id: driverId,
+                code: driver[0]?.code ?? null,
+                name: driver[0]?.name ?? null,
+                plate: driver[0]?.plate ?? null,
+                vehicleType: driver[0]?.vehicleType ?? null,
+              },
+            },
           }),
         );
 

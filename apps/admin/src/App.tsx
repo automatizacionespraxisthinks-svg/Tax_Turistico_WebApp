@@ -9,7 +9,7 @@ import { startLive } from './live/store';
 import { Operacion } from './pages/Operacion';
 import { Carreras } from './pages/Carreras';
 import { Flota } from './pages/Flota';
-import { ZonasTarifas } from './pages/ZonasTarifas';
+import { Zonas } from './pages/Zonas';
 import { Reportes } from './pages/Reportes';
 import { Sistema } from './pages/Sistema';
 
@@ -58,7 +58,7 @@ function AnimatedRoutes() {
           <Route path="/carreras" element={<Carreras />} />
           <Route path="/carreras/:rideId" element={<Carreras />} />
           <Route path="/flota" element={<Flota />} />
-          <Route path="/zonas" element={<ZonasTarifas />} />
+          <Route path="/zonas" element={<Zonas />} />
           <Route path="/reportes" element={<Reportes />} />
           <Route path="/sistema" element={<Sistema />} />
           <Route path="*" element={<Navigate to="/" replace />} />

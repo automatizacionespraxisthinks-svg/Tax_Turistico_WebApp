@@ -1,38 +1,22 @@
-import { Body, Controller, Get, Inject, Post, UseGuards } from '@nestjs/common';
+import { Controller, Get, Inject, UseGuards } from '@nestjs/common';
 import { desc, eq } from 'drizzle-orm';
 import { DB, type Database } from '../../db/db.module';
-import { fareRules, places } from '../../db/schema';
-import { z } from 'zod';
-import { pointSchema } from '@tax/shared';
-import { zodBody } from '../../common/zod.pipe';
-import { AppError } from '../../common/problem';
+import { places } from '../../db/schema';
 import { ApiKeyGuard, Scopes } from '../identity/api-key.guard';
 import { SessionGuard } from '../identity/guards';
 import { ZonesService } from './zones.service';
-import { FaresService } from './fares.service';
-import { GeocodingService } from './geocoding.service';
 
-const quoteSchema = z.object({
-  origin: pointSchema.optional(),
-  /**
-   * Alternativa a `origin` para quien solo tiene la direccion en palabras.
-   *
-   * La resuelve la API, igual que al crear la carrera: el agente de n8n
-   * nunca manda coordenadas, ni para cotizar. Si mandara las de la cotizacion
-   * y luego las de la carrera, podrian no ser las mismas.
-   */
-  originText: z.string().min(4).max(200).optional(),
-  destination: pointSchema.optional(),
-});
-
+/**
+ * Zonas para las integraciones.
+ *
+ * Aquí estaba `POST /v1/quotes`, con el que el agente de n8n cotizaba la
+ * tarifa. Se quitó con las tarifas: la empresa no maneja precios desde el
+ * sistema y el agente no debe prometer ninguno.
+ */
 @Controller('v1')
 @UseGuards(ApiKeyGuard)
 export class PricingController {
-  constructor(
-    private readonly zonesService: ZonesService,
-    private readonly faresService: FaresService,
-    private readonly geocoding: GeocodingService,
-  ) {}
+  constructor(private readonly zonesService: ZonesService) {}
 
   /** Las zonas con su configuración de oleadas, para el panel. */
   @Get('zones')
@@ -46,37 +30,9 @@ export class PricingController {
       waves: zone.waves,
     }));
   }
-
-  /**
-   * Tarifa estimada antes de crear la carrera: el agente la usa para
-   * confirmarle un valor aproximado al cliente.
-   */
-  @Post('quotes')
-  @Scopes('rides:read', 'rides:write')
-  async quote(@Body(zodBody(quoteSchema)) body: z.infer<typeof quoteSchema>) {
-    const origin = body.origin ?? (await this.resolverOrigen(body.originText));
-    return this.faresService.quote(origin, body.destination);
-  }
-
-  private async resolverOrigen(texto: string | undefined) {
-    if (!texto) {
-      throw new AppError('VALIDATION_FAILED', 'Hace falta `origin` o `originText`');
-    }
-
-    const hallada = await this.geocoding.resolve(texto);
-    if (!hallada) {
-      // El mismo mensaje que al crear la carrera, para que el agente sepa
-      // que lo siguiente es pedir la ubicacion y no reintentar lo mismo.
-      throw new AppError(
-        'MISSING_LOCATION',
-        'No se pudo ubicar esa dirección. Pídele al cliente que comparta su ubicación.',
-      );
-    }
-    return hallada.point;
-  }
 }
 
-/** Zonas, lugares y tarifas para el panel, con la sesión de la oficina. */
+/** Zonas y lugares para el panel, con la sesión de la oficina. */
 @Controller('v1/admin')
 @UseGuards(SessionGuard)
 export class AdminPricingController {
@@ -105,12 +61,5 @@ export class AdminPricingController {
       .from(places)
       .where(eq(places.active, true))
       .orderBy(desc(places.uses));
-  }
-
-  /** Tabla de precios completa, incluidas las versiones ya vencidas: una
-      carrera antigua se cobró con una de ellas y hay que poder verla. */
-  @Get('fare-rules')
-  listFareRules() {
-    return this.db.select().from(fareRules).orderBy(desc(fareRules.effectiveFrom));
   }
 }

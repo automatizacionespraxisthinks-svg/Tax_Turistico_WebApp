@@ -1,13 +1,21 @@
 import { index, integer, jsonb, pgTable, text, timestamp, uniqueIndex, uuid } from 'drizzle-orm/pg-core';
 import { zoneKind } from './enums';
-import type { FareSurcharge } from '@tax/shared';
+
+interface FareSurcharge {
+  id: string;
+  label: string;
+  amount: number;
+  fromHour?: number;
+  toHour?: number;
+}
 
 /**
- * Tabla de precios versionada.
+ * Tabla de precios versionada. YA NO SE USA.
  *
- * Cada fila referencia el acto administrativo de la alcaldía que la autoriza
- * y tiene vigencia propia; una carrera guarda la versión con la que se
- * calculó, de modo que un cambio de tarifa no reescribe el histórico (§9.2).
+ * La empresa no maneja tarifas desde el sistema: ni se calculan, ni se
+ * siembran, ni se muestran. La tabla se conserva solo porque las carreras
+ * viejas guardan la versión con la que se calcularon, y borrarla dejaría
+ * esas referencias sin explicación.
  */
 export const fareRules = pgTable(
   'fare_rules',

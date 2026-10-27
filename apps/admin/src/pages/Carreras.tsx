@@ -8,7 +8,6 @@ import {
   RIDE_STATUSES,
   RIDE_STATUS_LABEL,
   RIDE_STATUS_TONE,
-  formatMoney,
   formatRelative,
   formatTime,
 } from '@tax/shared';
@@ -173,7 +172,6 @@ export function Carreras() {
                 <Th>Recogida</Th>
                 <Th>Cliente</Th>
                 <Th>Conductor</Th>
-                <Th className="text-right">Tarifa</Th>
                 <Th className="pr-4 text-right">Creada</Th>
               </tr>
             </thead>
@@ -209,7 +207,6 @@ export function Carreras() {
                       <Td className="text-ink-secondary">
                         {driver ? `${driver.code} · ${driver.vehicle.plate}` : <Dash />}
                       </Td>
-                      <Td className="text-right tnum text-ink">{formatMoney(ride.fareEstimate)}</Td>
                       <Td className="pr-4 text-right text-ink-muted">
                         <time title={formatTime(ride.createdAt)}>{formatRelative(ride.createdAt)}</time>
                       </Td>

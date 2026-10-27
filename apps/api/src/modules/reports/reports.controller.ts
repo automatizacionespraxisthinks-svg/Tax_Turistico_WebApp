@@ -11,6 +11,11 @@ const rangeSchema = z.object({ days: z.coerce.number().int().min(1).max(90).defa
 export class ReportsController {
   constructor(private readonly reports: ReportsService) {}
 
+  @Get('summary')
+  summary(@Query(zodBody(rangeSchema)) query: z.infer<typeof rangeSchema>) {
+    return this.reports.summary(query.days);
+  }
+
   @Get('rides-by-hour')
   ridesByHour(@Query(zodBody(rangeSchema)) query: z.infer<typeof rangeSchema>) {
     return this.reports.ridesByHour(query.days);

@@ -240,6 +240,10 @@ PUBLIC_ORIGINS=https://panel.TUDOMINIO,https://conductor.TUDOMINIO
 # Operadores activos a la vez; los administradores no cuentan.
 MAX_OPERADORES=5
 
+# Minutos a bordo antes de poder finalizar, y días que se guarda la foto del lugar.
+MIN_DURACION_CARRERA_MIN=10
+PHOTO_RETENTION_DAYS=30
+
 POSITION_MAX_AGE_SECONDS=60
 ARRIVAL_RADIUS_METERS=150
 OUTBOX_MAX_ATTEMPTS=10
@@ -394,24 +398,25 @@ vez dentro. La pantalla ya lo advierte.
 
 ## 4. Primer arranque
 
-### 4.1 Siembra zonas y tarifas
+### 4.1 Siembra las zonas
 
-La base está vacía: sin zonas ni tarifas, la primera carrera falla con
-`NO_FARE_RULE`. Desde el terminal del contenedor `tax-api` en Dokploy:
+La base está vacía: sin zonas no hay dónde despachar. Desde el terminal del
+contenedor `tax-api` en Dokploy:
 
 ```bash
 node dist/cli/sembrar-produccion.js
 ```
 
-Crea las 7 zonas de Paipa con su factor de tortuosidad y sus oleadas, y las 4
-reglas tarifarias vigentes. Es idempotente: repetirlo no duplica nada.
+Crea las 7 zonas de Paipa con su factor de tortuosidad y sus oleadas. Es
+idempotente: repetirlo no duplica nada. Ya no siembra tarifas: el sistema no
+maneja precios.
 
 > **No ejecutes `dist/db/seed.js` aquí.** Ese es el sembrado de desarrollo y
-> además de zonas y tarifas crea cinco conductores de mentira **con el PIN
+> además de las zonas crea cinco conductores de mentira **con el PIN
 > `4821`**, un usuario de oficina con la contraseña
 > `desarrollo-no-usar-en-produccion` y tres líneas de WhatsApp inventadas.
 > Cualquiera que haya leído el repositorio podría entrar como conductor y
-> aceptar carreras. Los dos comparten las zonas y tarifas (`db/datos-base.ts`),
+> aceptar carreras. Los dos comparten las zonas (`db/datos-base.ts`),
 > así que no hay riesgo de que se desincronicen.
 
 ### 4.2 Crea el usuario de la oficina
@@ -578,6 +583,22 @@ cópialo directo a las credenciales de n8n.
   números de mentira). Si se quedaran, el monitor no las encontraría en WAHA y
   alertaría de la caída de dos líneas que nunca existieron. Las de verdad las
   escribe el monitor.
+- **Sin precios, el flujo del agente de n8n cambia.** `POST /v1/quotes` ya
+  no existe: en el flujo «Agente de carreras» hay que borrar la herramienta
+  `cotizar_tarifa` y la sección «LA TARIFA» del prompt. Si se quedan, el agente
+  intentará cotizar, recibirá un 404 y no sabrá qué decirle al cliente.
+- **Lo que n8n recibe y puede mandar desde la migración `0012_fotos_y_sin_tarifas`:**
+  - `ride.assigned` trae `data.driver` con `code`, `name`, `plate` y
+    `vehicleType`, y `GET /v1/rides/:id` trae lo mismo en `driver`: con eso se
+    arma el «ya va en camino» con código y placa.
+  - La foto del lugar: `pickupPhotoUrl` al crear la carrera (el `data_url` del
+    adjunto de Chatwoot), o después `POST /v1/rides/:id/photo` con la imagen
+    como cuerpo (`content-type: image/jpeg`, «n8n Binary File» en el nodo HTTP
+    Request) o con `{ "url": "…" }`. Hasta 5 MB; JPEG, PNG o WebP.
+  - Ningún evento lleva ya `fareEstimate` ni `fareFinal`.
+- **`MIN_DURACION_CARRERA_MIN`** (10 por defecto): minutos con el pasajero a
+  bordo antes de poder finalizar. **`PHOTO_RETENTION_DAYS`** (30): cuánto se
+  guarda la foto del lugar; se borra con la purga de madrugada.
 - **Las exportaciones no necesitan volumen.** Los Excel y PDF se guardan en
   la tabla `report_exports` (migración `0011_exportaciones`) y se borran solos
   a los siete días. Llevan nombres y teléfonos de clientes, así que viajan con

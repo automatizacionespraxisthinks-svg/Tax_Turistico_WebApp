@@ -1,19 +1,20 @@
 import { Module } from '@nestjs/common';
 import { ZonesService } from './zones.service';
-import { FaresService } from './fares.service';
+import { TrayectosService } from './trayectos.service';
 import { GeocodingService } from './geocoding.service';
 import { AdminPricingController, PricingController } from './pricing.controller';
 
 /**
- * Tarifas y zonas.
+ * Zonas y lugares.
  *
- * Es dueño de la tabla de precios, de los polígonos urbano/rural y del
- * catálogo de veredas y lugares. Expone `quote(origen, destino, hora)` y
- * `classify(punto)`; ningún otro módulo lee sus tablas (§4.1).
+ * Es dueño de los polígonos urbano/rural, del catálogo de veredas y lugares y
+ * de la geocodificación. Expone `medir(origen, destino)` y `classify(punto)`;
+ * ningún otro módulo lee sus tablas (§4.1). Las tarifas ya no viven aquí: la
+ * empresa no las maneja desde el sistema.
  */
 @Module({
-  providers: [ZonesService, FaresService, GeocodingService],
+  providers: [ZonesService, TrayectosService, GeocodingService],
   controllers: [PricingController, AdminPricingController],
-  exports: [ZonesService, FaresService, GeocodingService],
+  exports: [ZonesService, TrayectosService, GeocodingService],
 })
 export class PricingModule {}

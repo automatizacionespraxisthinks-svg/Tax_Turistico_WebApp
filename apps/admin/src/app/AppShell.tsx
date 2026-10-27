@@ -34,7 +34,7 @@ const NAV: NavItem[] = [
   { to: '/', label: 'Operación', icon: LayoutGrid, end: true },
   { to: '/carreras', label: 'Carreras', icon: RouteIcon },
   { to: '/flota', label: 'Flota', icon: Users },
-  { to: '/zonas', label: 'Zonas y tarifas', icon: Map },
+  { to: '/zonas', label: 'Zonas', icon: Map },
   { to: '/reportes', label: 'Reportes', icon: BarChart3 },
   { to: '/sistema', label: 'Sistema', icon: ServerCog },
 ];
@@ -43,7 +43,7 @@ const TITLES: Record<string, string> = {
   '/': 'Operación',
   '/carreras': 'Carreras',
   '/flota': 'Flota',
-  '/zonas': 'Zonas y tarifas',
+  '/zonas': 'Zonas',
   '/reportes': 'Reportes',
   '/sistema': 'Sistema',
 };

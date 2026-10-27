@@ -127,6 +127,37 @@ export class RetentionService {
 
     return { removed, batches, ms, complete, reason };
   }
+
+  /**
+   * Fotos del lugar de recogida, a los 30 días. Son pocas filas por noche
+   * —una por carrera con foto— así que van en una sentencia, sin lotes.
+   */
+  async purgePhotos(): Promise<number> {
+    const dias = this.env.PHOTO_RETENTION_DAYS;
+    const result = await this.db.execute<{ ride_id: string }>(sql`
+      with borradas as (
+        delete from ride_photos
+         where created_at < now() - make_interval(days => ${dias})
+        returning ride_id
+      )
+      update rides set pickup_photo_at = null
+       where id in (select ride_id from borradas)
+      returning id as ride_id
+    `);
+    const filas = result.rows.length;
+
+    if (filas > 0) {
+      await this.audit.record({
+        actorName: 'Sistema',
+        role: 'system',
+        action: 'Borrado por retención',
+        entity: 'ride_photos',
+        after: { fotos: filas, plazoDias: dias },
+      });
+    }
+    this.logger.log({ fotos: filas, plazoDias: dias }, filas > 0 ? 'Fotos del lugar purgadas' : 'Ninguna foto que purgar');
+    return filas;
+  }
 }
 
 function pause(ms: number): Promise<void> {

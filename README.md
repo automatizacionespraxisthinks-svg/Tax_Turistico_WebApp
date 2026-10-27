@@ -12,10 +12,10 @@ HTTP y reciben los cambios por socket. Ya no queda nada simulado.
 
 | Paquete | Qué es |
 | --- | --- |
-| `apps/admin` | Panel de oficina: operación en vivo, carreras, flota, zonas y tarifas, reportes, sistema |
+| `apps/admin` | Panel de oficina: operación en vivo, carreras, flota, zonas, reportes, sistema |
 | `apps/driver` | PWA de conductores: una pantalla por estado, botones de 64 px, cola sin conexión |
 | `packages/ui` | Sistema de diseño: tokens, vocabulario de movimiento y componentes |
-| `packages/shared` | Dominio compartido: estados, tabla de transiciones, tarifas, geometría, eventos |
+| `packages/shared` | Dominio compartido: estados, tabla de transiciones, geometría, eventos |
 | `packages/tiles` | Genera el archivo PMTiles de Paipa desde OpenStreetMap |
 | `apps/api` | Monolito NestJS: API, despacho, outbox y tiempo real en un proceso |
 
@@ -116,13 +116,23 @@ El panel no inventa acciones: cada botón sale de la tabla de transiciones.
 - **Máquina de estados** (`domain/ride.ts`): los ocho estados de la carrera y
   las transiciones permitidas con su actor y su condición. `transitionsFrom()`
   es lo que decide qué acciones ve el operador.
-- **Oleadas**: radio, número de candidatos y vencimiento por zona, editables
-  desde *Zonas y tarifas*.
+- **Oleadas**: radio, número de candidatos y vencimiento por zona, en
+  *Zonas*.
 - **ETA sin servidor de rutas**: distancia en línea recta × factor de
   tortuosidad de la zona, como fija el ADR-08.
-- **Tarifas versionadas**: cada carrera guarda la versión de la regla con que
-  se calculó, y la versión referencia el acto administrativo. Siempre se
-  presenta como *tarifa estimada*.
+- **Sin precios**: la empresa no maneja tarifas desde el sistema. Ni la PWA,
+  ni el panel, ni los informes muestran dinero; la API no calcula ninguno y
+  `POST /v1/quotes` ya no existe. La tabla `fare_rules` se conserva solo como
+  histórico de las carreras viejas.
+- **Diez minutos a bordo** (`MIN_DURACION_CARRERA_MIN`): «Finalizar» queda
+  bloqueado en la PWA con una cuenta atrás, y la API lo rechaza con
+  `RIDE_TOO_SHORT` si alguien se lo salta. La oficina sí puede cerrar antes.
+- **Foto del lugar**: el cliente la manda por WhatsApp y n8n la entrega con la
+  carrera (`pickupPhotoUrl`) o después (`POST /v1/rides/:id/photo`, el archivo
+  o un enlace). El conductor la ve mientras va a recogerlo, la oficina en la
+  ficha, y se borra a los 30 días.
+- **Al aceptar**, el evento `ride.assigned` lleva `driver: { code, name,
+  plate }`, y la carrera guarda el taxi con el que va.
 - **Outbox**: estados de entrega, reintentos y cola muerta visibles en
   *Sistema*, con reenvío manual.
 - **Líneas de WhatsApp vigiladas**: un monitor pregunta a WAHA cada minuto.

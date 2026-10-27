@@ -20,7 +20,11 @@ export class MaintenanceProcessor extends WorkerHost {
 
   async process(job: Job): Promise<unknown> {
     if (job.name === PURGE_POSITIONS_JOB) {
-      return this.retention.purgePositions();
+      // Las fotos van en el mismo turno de madrugada: es la misma regla, la
+      // de no guardar datos personales más de lo necesario (§9.3).
+      const posiciones = await this.retention.purgePositions();
+      const fotos = await this.retention.purgePhotos();
+      return { ...posiciones, fotos };
     }
 
     this.logger.warn({ name: job.name }, 'Trabajo de mantenimiento desconocido');

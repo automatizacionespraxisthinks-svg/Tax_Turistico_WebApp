@@ -1,5 +1,4 @@
 import PDFDocument from 'pdfkit';
-import { formatMoney } from '@tax/shared';
 import { formatoFechaHora, resumir, type Periodo } from './exports.data';
 
 /*
@@ -144,8 +143,11 @@ function barrasPorHora(doc: Doc, horas: { hora: string; carreras: number }[]): v
   doc.y = base + 18;
 }
 
-const pesos = (n: number | null) => (n === null ? '—' : formatMoney(n));
 const segundos = (n: number | null) => (n === null ? '—' : `${n} s`);
+const minutos = (n: number | null) => (n === null ? '—' : `${n} min`);
+/** Segundos a minutos con un decimal: «4,5 min». */
+const comoMinutos = (s: number | null) =>
+  s === null ? '—' : `${(Math.round(s / 6) / 10).toLocaleString('es-CO')} min`;
 
 export function generarPdf(periodo: Periodo, opciones: { titulo: string; pedidoPor: string }): Promise<Buffer> {
   const r = resumir(periodo.filas);
@@ -180,9 +182,17 @@ export function generarPdf(periodo: Periodo, opciones: { titulo: string; pedidoP
     { etiqueta: 'Carreras creadas', valor: String(r.creadas) },
     { etiqueta: 'Finalizadas', valor: String(r.finalizadas) },
     { etiqueta: 'Canceladas', valor: String(r.canceladas) },
-    { etiqueta: 'Sin asignar', valor: String(r.sinAsignar), nota: r.enCurso ? `${r.enCurso} en curso al generar` : undefined },
-    { etiqueta: 'Facturado', valor: pesos(r.facturado), nota: 'Carreras finalizadas' },
-    { etiqueta: 'Tarifa media', valor: pesos(r.tarifaMedia) },
+    { etiqueta: 'Sin asignar', valor: String(r.sinAsignar) },
+    {
+      etiqueta: 'Hora pico',
+      valor: r.horaPico ? `${r.horaPico.hora}:00` : '—',
+      nota: r.horaPico ? `${r.horaPico.carreras} carreras en esa hora` : undefined,
+    },
+    {
+      etiqueta: 'Llegada al punto',
+      valor: comoMinutos(r.llegadaP50),
+      nota: 'Mediana, de aceptar a «Llegué»',
+    },
     {
       etiqueta: 'Asignación',
       valor: segundos(r.asignacionP50),
@@ -193,6 +203,10 @@ export function generarPdf(periodo: Periodo, opciones: { titulo: string; pedidoP
       valor: r.sinIntervencion === null ? '—' : `${Math.round(r.sinIntervencion * 100)} %`,
       nota: 'Meta inicial 80 %',
     },
+    { etiqueta: 'Duración media', valor: minutos(r.duracionP50), nota: 'Mediana, a bordo' },
+    { etiqueta: 'Km recorridos', valor: r.kmRecorridos.toLocaleString('es-CO'), nota: 'Carreras finalizadas' },
+    { etiqueta: 'Conductores', valor: String(r.porConductor.length), nota: 'Con alguna carrera' },
+    { etiqueta: 'En curso', valor: String(r.enCurso), nota: 'Al generar el informe' },
   ]);
 
   /* -------------------------------------------------------- secciones --- */
@@ -203,14 +217,13 @@ export function generarPdf(periodo: Periodo, opciones: { titulo: string; pedidoP
   tabla(
     doc,
     [
-      { titulo: 'Zona', ancho: 170 },
-      { titulo: 'Tipo', ancho: 65 },
-      { titulo: 'Carreras', ancho: 65, derecha: true },
-      { titulo: 'Finalizadas', ancho: 70, derecha: true },
-      { titulo: 'Canceladas', ancho: 70, derecha: true },
-      { titulo: 'Facturado', ancho: 75, derecha: true },
+      { titulo: 'Zona', ancho: 195 },
+      { titulo: 'Tipo', ancho: 80 },
+      { titulo: 'Carreras', ancho: 80, derecha: true },
+      { titulo: 'Finalizadas', ancho: 80, derecha: true },
+      { titulo: 'Canceladas', ancho: 80, derecha: true },
     ],
-    r.porZona.map((z) => [z.zona, z.tipo, String(z.carreras), String(z.finalizadas), String(z.canceladas), pesos(z.facturado)]),
+    r.porZona.map((z) => [z.zona, z.tipo, String(z.carreras), String(z.finalizadas), String(z.canceladas)]),
   );
 
   tituloDeSeccion(doc, 'Por día', 'Tiempo hasta la asignación: segundos entre crear la carrera y que un conductor la acepte.');
@@ -226,17 +239,29 @@ export function generarPdf(periodo: Periodo, opciones: { titulo: string; pedidoP
     r.porDia.map((d) => [d.dia, String(d.carreras), String(d.finalizadas), segundos(d.p50), segundos(d.p95)]),
   );
 
-  tituloDeSeccion(doc, 'Por conductor', 'Carreras finalizadas. Facturado: la tarifa final, o la estimada si no la hubo.');
+  tituloDeSeccion(
+    doc,
+    'Por conductor',
+    'Llegada: mediana de aceptar a «Llegué». Duración: mediana de las carreras con el pasajero a bordo.',
+  );
   tabla(
     doc,
     [
-      { titulo: 'Código', ancho: 60 },
-      { titulo: 'Conductor', ancho: 215 },
-      { titulo: 'Finalizadas', ancho: 75, derecha: true },
-      { titulo: 'Facturado', ancho: 90, derecha: true },
-      { titulo: 'Km', ancho: 75, derecha: true },
+      { titulo: 'Código', ancho: 55 },
+      { titulo: 'Conductor', ancho: 170 },
+      { titulo: 'Finalizadas', ancho: 70, derecha: true },
+      { titulo: 'Km', ancho: 60, derecha: true },
+      { titulo: 'Llegada', ancho: 80, derecha: true },
+      { titulo: 'Duración', ancho: 80, derecha: true },
     ],
-    r.porConductor.map((c) => [c.codigo, c.nombre, String(c.finalizadas), pesos(c.facturado), c.km.toFixed(1)]),
+    r.porConductor.map((c) => [
+      c.codigo,
+      c.nombre,
+      String(c.finalizadas),
+      c.km.toFixed(1),
+      comoMinutos(c.llegadaP50),
+      minutos(c.duracionP50),
+    ]),
   );
 
   /* -------------------------------------------------------- pie de página --- */

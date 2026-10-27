@@ -7,7 +7,6 @@ import {
   type Periodo,
 } from './exports.data';
 
-const PESOS = '"$" #,##0';
 const FECHA_HORA = 'dd/mm/yyyy hh:mm';
 
 const VEHICULO: Record<string, string> = { sedan: 'Sedán', camioneta: 'Camioneta', van: 'Van' };
@@ -55,10 +54,10 @@ function hojaCarreras(libro: ExcelJS.Workbook, filas: FilaCarrera[]): void {
       { titulo: 'Cód. conductor', ancho: 14 },
       { titulo: 'Conductor', ancho: 22 },
       { titulo: 'Placa', ancho: 10 },
-      { titulo: 'Tarifa estimada', ancho: 15, formato: PESOS },
-      { titulo: 'Tarifa final', ancho: 13, formato: PESOS },
       { titulo: 'Distancia (km)', ancho: 14, formato: '0.0' },
       { titulo: 'Asignación (s)', ancho: 14 },
+      { titulo: 'Llegada al punto (min)', ancho: 20, formato: '0.0' },
+      { titulo: 'Duración (min)', ancho: 14 },
       { titulo: 'Línea', ancho: 12 },
       { titulo: 'Lanzamientos', ancho: 13 },
       { titulo: 'Con operador', ancho: 13 },
@@ -80,10 +79,10 @@ function hojaCarreras(libro: ExcelJS.Workbook, filas: FilaCarrera[]): void {
       f.conductorCodigo ?? '',
       f.conductor ?? '',
       f.placa ?? '',
-      f.tarifaEstimada,
-      f.tarifaFinal,
       f.distanciaKm,
       f.asignacionSegundos,
+      f.llegadaSegundos === null ? null : Math.round(f.llegadaSegundos / 6) / 10,
+      f.duracionMinutos,
       f.linea ?? '',
       f.intentos,
       f.intervenida ? 'Sí' : 'No',
@@ -113,11 +112,12 @@ function hojaResumen(libro: ExcelJS.Workbook, periodo: Periodo, pedidoPor: strin
     ['Canceladas', r.canceladas],
     ['Sin asignar', r.sinAsignar],
     ['En curso al generar', r.enCurso],
-    ['Facturado (finalizadas)', r.facturado, PESOS],
-    ['Tarifa media', r.tarifaMedia, PESOS],
+    ['Hora pico', r.horaPico ? `${r.horaPico.hora}:00 (${r.horaPico.carreras} carreras)` : null],
     ['Kilómetros recorridos', r.kmRecorridos, '0.0'],
     ['Asignación, mediana (s)', r.asignacionP50],
     ['Asignación, p95 (s)', r.asignacionP95],
+    ['Llegada al punto, mediana (min)', r.llegadaP50 === null ? null : Math.round(r.llegadaP50 / 6) / 10, '0.0'],
+    ['Duración de la carrera, mediana (min)', r.duracionP50],
     ['Sin intervención humana', r.sinIntervencion, '0%'],
   ];
   for (const [nombre, valor, formato] of cifras) {
@@ -138,10 +138,18 @@ function hojasDeResumen(libro: ExcelJS.Workbook, periodo: Periodo): void {
       { titulo: 'Código', ancho: 10 },
       { titulo: 'Conductor', ancho: 26 },
       { titulo: 'Finalizadas', ancho: 12 },
-      { titulo: 'Facturado', ancho: 15, formato: PESOS },
       { titulo: 'Km recorridos', ancho: 14, formato: '0.0' },
+      { titulo: 'Llegada al punto, mediana (min)', ancho: 28, formato: '0.0' },
+      { titulo: 'Duración, mediana (min)', ancho: 22 },
     ],
-    r.porConductor.map((c) => [c.codigo, c.nombre, c.finalizadas, c.facturado, Math.round(c.km * 10) / 10]),
+    r.porConductor.map((c) => [
+      c.codigo,
+      c.nombre,
+      c.finalizadas,
+      c.km,
+      c.llegadaP50 === null ? null : Math.round(c.llegadaP50 / 6) / 10,
+      c.duracionP50,
+    ]),
   );
 
   hoja(
@@ -153,9 +161,8 @@ function hojasDeResumen(libro: ExcelJS.Workbook, periodo: Periodo): void {
       { titulo: 'Carreras', ancho: 10 },
       { titulo: 'Finalizadas', ancho: 12 },
       { titulo: 'Canceladas', ancho: 12 },
-      { titulo: 'Facturado', ancho: 15, formato: PESOS },
     ],
-    r.porZona.map((z) => [z.zona, z.tipo, z.carreras, z.finalizadas, z.canceladas, z.facturado]),
+    r.porZona.map((z) => [z.zona, z.tipo, z.carreras, z.finalizadas, z.canceladas]),
   );
 
   hoja(
@@ -186,7 +193,8 @@ function hojasDeResumen(libro: ExcelJS.Workbook, periodo: Periodo): void {
  * El Excel de una exportación.
  *
  * - `resumen`: portada con las cifras, todas las carreras del periodo y las
- *   tablas por conductor (la liquidación), por zona, por día y por hora.
+ *   tablas por conductor, por zona, por día y por hora. Sin dinero: el
+ *   sistema vigila la operación, no cobra.
  * - `carreras`: portada y las carreras con los filtros de la vista.
  */
 export async function generarExcel(

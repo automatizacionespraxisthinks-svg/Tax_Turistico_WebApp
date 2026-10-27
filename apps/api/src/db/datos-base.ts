@@ -55,16 +55,6 @@ export const RURAL_WAVES = [
   { wave: 3 as const, radiusKm: 20, candidates: 14, timeoutSeconds: 120 },
 ];
 
-export const FARES = [
-  { origin: 'urbano', destination: 'urbano', base: 5400, perKm: 1750, min: 7000 },
-  { origin: 'urbano', destination: 'rural', base: 7200, perKm: 2400, min: 13000 },
-  { origin: 'rural', destination: 'urbano', base: 7200, perKm: 2400, min: 13000 },
-  { origin: 'rural', destination: 'rural', base: 8500, perKm: 2600, min: 16000 },
-] as const;
-
-export const FARE_VERSION = '2026.02';
-export const FARE_REFERENCE = 'Decreto municipal 041 de 2026';
-
 export async function sembrarZonas(db: Database): Promise<number> {
   for (const zone of ZONES) {
     await db
@@ -80,27 +70,4 @@ export async function sembrarZonas(db: Database): Promise<number> {
       .onConflictDoNothing();
   }
   return ZONES.length;
-}
-
-export async function sembrarTarifas(db: Database): Promise<number> {
-  for (const fare of FARES) {
-    await db
-      .insert(schema.fareRules)
-      .values({
-        id: uuidv7(),
-        version: FARE_VERSION,
-        originKind: fare.origin,
-        destinationKind: fare.destination,
-        baseFare: fare.base,
-        perKm: fare.perKm,
-        minimumFare: fare.min,
-        surcharges: [
-          { id: 's-noche', label: 'Recargo nocturno', amount: 1500, fromHour: 20, toHour: 5 },
-        ],
-        legalReference: FARE_REFERENCE,
-        effectiveFrom: new Date('2026-02-01T00:00:00Z'),
-      })
-      .onConflictDoNothing();
-  }
-  return FARES.length;
 }

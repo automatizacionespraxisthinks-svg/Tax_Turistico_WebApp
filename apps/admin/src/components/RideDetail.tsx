@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { AnimatePresence, motion } from 'motion/react';
-import { Ban, Car, MessageSquare, RefreshCw, ShieldCheck } from 'lucide-react';
+import { Ban, Camera, Car, MessageSquare, RefreshCw } from 'lucide-react';
 import type { Driver, Ride, RideOffer, WaveLogEntry } from '@tax/shared';
 import {
   ACTOR_LABEL,
@@ -8,7 +8,6 @@ import {
   RIDE_STATUS_TONE,
   formatDateTime,
   formatDistance,
-  formatMoney,
   formatTime,
   haversineKm,
   maskPhone,
@@ -29,6 +28,7 @@ import {
   useToast,
 } from '@tax/ui';
 import { actions, loadRideDetail, useLive } from '../live/store';
+import { API_BASE } from '../api/client';
 
 type DetailTab = 'resumen' | 'oleadas' | 'bitacora';
 
@@ -159,39 +159,23 @@ function Resumen({ ride, driver }: { ride: Ride; driver?: Driver }) {
         </div>
       ) : null}
 
-      <div>
-        <SectionLabel>Tarifa</SectionLabel>
-        <div className="mt-2 rounded-md border border-line bg-surface-sunk px-3 py-2.5">
-          <div className="flex items-baseline justify-between">
-            <div>
-              <p className="text-title font-semibold tnum text-ink">
-                {formatMoney(ride.fareFinal ?? ride.fareEstimate)}
-              </p>
-              <p className="text-micro text-ink-muted">
-                {ride.fareFinal !== undefined
-                  ? `Final${ride.distanceKm !== undefined ? ` · ${formatKm(ride.distanceKm)}` : ''} · regla ${ride.fareRuleVersion}`
-                  : `Estimada · regla ${ride.fareRuleVersion} · zona ${zone?.name ?? '—'}`}
-              </p>
-            </div>
-            <span className="inline-flex items-center gap-1 text-micro text-ink-muted">
-              <ShieldCheck className="size-3.5" />
-              Tarifa autorizada
-            </span>
-          </div>
+      {ride.pickupPhotoAt ? <FotoDelLugar rideId={ride.id} version={ride.pickupPhotoAt} /> : null}
 
-          {/*
-            Con tarifa final, la estimada no desaparece: es la que se le dijo
-            al cliente cuando pidio el taxi. Si hay diferencia, la oficina la
-            ve aqui y no cuando el cliente llama a reclamar.
-          */}
-          {ride.fareFinal !== undefined ? (
-            <p className="mt-2 border-t border-line pt-2 text-micro text-ink-muted">
-              Se le dijo {formatMoney(ride.fareEstimate)} al pedirla
-              {ride.fareFinal !== ride.fareEstimate
-                ? ` · ${ride.fareFinal > ride.fareEstimate ? '+' : '−'}${formatMoney(Math.abs(ride.fareFinal - ride.fareEstimate))}`
-                : ' · sin diferencia'}
-            </p>
-          ) : null}
+      {/* Sin precios: la empresa no los maneja desde el sistema. Lo que sí
+          cuenta para la operación es cuánto se recorrió. */}
+      <div>
+        <SectionLabel>Recorrido</SectionLabel>
+        <div className="mt-2 rounded-md border border-line bg-surface-sunk px-3 py-2.5">
+          <p className="text-title font-semibold tnum text-ink">
+            {ride.distanceKm !== undefined ? formatKm(ride.distanceKm) : '—'}
+          </p>
+          <p className="text-micro text-ink-muted">
+            {ride.distanceKm !== undefined
+              ? ride.dropoffSource === 'conductor'
+                ? `Hasta donde el conductor la finalizó · zona ${zone?.name ?? '—'}`
+                : `Hasta el destino que dijo el cliente · zona ${zone?.name ?? '—'}`
+              : `Se mide al finalizar · zona ${zone?.name ?? '—'}`}
+          </p>
         </div>
       </div>
 
@@ -674,5 +658,58 @@ function Bitacora({ ride }: { ride: Ride }) {
         );
       })}
     </ol>
+  );
+}
+
+/**
+ * La foto del lugar que mandó el cliente, la misma que ve el conductor. Va
+ * con la sesión de la oficina, que un `<img src>` no lleva a otro dominio.
+ */
+function FotoDelLugar({ rideId, version }: { rideId: string; version: string }) {
+  const [url, setUrl] = useState<string>();
+  const [fallo, setFallo] = useState(false);
+
+  useEffect(() => {
+    let creada: string | undefined;
+    let cancelado = false;
+    setFallo(false);
+    fetch(`${API_BASE}/v1/admin/rides/${rideId}/photo`, { credentials: 'include' })
+      .then(async (respuesta) => {
+        if (!respuesta.ok) throw new Error(String(respuesta.status));
+        const blob = await respuesta.blob();
+        if (cancelado) return;
+        creada = URL.createObjectURL(blob);
+        setUrl(creada);
+      })
+      .catch(() => {
+        if (!cancelado) setFallo(true);
+      });
+    return () => {
+      cancelado = true;
+      if (creada) URL.revokeObjectURL(creada);
+    };
+  }, [rideId, version]);
+
+  return (
+    <div>
+      <SectionLabel>Foto del lugar</SectionLabel>
+      <div className="mt-2 overflow-hidden rounded-md border border-line bg-surface-sunk">
+        {fallo ? (
+          <p className="px-3 py-2.5 text-caption text-ink-muted">
+            La foto ya no está disponible: se borran a los 30 días.
+          </p>
+        ) : url ? (
+          <a href={url} target="_blank" rel="noreferrer" title="Abrir la foto en grande">
+            <img src={url} alt="Foto del lugar de recogida" className="max-h-64 w-full object-cover" />
+          </a>
+        ) : (
+          <div className="animate-breathe h-40 w-full" />
+        )}
+        <p className="flex items-center gap-1.5 border-t border-line px-3 py-1.5 text-micro text-ink-muted">
+          <Camera className="size-3" />
+          La mandó el cliente por WhatsApp · el conductor la ve mientras va a recogerlo
+        </p>
+      </div>
+    </div>
   );
 }

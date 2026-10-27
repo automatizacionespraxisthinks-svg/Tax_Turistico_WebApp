@@ -1,5 +1,6 @@
 import { Module, forwardRef } from '@nestjs/common';
 import { RidesService } from './rides.service';
+import { FotosService } from './fotos.service';
 import { RidesController } from './rides.controller';
 import { DriverRidesController } from './driver-rides.controller';
 import { PricingModule } from '../pricing/pricing.module';
@@ -16,7 +17,7 @@ import { DispatchModule } from '../dispatch/dispatch.module';
  */
 @Module({
   imports: [PricingModule, FleetModule, IntegrationsModule, forwardRef(() => DispatchModule)],
-  providers: [RidesService],
+  providers: [RidesService, FotosService],
   controllers: [RidesController, DriverRidesController, AdminRidesController],
   exports: [RidesService],
 })

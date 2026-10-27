@@ -55,6 +55,7 @@ export const ERROR_CODES = {
   OFFER_NOT_VALID: 'La oferta venció o fue revocada',
   DRIVER_BUSY: 'El conductor ya tiene una carrera activa',
   DRIVER_OFF_SHIFT: 'El conductor no tiene un turno abierto',
+  RIDE_TOO_SHORT: 'Todavía no ha pasado el tiempo mínimo para finalizar',
   NO_FARE_RULE: 'No hay regla tarifaria vigente para ese par de zonas',
 
   INTERNAL: 'Error interno',
@@ -89,6 +90,7 @@ const STATUS_BY_CODE: Record<ErrorCode, HttpStatus> = {
   OFFER_NOT_VALID: HttpStatus.GONE,
   DRIVER_BUSY: HttpStatus.CONFLICT,
   DRIVER_OFF_SHIFT: HttpStatus.CONFLICT,
+  RIDE_TOO_SHORT: HttpStatus.CONFLICT,
   NO_FARE_RULE: HttpStatus.UNPROCESSABLE_ENTITY,
 
   INTERNAL: HttpStatus.INTERNAL_SERVER_ERROR,

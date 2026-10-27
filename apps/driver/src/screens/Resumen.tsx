@@ -1,6 +1,5 @@
 import { motion } from 'motion/react';
 import { Check } from 'lucide-react';
-import { formatMoney } from '@tax/shared';
 import { AnimatedNumber, Button, spring, transition } from '@tax/ui';
 import { ActionBar, DataRow, Screen } from '../components/Chrome';
 import type { OfferedRide, SessionState } from '../state/session';
@@ -15,6 +14,10 @@ export function Resumen({
   session: SessionState;
   onContinue: () => void;
 }) {
+  // Lo que duró con el pasajero a bordo: lo único de la carrera que le dice
+  // algo al conductor ahora que no se manejan precios.
+  const minutos = offer?.startedAt ? Math.max(1, Math.round((Date.now() - offer.startedAt) / 60_000)) : null;
+
   return (
     <>
       <Screen className="justify-center text-center">
@@ -42,16 +45,11 @@ export function Resumen({
               <p className="mt-1.5 font-mono text-caption text-ink-muted">{offer.code}</p>
             ) : null}
           </div>
-
-          <p className="tnum text-[2.5rem] font-semibold leading-none tracking-[-0.025em] text-ink">
-            {formatMoney(session.lastFare)}
-          </p>
-          <p className="-mt-3 text-base text-ink-muted">Tarifa estimada de esta carrera</p>
         </div>
 
         <div className="mt-6 rounded-lg border border-line bg-surface px-4 text-left">
+          {minutos !== null ? <DataRow label="Con el pasajero a bordo" value={`${minutos} min`} /> : null}
           <DataRow label="Carreras de hoy" value={<AnimatedNumber value={session.ridesToday} />} />
-          <DataRow label="Total del día" value={formatMoney(session.earnedToday)} />
         </div>
       </Screen>
 

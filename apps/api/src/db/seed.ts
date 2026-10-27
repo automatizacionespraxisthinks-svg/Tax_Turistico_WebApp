@@ -5,7 +5,7 @@ import { uuidv7 } from 'uuidv7';
 import { sql } from 'drizzle-orm';
 import * as schema from './schema';
 import type { Database } from './db.module';
-import { sembrarTarifas, sembrarZonas } from './datos-base';
+import { sembrarZonas } from './datos-base';
 import { hashSecret, randomHex, randomToken } from '../common/crypto';
 
 /**
@@ -31,11 +31,10 @@ async function main(): Promise<void> {
   const pool = new Pool({ connectionString: url, max: 2 });
   const db = drizzle(pool, { schema, casing: 'snake_case' });
 
-  console.log('Sembrando zonas y tarifas…');
+  console.log('Sembrando zonas…');
   // Compartidas con `cli/sembrar-produccion.ts`: una sola fuente de verdad,
   // para que lo que se prueba en desarrollo sea lo que corre en producción.
   await sembrarZonas(db as unknown as Database);
-  await sembrarTarifas(db as unknown as Database);
 
   console.log('Sembrando flota…');
   // Un PIN de desarrollo, igual para todos. En producción cada conductor fija

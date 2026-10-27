@@ -1,9 +1,5 @@
-import { customType, index, integer, jsonb, pgTable, text, timestamp, uuid } from 'drizzle-orm/pg-core';
-
-/** `bytea` de PostgreSQL: pg lo devuelve como `Buffer`. */
-const bytea = customType<{ data: Buffer; driverData: Buffer }>({
-  dataType: () => 'bytea',
-});
+import { index, integer, jsonb, pgTable, text, timestamp, uuid } from 'drizzle-orm/pg-core';
+import { bytea } from './bytea';
 
 export type ExportKind = 'resumen' | 'carreras';
 export type ExportFormat = 'xlsx' | 'pdf';

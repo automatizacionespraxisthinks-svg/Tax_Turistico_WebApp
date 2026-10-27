@@ -14,6 +14,7 @@ import {
   uuid,
 } from 'drizzle-orm/pg-core';
 import { drivers, vehicles } from './fleet';
+import { bytea } from './bytea';
 import { zones } from './geo';
 import { offerResponse, rideStatus, transitionActor, vehicleType } from './enums';
 
@@ -96,10 +97,10 @@ export const rides = pgTable(
 
     /** Pesos colombianos, sin decimales. Siempre «estimada» de cara al
         cliente (Ley 1480). */
-    fareEstimate: integer('fare_estimate').notNull(),
+    fareEstimate: integer('fare_estimate'),
     /** Versión de la regla con la que se calculó: una carrera conserva su
         tarifa aunque la tabla cambie después (§9.2). */
-    fareRuleVersion: text('fare_rule_version').notNull(),
+    fareRuleVersion: text('fare_rule_version'),
     /**
      * Distancia y tarifa calculadas al finalizar, con el destino ya conocido.
      *
@@ -117,6 +118,12 @@ export const rides = pgTable(
     /** Línea de WhatsApp por la que entró. */
     line: text('line'),
     chatwootConversationId: integer('chatwoot_conversation_id'),
+    /**
+     * Cuándo llegó la foto del lugar que mandó el cliente; nulo si no hay.
+     * La foto en sí va en `ride_photos`, para que listar carreras no arrastre
+     * cientos de KB por fila.
+     */
+    pickupPhotoAt: timestamp('pickup_photo_at', { withTimezone: true }),
 
     etaMinutes: integer('eta_minutes'),
     notes: text('notes'),
@@ -258,6 +265,26 @@ export const rideAddressEdits = pgTable(
   },
   (table) => [index('ride_address_edits_ride_idx').on(table.rideId, table.at)],
 );
+
+/**
+ * La foto del punto de recogida que manda el cliente por WhatsApp: la puerta,
+ * la esquina, la tienda de al lado. Al conductor le dice en un vistazo lo que
+ * una dirección de vereda no dice nunca.
+ *
+ * Una por carrera: si el cliente manda otra, reemplaza a la anterior. Se borra
+ * a los 30 días (§9.3); puede verse la casa del cliente y no hace falta más.
+ */
+export const ridePhotos = pgTable('ride_photos', {
+  rideId: uuid('ride_id')
+    .primaryKey()
+    .references(() => rides.id, { onDelete: 'cascade' }),
+  content: bytea('content').notNull(),
+  mimeType: text('mime_type').notNull(),
+  sizeBytes: integer('size_bytes').notNull(),
+  /** De dónde salió: un enlace que la API descargó, o el archivo enviado tal cual. */
+  source: text('source').$type<'enlace' | 'archivo'>().notNull(),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+});
 
 export const ridesRelations = relations(rides, ({ one, many }) => ({
   customer: one(customers, { fields: [rides.customerId], references: [customers.id] }),

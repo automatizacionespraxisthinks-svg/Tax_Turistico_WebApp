@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { motion } from 'motion/react';
 import { Check, MapPin, Users, X } from 'lucide-react';
-import { formatDistance, formatMoney } from '@tax/shared';
+import { formatDistance } from '@tax/shared';
 import { Button, ProgressRing, StatusPill, cn, transition } from '@tax/ui';
 import { ActionBar, AddressBlock, Screen } from '../components/Chrome';
 import type { OfferedRide } from '../state/session';
@@ -103,12 +103,6 @@ export function Oferta({
             Destino
           </p>
           <p className="mt-1 text-xl font-medium text-ink">{offer.dropoffText}</p>
-          <div className="mt-3 flex items-baseline justify-between border-t border-line pt-3">
-            <span className="text-base text-ink-muted">Tarifa estimada</span>
-            <span className="tnum text-2xl font-semibold text-ink">
-              {formatMoney(offer.fareEstimate)}
-            </span>
-          </div>
         </div>
 
         {offer.notes ? (

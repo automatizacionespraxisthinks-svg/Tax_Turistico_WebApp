@@ -1,8 +1,7 @@
 import { useState } from 'react';
 import { AnimatePresence, motion } from 'motion/react';
-import { FileText, Gauge, MapPin, Radar, Save } from 'lucide-react';
-import type { FareRule, Place, WaveConfig, Zone } from '@tax/shared';
-import { formatMoney } from '@tax/shared';
+import { MapPin, Radar, Save } from 'lucide-react';
+import type { Place, WaveConfig, Zone } from '@tax/shared';
 import {
   Button,
   Card,
@@ -11,25 +10,29 @@ import {
   Field,
   Input,
   SectionLabel,
-  Segmented,
   StatusPill,
   Tabs,
-  cn,
   staggerItem,
   staggerList,
   transition,
   useToast,
 } from '@tax/ui';
-import { useFareRules, usePlaces } from '../api/queries';
+import { usePlaces } from '../api/queries';
 import { useLive } from '../live/store';
 
-type Tab = 'zonas' | 'lugares' | 'tarifas';
+type Tab = 'zonas' | 'lugares';
 
-export function ZonasTarifas() {
+/**
+ * Zonas y lugares.
+ *
+ * Aquí había también una pestaña de tarifas. Se quitó: la empresa no maneja
+ * precios desde el sistema, y el panel no muestra dinero en ninguna parte.
+ * Las zonas siguen: con ellas se despacha.
+ */
+export function Zonas() {
   const [tab, setTab] = useState<Tab>('zonas');
   const zoneCount = useLive((s) => s.zones.length);
   const places = usePlaces();
-  const fareRules = useFareRules();
 
   return (
     <div className="space-y-4 p-5">
@@ -39,7 +42,6 @@ export function ZonasTarifas() {
         options={[
           { value: 'zonas', label: 'Zonas y oleadas', count: zoneCount },
           { value: 'lugares', label: 'Catálogo de lugares', count: places.data?.length },
-          { value: 'tarifas', label: 'Tarifas', count: fareRules.data?.length },
         ]}
       />
 
@@ -51,9 +53,8 @@ export function ZonasTarifas() {
           exit={{ opacity: 0, y: -6 }}
           transition={transition.base}
         >
-          {tab === 'zonas' ? <Zonas /> : null}
+          {tab === 'zonas' ? <ZonasYOleadas /> : null}
           {tab === 'lugares' ? <Lugares places={places.data ?? []} /> : null}
-          {tab === 'tarifas' ? <Tarifas rules={fareRules.data ?? []} /> : null}
         </motion.div>
       </AnimatePresence>
     </div>
@@ -62,7 +63,7 @@ export function ZonasTarifas() {
 
 /* -------------------------------------------------------------------- zonas */
 
-function Zonas() {
+function ZonasYOleadas() {
   const loaded = useLive((s) => s.zones);
   const [edits, setEdits] = useState<Record<string, Zone>>({});
   const [editing, setEditing] = useState<string | null>(null);
@@ -291,99 +292,5 @@ function Lugares({ places }: { places: Place[] }) {
         ))}
       </ul>
     </Card>
-  );
-}
-
-/* ------------------------------------------------------------------ tarifas */
-
-function Tarifas({ rules }: { rules: FareRule[] }) {
-  const versions = Array.from(new Set(rules.map((r) => r.version)));
-  const [version, setVersion] = useState(versions[0] ?? '');
-  const selected = version || versions[0] || '';
-  const rows = rules.filter((r) => r.version === selected);
-  const legal = rows[0]?.legalReference;
-
-  if (rules.length === 0) {
-    return (
-      <Card>
-        <EmptyState
-          icon={<FileText className="size-4" />}
-          title="Sin tarifas cargadas"
-          description="La tabla de precios la publica la empresa con el acto administrativo vigente."
-        />
-      </Card>
-    );
-  }
-
-  return (
-    <div className="space-y-3">
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <Segmented
-          value={selected}
-          onChange={setVersion}
-          options={versions.map((v) => ({ value: v, label: `Versión ${v}` }))}
-        />
-        <p className="inline-flex items-center gap-1.5 text-caption text-ink-muted">
-          <FileText className="size-3.5" />
-          {legal}
-        </p>
-      </div>
-
-      <Card flush className="overflow-x-auto">
-        <table className="w-full text-left">
-          <thead>
-            <tr className="border-b border-line text-micro uppercase tracking-[0.06em] text-ink-muted">
-              <th className="px-4 py-2 font-medium">Origen → destino</th>
-              <th className="px-3 py-2 text-right font-medium">Banderazo</th>
-              <th className="px-3 py-2 text-right font-medium">Por km</th>
-              <th className="px-3 py-2 text-right font-medium">Mínima</th>
-              <th className="px-4 py-2 font-medium">Recargos</th>
-            </tr>
-          </thead>
-          <tbody>
-            {rows.map((rule) => (
-              <tr key={`${rule.originKind}-${rule.destinationKind}`} className="border-b border-line last:border-0">
-                <td className="px-4 py-2.5 text-base text-ink">
-                  <span className="capitalize">{rule.originKind}</span>
-                  <span className="mx-1.5 text-ink-muted">→</span>
-                  <span className="capitalize">{rule.destinationKind}</span>
-                </td>
-                <td className="px-3 py-2.5 text-right tnum text-base text-ink">{formatMoney(rule.baseFare)}</td>
-                <td className="px-3 py-2.5 text-right tnum text-base text-ink">{formatMoney(rule.perKm)}</td>
-                <td className="px-3 py-2.5 text-right tnum text-base text-ink">{formatMoney(rule.minimumFare)}</td>
-                <td className="px-4 py-2.5">
-                  <div className="flex flex-wrap gap-1">
-                    {rule.surcharges.map((s) => (
-                      <span
-                        key={s.id}
-                        className="rounded-full border border-line px-2 py-0.5 text-micro text-ink-secondary"
-                        title={
-                          s.fromHour !== undefined ? `De ${s.fromHour}:00 a ${s.toHour}:00` : 'Siempre'
-                        }
-                      >
-                        {s.label} +{formatMoney(s.amount)}
-                      </span>
-                    ))}
-                  </div>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </Card>
-
-      <div
-        className={cn(
-          'tone-warning flex items-start gap-2.5 rounded-md border border-[var(--tone-line)] bg-[var(--tone-bg)] px-3 py-2.5',
-        )}
-      >
-        <Gauge className="mt-0.5 size-4 shrink-0 text-[var(--tone-ink)]" />
-        <p className="text-base text-[var(--tone-ink)]">
-          Cada carrera guarda la versión de la regla con la que se calculó. Al cliente siempre se le
-          informa <span className="font-medium">tarifa estimada</span>; la tarifa cobrada debe
-          coincidir con la autorizada por la alcaldía.
-        </p>
-      </div>
-    </div>
   );
 }

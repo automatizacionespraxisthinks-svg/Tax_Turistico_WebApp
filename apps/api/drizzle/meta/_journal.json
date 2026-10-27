@@ -85,6 +85,13 @@
       "when": 1792944728341,
       "tag": "0011_exportaciones",
       "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "7",
+      "when": 1793111061361,
+      "tag": "0012_fotos_y_sin_tarifas",
+      "breakpoints": true
     }
   ]
 }

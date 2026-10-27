@@ -39,7 +39,8 @@ interface DriverSessionResponse {
   driver: { id: string; code: string; name: string };
   /** Turno abierto, si lo hay: decide si la PWA arranca en espera o fuera. */
   shift: { shiftId: string; plate: string; startedAt: string; paused: boolean } | null;
-  totals: { rides: number; earned: number };
+  totals: { rides: number };
+  rules?: { minRideMinutes: number };
   activeRide: ApiRide | null;
   pendingOffer: {
     rideId: string;
@@ -89,6 +90,7 @@ export function App() {
           rideStatus: me.activeRide.status as 'ASSIGNED' | 'DRIVER_ARRIVED' | 'IN_PROGRESS',
           shiftStartedAt,
           totals: me.totals,
+          minRideMinutes: me.rules?.minRideMinutes,
         });
         return;
       }
@@ -100,6 +102,7 @@ export function App() {
           phase: 'offer',
           shiftStartedAt,
           totals: me.totals,
+          minRideMinutes: me.rules?.minRideMinutes,
           offer: {
             ...offer,
             distanceKm: me.pendingOffer.distanceKm,
@@ -128,6 +131,7 @@ export function App() {
         offer: null,
         shiftStartedAt,
         totals: me.totals,
+        minRideMinutes: me.rules?.minRideMinutes,
       });
     } catch (error) {
       if (error instanceof ApiError && error.status === 401) {
@@ -436,6 +440,7 @@ export function App() {
                 offer={session.offer}
                 status={session.rideStatus}
                 metersToPickup={session.metersToPickup}
+                minRideMinutes={session.minRideMinutes}
                 onArrived={() =>
                   void command(
                     `/v1/driver/rides/${rideId}/arrived`,

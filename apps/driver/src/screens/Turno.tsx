@@ -1,6 +1,6 @@
 import { motion } from 'motion/react';
 import { BellOff, BellRing, Coffee, LogOut, Play, Radar } from 'lucide-react';
-import { formatDuration, formatMoney } from '@tax/shared';
+import { formatDuration } from '@tax/shared';
 import { useState } from 'react';
 import { Button, Field, Input, StatusPill, transition } from '@tax/ui';
 import { ActionBar, DataRow, Screen } from '../components/Chrome';
@@ -125,7 +125,6 @@ export function Turno({
 
         <div className="rounded-lg border border-line bg-surface px-4">
           <DataRow label="Carreras de hoy" value={session.ridesToday} />
-          <DataRow label="Total estimado" value={formatMoney(session.earnedToday)} />
           {plate ? <DataRow label="Vehículo" value={plate} /> : null}
         </div>
 

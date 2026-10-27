@@ -98,6 +98,13 @@ async function bootstrap(): Promise<void> {
   await app.init();
   const fastify = app.getHttpAdapter().getInstance();
   fastify.removeContentTypeParser('application/json');
+  // La foto del lugar llega como archivo: el cuerpo es la imagen tal cual.
+  // Con su propio límite, el de 5 MB del §8.2, y el resto sigue en 1 MB.
+  fastify.addContentTypeParser(
+    /^image\/(jpeg|png|webp)$/,
+    { parseAs: 'buffer', bodyLimit: 5 * 1024 * 1024 },
+    (_request, body, done) => done(null, body),
+  );
   fastify.addContentTypeParser(
     'application/json',
     { parseAs: 'string', bodyLimit: 1024 * 1024 },
