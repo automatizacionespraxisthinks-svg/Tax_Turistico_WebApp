@@ -596,6 +596,13 @@ cópialo directo a las credenciales de n8n.
     como cuerpo (`content-type: image/jpeg`, «n8n Binary File» en el nodo HTTP
     Request) o con `{ "url": "…" }`. Hasta 5 MB; JPEG, PNG o WebP.
   - Ningún evento lleva ya `fareEstimate` ni `fareFinal`.
+  - Los botones «Ir con Maps» e «Ir con Waze» de la PWA salen de lo que n8n
+    ya manda: `pickup.text` (la nomenclatura), `pickup.reference` y, si el
+    cliente compartió su ubicación, `pickup.point`. No hay que mandar enlaces
+    ni la precisión: la API sabe si el punto es la ubicación compartida, una
+    dirección geocodificada o una sin ubicar, y la PWA avisa al conductor en
+    los dos últimos casos. Al destino solo hay botones si llega
+    `dropoff.point`.
 - **`MIN_DURACION_CARRERA_MIN`** (10 por defecto): minutos con el pasajero a
   bordo antes de poder finalizar. **`PHOTO_RETENTION_DAYS`** (30): cuánto se
   guarda la foto del lugar; se borra con la purga de madrugada.

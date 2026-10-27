@@ -6,6 +6,7 @@ import type { RideStatus, StatusTone } from '@tax/shared';
 import { RIDE_STATUS_LABEL, RIDE_STATUS_TONE, formatDistance } from '@tax/shared';
 import { StatusPill, TONE_CLASS, cn, spring, transition } from '@tax/ui';
 import { ActionBar, AddressBlock, Screen } from '../components/Chrome';
+import { AvisoDeUbicacion, IrConMapas } from '../components/IrConMapas';
 import { api } from '../api/client';
 import type { OfferedRide } from '../state/session';
 
@@ -20,6 +21,9 @@ const STEPS: ActiveStatus[] = ['ASSIGNED', 'DRIVER_ARRIVED', 'IN_PROGRESS'];
  * panel de la oficina: azul mientras va a recoger, morado en el punto, verde
  * azulado con el pasajero a bordo. Así el conductor sabe en qué paso está sin
  * leer, y la oficina y él hablan del mismo color.
+ *
+ * Debajo de la dirección van Maps y Waze, ya con la ruta pedida, y un aviso
+ * cuando el punto no es la ubicación que compartió el cliente.
  *
  * "Llegué" solo se habilita a menos de 150 m del punto; más lejos se puede
  * marcar igual, pero queda registrada la excepción (§5.3). "Finalizar" queda
@@ -38,13 +42,16 @@ export function Carrera({
 }: {
   offer: OfferedRide;
   status: ActiveStatus;
-  metersToPickup: number;
+  metersToPickup: number | null;
   minRideMinutes: number;
   onArrived: () => void;
   onBoard: () => void;
   onFinish: () => void;
 }) {
-  const nearby = metersToPickup <= 150;
+  // Sin punto (carrera sin ubicar) no hay distancia que medir: el conductor
+  // se guía por la dirección y marca «Llegué» cuando lo encuentre.
+  const conPunto = offer.pickupPoint !== undefined;
+  const nearby = conPunto && metersToPickup !== null && metersToPickup <= 150;
   const stepIndex = STEPS.indexOf(status);
   const tone = RIDE_STATUS_TONE[status];
   const faltan = useFaltaParaFinalizar(status === 'IN_PROGRESS' ? offer.startedAt : undefined, minRideMinutes);
@@ -62,13 +69,22 @@ export function Carrera({
         </div>
 
         {status === 'IN_PROGRESS' ? (
-          <AddressBlock label="Llevar a" text={offer.dropoffText} />
+          <div className="flex flex-col gap-3">
+            <AddressBlock label="Llevar a" text={offer.dropoffText ?? 'Sin destino indicado'} />
+            {/* Al destino solo con coordenadas: casi siempre lo dicen ya a
+                bordo, y una dirección suelta puede ser de otro pueblo. */}
+            <IrConMapas point={offer.dropoffPoint} />
+          </div>
         ) : (
-          <AddressBlock
-            label="Recoger en"
-            text={offer.pickupText}
-            reference={offer.pickupReference}
-          />
+          <div className="flex flex-col gap-3">
+            <AddressBlock
+              label="Recoger en"
+              text={offer.pickupText}
+              reference={offer.pickupReference}
+            />
+            <AvisoDeUbicacion origen={offer.pickupSource} />
+            <IrConMapas point={offer.pickupPoint} text={offer.pickupText} />
+          </div>
         )}
 
         {/* La foto solo mientras va a recogerlo: después ya no le sirve, y
@@ -77,7 +93,7 @@ export function Carrera({
           <FotoDelLugar rideId={offer.rideId} version={offer.pickupPhotoAt} />
         ) : null}
 
-        {status !== 'IN_PROGRESS' ? (
+        {status !== 'IN_PROGRESS' && conPunto ? (
           <div
             className={cn(
               'flex items-center gap-3 rounded-lg border px-4 py-3.5',
@@ -91,10 +107,18 @@ export function Carrera({
             />
             <div className="min-w-0 flex-1">
               <p className={cn('text-lg font-medium', nearby ? 'text-[var(--tone-ink)]' : 'text-ink')}>
-                {nearby ? 'Estás en el punto' : `A ${formatDistance(metersToPickup / 1000)} del punto`}
+                {nearby
+                  ? 'Estás en el punto'
+                  : metersToPickup === null
+                    ? 'Buscando tu posición…'
+                    : `A ${formatDistance(metersToPickup / 1000)} del punto`}
               </p>
               <p className="text-caption text-ink-muted">
-                {nearby ? 'Puedes marcar que llegaste.' : 'La distancia se actualiza con tu GPS.'}
+                {nearby
+                  ? 'Puedes marcar que llegaste.'
+                  : metersToPickup === null
+                    ? 'La distancia aparece en cuanto responda el GPS.'
+                    : 'La distancia se actualiza con tu GPS.'}
               </p>
             </div>
           </div>
@@ -163,7 +187,7 @@ export function Carrera({
           )
         ) : null}
 
-        {!nearby && status === 'ASSIGNED' ? (
+        {!nearby && status === 'ASSIGNED' && conPunto && metersToPickup !== null ? (
           <p className="text-center text-base text-ink-muted">
             Estás a más de 150 m; si marcas ahora, queda registrada la excepción.
           </p>
@@ -184,8 +208,16 @@ function useFaltaParaFinalizar(startedAt: number | undefined, minutos: number): 
   const calcular = () => (startedAt === undefined ? 0 : Math.max(0, startedAt + minutos * 60_000 - Date.now()));
   const [faltan, setFaltan] = useState(calcular);
 
-  useEffect(() => {
+  // Al subir el pasajero, la cuenta se pone al día en este mismo render. En
+  // el efecto llegaba un render tarde, y «Finalizar» se pintaba habilitado
+  // un instante antes de bloquearse.
+  const [startedAtPrevio, setStartedAtPrevio] = useState(startedAt);
+  if (startedAtPrevio !== startedAt) {
+    setStartedAtPrevio(startedAt);
     setFaltan(calcular());
+  }
+
+  useEffect(() => {
     if (startedAt === undefined) return;
     const id = window.setInterval(() => {
       const siguiente = calcular();

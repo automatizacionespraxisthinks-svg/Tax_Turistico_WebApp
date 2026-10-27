@@ -92,6 +92,9 @@ export class DriverRidesController {
    * «Llegué». A menos de 150 m del punto es normal; más lejos se acepta
    * igual, pero queda registrada la excepción (§5.3). El conductor no se
    * queda bloqueado por un GPS impreciso en una vereda.
+   *
+   * En una carrera sin ubicar no se mide: su punto es el centro del pueblo,
+   * no el del cliente, y toda llegada saldría como excepción.
    */
   @Post(':rideId/arrived')
   async arrived(
@@ -103,7 +106,7 @@ export class DriverRidesController {
     const ride = await this.ownRide(rideId, driver.id);
 
     let note: string | undefined;
-    if (body.at && ride.pickupLat && ride.pickupLng) {
+    if (body.at && ride.pickupLat && ride.pickupLng && ride.pickupSource !== 'sin_ubicar') {
       const meters =
         haversineKm(body.at, { lat: ride.pickupLat, lng: ride.pickupLng }) * 1000;
       if (meters > this.env.ARRIVAL_RADIUS_METERS) {

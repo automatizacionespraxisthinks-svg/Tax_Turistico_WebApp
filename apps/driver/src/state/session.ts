@@ -17,14 +17,31 @@ export type Phase =
   | 'ride'
   | 'summary';
 
+/**
+ * De dónde salió el punto de recogida, tal como lo guarda la API.
+ *
+ * `compartida` es la ubicación que mandó el cliente, exacta. `geocodificada`
+ * es una dirección escrita que el geocodificador resolvió, y puede quedarse
+ * en la calle sin el número. `sin_ubicar` es una dirección que no resolvió.
+ */
+export type OrigenDelPunto = 'compartida' | 'geocodificada' | 'sin_ubicar';
+
 export interface OfferedRide {
   /** Identificador de la carrera: es lo que apuntan los comandos. */
   rideId: string;
   code: string;
   pickupText: string;
   pickupReference?: string;
-  dropoffText: string;
-  pickupPoint: Point;
+  /**
+   * El punto del cliente. Ausente en una oferta (el socket no lo trae) y en
+   * una carrera sin ubicar: la API le pone el centro del pueblo para poder
+   * despachar, y ese no es un lugar al que mandar al conductor.
+   */
+  pickupPoint?: Point;
+  pickupSource?: OrigenDelPunto;
+  /** Ausente si el cliente no dijo a dónde va, que es lo más común. */
+  dropoffText?: string;
+  dropoffPoint?: Point;
   distanceKm: number;
   etaMinutes: number;
   passengers: number;
@@ -61,8 +78,11 @@ export interface SessionState {
   ridesToday: number;
   /** Minutos a bordo antes de poder finalizar; los dice la API al abrir. */
   minRideMinutes: number;
-  /** Distancia al punto de recogida; bajo 150 m se habilita "Llegué" (§5.3). */
-  metersToPickup: number;
+  /**
+   * Distancia al punto de recogida, medida con cada lectura del GPS; bajo
+   * 150 m se habilita "Llegué" (§5.3). Nula mientras no se sabe.
+   */
+  metersToPickup: number | null;
 }
 
 export const initialSession: SessionState = {
@@ -76,7 +96,7 @@ export const initialSession: SessionState = {
   shiftStartedAt: null,
   ridesToday: 0,
   minRideMinutes: 10,
-  metersToPickup: 1240,
+  metersToPickup: null,
 };
 
 export type SessionAction =
@@ -134,7 +154,8 @@ export function sessionReducer(state: SessionState, action: SessionAction): Sess
         ...state,
         phase: 'ride',
         rideStatus: 'ASSIGNED',
-        metersToPickup: Math.round((state.offer?.distanceKm ?? 1.2) * 1000),
+        // La distancia de la oferta vale hasta que llegue la primera lectura.
+        metersToPickup: state.offer?.distanceKm ? Math.round(state.offer.distanceKm * 1000) : null,
       };
 
     case 'offer_rejected':
@@ -158,8 +179,12 @@ export function sessionReducer(state: SessionState, action: SessionAction): Sess
     case 'back_to_available':
       return { ...state, phase: 'available', offer: null, rideStatus: 'ASSIGNED' };
 
-    case 'approach':
-      return { ...state, metersToPickup: Math.max(0, action.meters) };
+    case 'approach': {
+      // De diez en diez metros: el GPS da una lectura por segundo, y pintar
+      // la pantalla por un metro de diferencia no le dice nada al conductor.
+      const meters = Math.round(Math.max(0, action.meters) / 10) * 10;
+      return meters === state.metersToPickup ? state : { ...state, metersToPickup: meters };
+    }
 
     case 'set_online':
       return { ...state, online: action.online };
@@ -217,7 +242,10 @@ interface ApiRide {
   pickupReference: string | null;
   pickupLat: number | null;
   pickupLng: number | null;
+  pickupSource?: OrigenDelPunto | null;
   dropoffText: string | null;
+  dropoffLat?: number | null;
+  dropoffLng?: number | null;
   passengers: number;
   vehicleType: VehicleType;
   notes: string | null;
@@ -248,8 +276,7 @@ export function offerFromSocket(push: ApiOffer): OfferedRide {
     code: push.code,
     pickupText: push.pickupText,
     pickupReference: push.pickupReference ?? undefined,
-    dropoffText: push.dropoffText ?? 'Sin destino indicado',
-    pickupPoint: { lat: 0, lng: 0 },
+    dropoffText: push.dropoffText ?? undefined,
     distanceKm: push.distanceKm,
     etaMinutes: push.etaMinutes,
     passengers: push.passengers,
@@ -266,11 +293,16 @@ export function offerFromRide(ride: ApiRide): OfferedRide {
     code: ride.code,
     pickupText: ride.pickupText,
     pickupReference: ride.pickupReference ?? undefined,
-    dropoffText: ride.dropoffText ?? 'Sin destino indicado',
     pickupPoint:
-      ride.pickupLat !== null && ride.pickupLng !== null
+      ride.pickupSource !== 'sin_ubicar' && ride.pickupLat != null && ride.pickupLng != null
         ? { lat: ride.pickupLat, lng: ride.pickupLng }
-        : { lat: 0, lng: 0 },
+        : undefined,
+    pickupSource: ride.pickupSource ?? undefined,
+    dropoffText: ride.dropoffText ?? undefined,
+    dropoffPoint:
+      ride.dropoffLat != null && ride.dropoffLng != null
+        ? { lat: ride.dropoffLat, lng: ride.dropoffLng }
+        : undefined,
     distanceKm: 0,
     etaMinutes: ride.etaMinutes ?? 0,
     passengers: ride.passengers,

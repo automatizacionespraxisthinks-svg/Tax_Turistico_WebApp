@@ -2,7 +2,8 @@ import { useCallback, useEffect, useReducer, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
 import { MotionConfig, motion } from 'motion/react';
 import { Wifi, WifiOff } from 'lucide-react';
-import type { Oleada } from '@tax/shared';
+import type { Oleada, Point } from '@tax/shared';
+import { haversineKm } from '@tax/shared';
 import { screenTransition } from '@tax/ui';
 import { TopStatus } from './components/Chrome';
 import { Acceso } from './screens/Acceso';
@@ -58,6 +59,12 @@ export function App() {
   const [push, setPush] = useState<PushState>(() => pushSupport());
   const previousPhase = useRef<Phase>(session.phase);
   const positionWatcher = useRef<PositionWatcher>(undefined);
+  /**
+   * El punto del cliente mientras el conductor va a recogerlo. Con él se mide
+   * la distancia en cada lectura del GPS: el aviso de «a 300 m del punto» y
+   * el «Llegué» habilitado bajo 150 m dependen de ella.
+   */
+  const puntoDeRecogida = useRef<Point | undefined>(undefined);
 
   const direction: 1 | -1 = ORDER[session.phase] >= ORDER[previousPhase.current] ? 1 : -1;
   useEffect(() => {
@@ -234,7 +241,13 @@ export function App() {
       return;
     }
 
-    positionWatcher.current ??= watchPosition({ onError: setNotice });
+    positionWatcher.current ??= watchPosition({
+      onError: setNotice,
+      onPosition: (punto) => {
+        const destino = puntoDeRecogida.current;
+        if (destino) dispatch({ type: 'approach', meters: haversineKm(punto, destino) * 1000 });
+      },
+    });
     positionWatcher.current.setRideId(session.phase === 'ride' ? session.offer?.rideId : undefined);
 
     return () => {
@@ -244,6 +257,22 @@ export function App() {
       }
     };
   }, [session.phase, session.offer?.rideId]);
+
+  const yendoAlPunto =
+    session.phase === 'ride' &&
+    (session.rideStatus === 'ASSIGNED' || session.rideStatus === 'DRIVER_ARRIVED');
+  const pickupLat = yendoAlPunto ? session.offer?.pickupPoint?.lat : undefined;
+  const pickupLng = yendoAlPunto ? session.offer?.pickupPoint?.lng : undefined;
+  useEffect(() => {
+    puntoDeRecogida.current =
+      pickupLat !== undefined && pickupLng !== undefined ? { lat: pickupLat, lng: pickupLng } : undefined;
+    // Si el GPS ya tiene posición, la distancia se pone al día sin esperar
+    // a la próxima lectura: al reabrir la aplicación, por ejemplo.
+    const ultima = positionWatcher.current?.last();
+    if (ultima && puntoDeRecogida.current) {
+      dispatch({ type: 'approach', meters: haversineKm(ultima, puntoDeRecogida.current) * 1000 });
+    }
+  }, [pickupLat, pickupLng]);
 
   /* --- cola sin conexión --------------------------------------------------- */
   useEffect(() => {

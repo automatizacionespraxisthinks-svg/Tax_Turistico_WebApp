@@ -22,6 +22,8 @@ const DEV_FALLBACK = { lat: 5.7803, lng: -73.1142 };
 export function watchPosition(options: {
   onError?: (message: string) => void;
   onSent?: () => void;
+  /** Cada lectura del GPS, también las que no toca enviar. */
+  onPosition?: (point: { lat: number; lng: number }) => void;
 }): PositionWatcher {
   let rideId: string | undefined;
   let lastPoint: { lat: number; lng: number } | undefined;
@@ -35,6 +37,7 @@ export function watchPosition(options: {
     // Se recuerda siempre, aunque toque no enviarla todavía: los comandos de
     // la carrera la necesitan para registrar dónde estaba el conductor.
     lastPoint = { lat, lng };
+    options.onPosition?.(lastPoint);
 
     const now = Date.now();
     if (now - lastSentAt < intervalMs()) return;

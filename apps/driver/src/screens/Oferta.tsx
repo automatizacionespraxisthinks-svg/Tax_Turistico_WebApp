@@ -102,7 +102,7 @@ export function Oferta({
           <p className="text-micro font-semibold uppercase tracking-[0.07em] text-ink-muted">
             Destino
           </p>
-          <p className="mt-1 text-xl font-medium text-ink">{offer.dropoffText}</p>
+          <p className="mt-1 text-xl font-medium text-ink">{offer.dropoffText ?? 'Sin destino indicado'}</p>
         </div>
 
         {offer.notes ? (
