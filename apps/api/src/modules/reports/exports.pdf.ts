@@ -1,4 +1,5 @@
 import PDFDocument from 'pdfkit';
+import type { TableroInforme } from '@tax/shared';
 import { formatoFechaHora, resumir, type Periodo } from './exports.data';
 
 /*
@@ -149,8 +150,33 @@ const minutos = (n: number | null) => (n === null ? '—' : `${n} min`);
 const comoMinutos = (s: number | null) =>
   s === null ? '—' : `${(Math.round(s / 6) / 10).toLocaleString('es-CO')} min`;
 
-export function generarPdf(periodo: Periodo, opciones: { titulo: string; pedidoPor: string }): Promise<Buffer> {
-  const r = resumir(periodo.filas);
+const porcentaje = (tasa: number | null) => (tasa === null ? '—' : `${Math.round(tasa * 100)} %`);
+
+/**
+ * El párrafo de «En pocas palabras», con sus negritas: el mismo que se lee en
+ * el tablero de Reportes.
+ */
+function enPocasPalabras(doc: Doc, fragmentos: TableroInforme['enPalabras']): void {
+  asegurar(doc, 70);
+  doc.font('Helvetica-Bold').fontSize(7.5).fillColor(APAGADA)
+    .text('EN POCAS PALABRAS', IZQ, doc.y, { characterSpacing: 0.4 });
+  doc.moveDown(0.3);
+  doc.fontSize(10).fillColor(TINTA);
+  fragmentos.forEach((f, i) => {
+    doc.font(f.fuerte ? 'Helvetica-Bold' : 'Helvetica').text(f.texto, {
+      width: ANCHO,
+      lineGap: 2,
+      continued: i < fragmentos.length - 1,
+    });
+  });
+  doc.moveDown(1);
+}
+
+export function generarPdf(
+  periodo: Periodo,
+  opciones: { titulo: string; pedidoPor: string; tablero?: TableroInforme; filtros?: string },
+): Promise<Buffer> {
+  const r = resumir(periodo.filas, periodo.dias);
   const doc = new PDFDocument({
     size: 'A4',
     margin: 40,
@@ -171,12 +197,19 @@ export function generarPdf(periodo: Periodo, opciones: { titulo: string; pedidoP
   doc.font('Helvetica-Bold').fontSize(18).fillColor(TINTA).text(opciones.titulo);
   doc.moveDown(0.2);
   doc.font('Helvetica').fontSize(9).fillColor(SECUNDARIA)
-    .text(`Del ${formatoFechaHora(periodo.desde)} al ${formatoFechaHora(periodo.hasta)}, hora de Paipa.`)
+    .text(
+      periodo.dias
+        ? `Periodo: ${periodo.texto}, días completos en hora de Paipa.`
+        : `Del ${formatoFechaHora(periodo.desde)} al ${formatoFechaHora(periodo.hasta)}, hora de Paipa.`,
+    )
+    .text(`Filtros: ${opciones.filtros ?? 'ninguno, toda la operación'}.`)
     .text(`Generado por ${opciones.pedidoPor}.`);
   if (periodo.recortado) {
     doc.fillColor('#B45309').text(`Recortado a las ${periodo.filas.length} carreras más recientes.`);
   }
   doc.moveDown(1);
+
+  if (opciones.tablero) enPocasPalabras(doc, opciones.tablero.enPalabras);
 
   cifras(doc, [
     { etiqueta: 'Carreras creadas', valor: String(r.creadas) },
@@ -242,9 +275,35 @@ export function generarPdf(periodo: Periodo, opciones: { titulo: string; pedidoP
   tituloDeSeccion(
     doc,
     'Por conductor',
-    'Llegada: mediana de aceptar a «Llegué». Duración: mediana de las carreras con el pasajero a bordo.',
+    opciones.tablero
+      ? 'Tomadas: carreras que aceptó. Aceptación: ofertas aceptadas sobre las que respondió o dejó vencer. Llegada y duración: medianas. Horas: turno abierto en el periodo.'
+      : 'Llegada: mediana de aceptar a «Llegué». Duración: mediana de las carreras con el pasajero a bordo.',
   );
-  tabla(
+  if (opciones.tablero) {
+    tabla(
+      doc,
+      [
+        { titulo: 'Código', ancho: 45 },
+        { titulo: 'Conductor', ancho: 140 },
+        { titulo: 'Tomadas', ancho: 55, derecha: true },
+        { titulo: 'Finalizadas', ancho: 60, derecha: true },
+        { titulo: 'Aceptación', ancho: 60, derecha: true },
+        { titulo: 'Llegada', ancho: 55, derecha: true },
+        { titulo: 'Duración', ancho: 50, derecha: true },
+        { titulo: 'Horas', ancho: 50, derecha: true },
+      ],
+      opciones.tablero.conductores.map((c) => [
+        c.codigo,
+        c.esPrueba ? `${c.nombre} (prueba)` : c.nombre,
+        String(c.asignadas),
+        String(c.finalizadas),
+        porcentaje(c.tasaAceptacion),
+        comoMinutos(c.llegadaP50),
+        minutos(c.duracionP50),
+        c.horasTurno.toLocaleString('es-CO'),
+      ]),
+    );
+  } else tabla(
     doc,
     [
       { titulo: 'Código', ancho: 55 },

@@ -142,6 +142,17 @@ El panel no inventa acciones: cada botón sale de la tabla de transiciones.
   ficha, y se borra a los 30 días.
 - **Al aceptar**, el evento `ride.assigned` lleva `driver: { code, name,
   plate }`, y la carrera guarda el taxi con el que va.
+- **Reportes como tablero**: una sola consulta (`GET /v1/reports/dashboard`)
+  con periodo por días de Paipa (hasta 93), sectores y líneas de opción
+  múltiple, urbano o veredas y conductor de opción única, y «No incluir
+  pruebas». Trae el resumen en palabras, las cifras contra las metas de
+  `METAS`, las gráficas y una fila por conductor con ofertas y horas de turno;
+  con un conductor elegido, lo compara con el grupo. Los filtros viven en la
+  dirección de la página, y el Excel y el PDF salen con los mismos.
+- **Pruebas fuera de las cifras**: un teléfono (desde la ficha de una de sus
+  carreras) o una cuenta de conductor (desde *Flota*) se marcan como de
+  prueba, y con «No incluir pruebas» Reportes deja fuera todo lo suyo, también
+  lo de antes de marcarlo.
 - **Outbox**: estados de entrega, reintentos y cola muerta visibles en
   *Sistema*, con reenvío manual.
 - **Líneas de WhatsApp vigiladas**: un monitor pregunta a WAHA cada minuto.

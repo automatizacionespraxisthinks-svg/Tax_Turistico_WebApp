@@ -26,9 +26,9 @@ import { actions, useLive } from '../live/store';
  * ámbar oscuro, que es el que deja leer el texto blanco.
  */
 const COLUMNS: { status: RideStatus; title: string; band: string }[] = [
-  { status: 'NOTIFIED', title: 'En oferta', band: 'bg-warning-band' },
-  { status: 'ASSIGNED', title: 'Asignadas', band: 'bg-brand' },
-  { status: 'DRIVER_ARRIVED', title: 'En el sitio', band: 'bg-danger-fill' },
+  { status: 'NOTIFIED', title: 'Buscando taxi', band: 'bg-warning-band' },
+  { status: 'ASSIGNED', title: 'Taxi en camino', band: 'bg-brand' },
+  { status: 'DRIVER_ARRIVED', title: 'Taxi en el lugar', band: 'bg-danger-fill' },
   { status: 'IN_PROGRESS', title: 'En curso', band: 'bg-success' },
 ];
 

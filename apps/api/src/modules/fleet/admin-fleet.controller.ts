@@ -21,6 +21,8 @@ const cambiosSchema = z
     name: z.string().trim().min(3).max(120).optional(),
     phone: z.string().trim().regex(/^\+\d{8,15}$/).optional(),
     active: z.boolean().optional(),
+    /** Cuenta con la que el equipo prueba: no cuenta en Reportes sin pruebas. */
+    esPrueba: z.boolean().optional(),
   })
   .refine((v) => Object.keys(v).length > 0, 'No hay nada que cambiar');
 

@@ -1,4 +1,6 @@
 import ExcelJS from 'exceljs';
+import type { TableroInforme } from '@tax/shared';
+import { comoTextoPlano } from './informes.texto';
 import {
   formatoFechaHora,
   paraExcel,
@@ -93,14 +95,30 @@ function hojaCarreras(libro: ExcelJS.Workbook, filas: FilaCarrera[]): void {
 }
 
 /** Portada: de qué es el archivo, quién lo pidió y las cifras del periodo. */
-function hojaResumen(libro: ExcelJS.Workbook, periodo: Periodo, pedidoPor: string, titulo: string): void {
-  const r = resumir(periodo.filas);
+function hojaResumen(
+  libro: ExcelJS.Workbook,
+  periodo: Periodo,
+  opciones: { pedidoPor: string; titulo: string; tablero?: TableroInforme; filtros?: string },
+): void {
+  const r = resumir(periodo.filas, periodo.dias);
   const ws = libro.addWorksheet('Resumen');
   ws.columns = [{ width: 34 }, { width: 22 }];
 
-  ws.addRow([titulo]).font = { bold: true, size: 14 };
-  ws.addRow([`Del ${formatoFechaHora(periodo.desde)} al ${formatoFechaHora(periodo.hasta)} (hora de Paipa)`]);
-  ws.addRow([`Generado por ${pedidoPor}`]).font = { color: { argb: 'FF6B7280' } };
+  ws.addRow([opciones.titulo]).font = { bold: true, size: 14 };
+  ws.addRow([
+    periodo.dias
+      ? `Periodo: ${periodo.texto} (días completos, hora de Paipa)`
+      : `Del ${formatoFechaHora(periodo.desde)} al ${formatoFechaHora(periodo.hasta)} (hora de Paipa)`,
+  ]);
+  ws.addRow([`Filtros: ${opciones.filtros ?? 'ninguno, toda la operación'}`]);
+  ws.addRow([`Generado por ${opciones.pedidoPor}`]).font = { color: { argb: 'FF6B7280' } };
+  if (opciones.tablero) {
+    ws.addRow([]);
+    const parrafo = ws.addRow([comoTextoPlano(opciones.tablero.enPalabras)]);
+    ws.mergeCells(parrafo.number, 1, parrafo.number, 2);
+    parrafo.getCell(1).alignment = { wrapText: true, vertical: 'top' };
+    parrafo.height = 90;
+  }
   if (periodo.recortado) {
     ws.addRow([`Recortado a las ${periodo.filas.length} carreras más recientes.`]).font = { color: { argb: 'FFB45309' } };
   }
@@ -128,10 +146,51 @@ function hojaResumen(libro: ExcelJS.Workbook, periodo: Periodo, pedidoPor: strin
   }
 }
 
-function hojasDeResumen(libro: ExcelJS.Workbook, periodo: Periodo): void {
-  const r = resumir(periodo.filas);
+function hojasDeResumen(libro: ExcelJS.Workbook, periodo: Periodo, tablero?: TableroInforme): void {
+  const r = resumir(periodo.filas, periodo.dias);
 
-  hoja(
+  if (tablero) {
+    hoja(
+      libro,
+      'Por conductor',
+      [
+        { titulo: 'Código', ancho: 10 },
+        { titulo: 'Conductor', ancho: 26 },
+        { titulo: 'Cuenta de prueba', ancho: 16 },
+        { titulo: 'Tomadas', ancho: 10 },
+        { titulo: 'Finalizadas', ancho: 12 },
+        { titulo: 'Canceladas', ancho: 12 },
+        { titulo: 'Ofertas', ancho: 10 },
+        { titulo: 'Aceptadas', ancho: 11 },
+        { titulo: 'Rechazadas', ancho: 12 },
+        { titulo: 'Vencidas', ancho: 10 },
+        { titulo: 'Aceptación', ancho: 12, formato: '0%' },
+        { titulo: 'Llegada al punto, mediana (min)', ancho: 28, formato: '0.0' },
+        { titulo: 'Duración, mediana (min)', ancho: 22 },
+        { titulo: 'Km recorridos', ancho: 14, formato: '0.0' },
+        { titulo: 'Horas en turno', ancho: 14, formato: '0.0' },
+        { titulo: 'Finalizadas por hora', ancho: 18, formato: '0.00' },
+      ],
+      tablero.conductores.map((c) => [
+        c.codigo,
+        c.nombre,
+        c.esPrueba ? 'Sí' : 'No',
+        c.asignadas,
+        c.finalizadas,
+        c.canceladas,
+        c.ofertas,
+        c.aceptadas,
+        c.rechazadas,
+        c.vencidas,
+        c.tasaAceptacion,
+        c.llegadaP50 === null ? null : Math.round(c.llegadaP50 / 6) / 10,
+        c.duracionP50,
+        c.km,
+        c.horasTurno,
+        c.carrerasPorHora,
+      ]),
+    );
+  } else hoja(
     libro,
     'Por conductor',
     [
@@ -199,15 +258,21 @@ function hojasDeResumen(libro: ExcelJS.Workbook, periodo: Periodo): void {
  */
 export async function generarExcel(
   periodo: Periodo,
-  opciones: { tipo: 'resumen' | 'carreras'; titulo: string; pedidoPor: string },
+  opciones: {
+    tipo: 'resumen' | 'carreras';
+    titulo: string;
+    pedidoPor: string;
+    tablero?: TableroInforme;
+    filtros?: string;
+  },
 ): Promise<Buffer> {
   const libro = new ExcelJS.Workbook();
   libro.creator = 'Tax Turístico';
   libro.created = new Date();
 
-  hojaResumen(libro, periodo, opciones.pedidoPor, opciones.titulo);
+  hojaResumen(libro, periodo, opciones);
   hojaCarreras(libro, periodo.filas);
-  if (opciones.tipo === 'resumen') hojasDeResumen(libro, periodo);
+  if (opciones.tipo === 'resumen') hojasDeResumen(libro, periodo, opciones.tablero);
 
   return Buffer.from(await libro.xlsx.writeBuffer());
 }

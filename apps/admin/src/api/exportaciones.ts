@@ -30,11 +30,20 @@ export interface Exportacion {
 export interface SolicitudExportacion {
   kind: Exportacion['kind'];
   format: Exportacion['format'];
-  /** Hacia atrás desde ahora: 1 son las últimas 24 horas. */
-  days: number;
+  /** Desde *Carreras*: hacia atrás desde ahora; 1 son las últimas 24 horas. */
+  days?: number;
+  /** Desde *Reportes*: los días del tablero, con los dos extremos. */
+  desde?: string;
+  hasta?: string;
   statuses?: RideStatus[];
   zoneId?: string;
   query?: string;
+  /** Los filtros del tablero de Reportes. */
+  zoneIds?: string[];
+  zoneKind?: 'urbano' | 'rural';
+  driverId?: string;
+  lines?: string[];
+  excludeTests?: boolean;
   /** El nombre del filtro en el panel, para el título del archivo. */
   filterLabel?: string;
 }

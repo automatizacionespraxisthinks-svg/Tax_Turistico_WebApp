@@ -97,9 +97,33 @@ igual y la carrera sigue su camino.
 
 ## Idempotencia de entrada (§7.1)
 
-La misma `Idempotency-Key` con el mismo cuerpo devuelve la respuesta original
-sin volver a ejecutar nada; con un cuerpo distinto es un 409, porque significa
-que quien llama está reutilizando una clave por error. Las claves viven 24 h.
+La misma `Idempotency-Key` con la misma petición devuelve la respuesta
+original sin volver a ejecutar nada, con la cabecera `Idempotent-Replayed:
+true`; con una petición distinta es un 409 `IDEMPOTENCY_MISMATCH`, porque
+significa que quien llama está reutilizando una clave por error. Las claves
+viven 24 h y van por ruta: la misma clave en crear y en cancelar son dos
+peticiones.
+
+- **La clave se reserva antes de ejecutar.** Antes se guardaba justo después
+  de responder, sin esperar, y una repetición que llegara en ese instante no
+  la encontraba: volvía a crear y chocaba con `RIDE_ALREADY_ACTIVE`. Ahora una
+  repetición que llega mientras la primera sigue en curso espera su respuesta
+  (hasta 15 s; pasado eso, 409 `IDEMPOTENCY_IN_PROGRESS`, que es reintentable).
+  Si la ejecución falla, la reserva se suelta: los errores no se guardan. Una
+  reserva sin respuesta durante 60 s es de un proceso caído y se retoma.
+- **Ajuste a la §7.1 en `POST /v1/rides`:** no se compara el cuerpo entero
+  sino su huella, el teléfono y el punto compartido. En el flujo de n8n el
+  cuerpo lo redacta el agente de IA (`$fromAI`), y su prompt le pide volver a
+  llamar ante cualquier error: la segunda vez la dirección o las notas salen
+  con otras palabras. Con el cuerpo entero, esa repetición daba 409 y el agente
+  le decía al cliente que hubo un inconveniente mientras el taxi ya estaba
+  pedido. La clave ya identifica el turno de la conversación; la huella solo
+  confirma que no se reutilizó para otro cliente u otro punto. Cancelar y
+  cambiar la dirección siguen comparando el cuerpo entero.
+
+`e2e-idempotencia.ts` reproduce los casos del flujo: repetición al instante,
+con otra redacción, dos a la vez, clave reutilizada, error que no se guarda y
+la misma clave en otra ruta.
 
 Una trampa al depurar esto: la respuesta repetida sale de una columna `jsonb`,
 y `jsonb` **reordena las claves** al guardarlas (por longitud y luego

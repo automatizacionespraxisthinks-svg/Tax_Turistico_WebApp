@@ -1,38 +1,27 @@
 import { Controller, Get, Query, UseGuards } from '@nestjs/common';
-import { z } from 'zod';
+import { filtrosDeInformeSchema, type FiltrosDeInforme } from '@tax/shared';
 import { zodBody } from '../../common/zod.pipe';
 import { SessionGuard } from '../identity/guards';
 import { ReportsService } from './reports.service';
 
-const rangeSchema = z.object({ days: z.coerce.number().int().min(1).max(90).default(7) });
-
+/**
+ * El tablero de Reportes. Una sola consulta trae todo lo de la pantalla con
+ * los mismos filtros: así ninguna tarjeta cuenta un periodo distinto del de
+ * la gráfica de al lado.
+ */
 @Controller('v1/reports')
 @UseGuards(SessionGuard)
 export class ReportsController {
   constructor(private readonly reports: ReportsService) {}
 
-  @Get('summary')
-  summary(@Query(zodBody(rangeSchema)) query: z.infer<typeof rangeSchema>) {
-    return this.reports.summary(query.days);
+  @Get('dashboard')
+  dashboard(@Query(zodBody(filtrosDeInformeSchema)) filtros: FiltrosDeInforme) {
+    return this.reports.tablero(filtros);
   }
 
-  @Get('rides-by-hour')
-  ridesByHour(@Query(zodBody(rangeSchema)) query: z.infer<typeof rangeSchema>) {
-    return this.reports.ridesByHour(query.days);
-  }
-
-  @Get('assignment-times')
-  assignmentTimes(@Query(zodBody(rangeSchema)) query: z.infer<typeof rangeSchema>) {
-    return this.reports.assignmentTimes(query.days);
-  }
-
-  @Get('demand-by-zone')
-  demandByZone(@Query(zodBody(rangeSchema)) query: z.infer<typeof rangeSchema>) {
-    return this.reports.demandByZone(query.days);
-  }
-
-  @Get('automation-rate')
-  automationRate(@Query(zodBody(rangeSchema)) query: z.infer<typeof rangeSchema>) {
-    return this.reports.automationRate(query.days);
+  /** Lo que se puede elegir en cada filtro: zonas, conductores y líneas. */
+  @Get('filters')
+  filters() {
+    return this.reports.opciones();
   }
 }

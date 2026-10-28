@@ -28,7 +28,7 @@ import {
   useToast,
 } from '@tax/ui';
 import { actions, loadRideDetail, useLive } from '../live/store';
-import { API_BASE } from '../api/client';
+import { API_BASE, api } from '../api/client';
 
 type DetailTab = 'resumen' | 'oleadas' | 'bitacora';
 
@@ -135,6 +135,8 @@ function Resumen({ ride, driver }: { ride: Ride; driver?: Driver }) {
         <Meta label="Línea">{ride.line}</Meta>
         <Meta label="Pasajeros">{ride.passengers}</Meta>
       </div>
+
+      {ride.customerId ? <TelefonoDePrueba ride={ride} /> : null}
 
       <div className="rounded-md border border-line">
         <Route label="Recogida" text={ride.pickup.text} reference={ride.pickup.reference} />
@@ -710,6 +712,56 @@ function FotoDelLugar({ rideId, version }: { rideId: string; version: string }) 
           La mandó el cliente por WhatsApp · el conductor la ve mientras va a recogerlo
         </p>
       </div>
+    </div>
+  );
+}
+
+/**
+ * Un teléfono del equipo con el que se prueba el servicio. Marcarlo saca de
+ * Reportes todas sus carreras, también las de antes, cuando está puesto
+ * «No incluir pruebas».
+ */
+function TelefonoDePrueba({ ride }: { ride: Ride }) {
+  const toast = useToast();
+  const [marcado, setMarcado] = useState(ride.customerEsPrueba ?? false);
+  const [guardando, setGuardando] = useState(false);
+
+  useEffect(() => setMarcado(ride.customerEsPrueba ?? false), [ride.customerEsPrueba]);
+
+  const cambiar = async () => {
+    setGuardando(true);
+    try {
+      await api.patch(`/v1/admin/customers/${ride.customerId}`, { esPrueba: !marcado });
+      setMarcado(!marcado);
+      toast.push({
+        tone: 'info',
+        title: marcado ? 'Ya no es un teléfono de prueba' : 'Marcado como teléfono de prueba',
+        description: marcado
+          ? 'Sus carreras vuelven a contar en Reportes.'
+          : 'Reportes puede dejar fuera todas sus carreras, también las de antes.',
+      });
+    } catch {
+      toast.push({ tone: 'critical', title: 'No se pudo cambiar la marca de prueba' });
+    } finally {
+      setGuardando(false);
+    }
+  };
+
+  return (
+    <div className="flex items-center justify-between gap-3 rounded-md border border-line px-3 py-2.5">
+      <div className="min-w-0">
+        <p className="text-caption font-medium text-ink">
+          {marcado ? 'Teléfono de prueba' : '¿Es un teléfono de prueba?'}
+        </p>
+        <p className="text-micro text-ink-muted">
+          {marcado
+            ? 'Sus carreras no cuentan en Reportes con «No incluir pruebas».'
+            : 'Márcalo si es del equipo y se usó para probar el servicio.'}
+        </p>
+      </div>
+      <Button size="sm" variant="secondary" loading={guardando} onClick={() => void cambiar()}>
+        {marcado ? 'Quitar marca' : 'Marcar'}
+      </Button>
     </div>
   );
 }

@@ -92,6 +92,20 @@
       "when": 1793111061361,
       "tag": "0012_fotos_y_sin_tarifas",
       "breakpoints": true
+    },
+    {
+      "idx": 13,
+      "version": "7",
+      "when": 1793223293125,
+      "tag": "0013_marcas_de_prueba",
+      "breakpoints": true
+    },
+    {
+      "idx": 14,
+      "version": "7",
+      "when": 1793225094635,
+      "tag": "0014_zonas_circulares",
+      "breakpoints": true
     }
   ]
 }

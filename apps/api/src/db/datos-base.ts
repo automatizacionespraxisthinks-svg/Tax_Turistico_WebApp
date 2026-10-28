@@ -16,30 +16,44 @@ import * as schema from './schema';
  * las vigentes al desplegar.
  */
 
-/** Rectángulo alrededor de un punto, en GeoJSON (lng, lat). */
-export function box(lat: number, lng: number, dLat: number, dLng: number) {
-  return {
-    type: 'Polygon' as const,
-    coordinates: [
-      [
-        [lng - dLng, lat + dLat],
-        [lng + dLng, lat + dLat],
-        [lng + dLng, lat - dLat],
-        [lng - dLng, lat - dLat],
-        [lng - dLng, lat + dLat],
-      ] as [number, number][],
-    ],
-  };
+const RADIO_TIERRA_KM = 6371.0088;
+
+/**
+ * Círculo alrededor de un punto, como polígono GeoJSON (lng, lat) de
+ * `lados` lados, en sentido contrario a las agujas del reloj (RFC 7946).
+ *
+ * Sigue siendo un polígono, no un centro y un radio: así el despacho, el mapa
+ * y la búsqueda de zona usan la misma geometría que antes, solo que redonda.
+ * Con 64 lados el borde se aparta del círculo verdadero menos de un 0,2 %.
+ */
+export function circulo(lat: number, lng: number, radioKm: number, lados = 64) {
+  const dLat = (radioKm / RADIO_TIERRA_KM) * (180 / Math.PI);
+  const dLng = dLat / Math.cos((lat * Math.PI) / 180);
+  const redondear = (n: number) => Math.round(n * 1e6) / 1e6;
+  const anillo = Array.from({ length: lados }, (_, i): [number, number] => {
+    const t = (2 * Math.PI * i) / lados;
+    return [redondear(lng + dLng * Math.cos(t)), redondear(lat + dLat * Math.sin(t))];
+  });
+  anillo.push(anillo[0]!);
+  return { type: 'Polygon' as const, coordinates: [anillo] };
 }
 
+/**
+ * Las zonas de Paipa, como círculos.
+ *
+ * Antes eran rectángulos; cada radio, redondeado a 100 m, da la misma área
+ * que tenía su rectángulo, así que la cobertura no crece ni se encoge: solo
+ * cambia de forma. Ningún círculo se monta sobre otro: el hueco más estrecho, entre
+ * Zona termal y Vereda Palermo, es de 0,44 km.
+ */
 export const ZONES = [
-  { name: 'Centro', kind: 'urbano' as const, lat: 5.7803, lng: -73.1142, dLat: 0.01, dLng: 0.011, tortuosity: 1.25 },
-  { name: 'Lago Sochagota', kind: 'urbano' as const, lat: 5.756, lng: -73.13, dLat: 0.009, dLng: 0.01, tortuosity: 1.3 },
-  { name: 'Zona termal', kind: 'urbano' as const, lat: 5.735, lng: -73.148, dLat: 0.009, dLng: 0.01, tortuosity: 1.35 },
-  { name: 'Vereda El Salitre', kind: 'rural' as const, lat: 5.814, lng: -73.076, dLat: 0.02, dLng: 0.022, tortuosity: 1.75 },
-  { name: 'Vereda Canocas', kind: 'rural' as const, lat: 5.73, lng: -73.07, dLat: 0.022, dLng: 0.024, tortuosity: 1.9 },
-  { name: 'Vereda Toibita', kind: 'rural' as const, lat: 5.815, lng: -73.17, dLat: 0.022, dLng: 0.024, tortuosity: 1.85 },
-  { name: 'Vereda Palermo', kind: 'rural' as const, lat: 5.725, lng: -73.185, dLat: 0.022, dLng: 0.02, tortuosity: 2.0 },
+  { name: 'Centro', kind: 'urbano' as const, lat: 5.7803, lng: -73.1142, radioKm: 1.3, tortuosity: 1.25 },
+  { name: 'Lago Sochagota', kind: 'urbano' as const, lat: 5.756, lng: -73.13, radioKm: 1.2, tortuosity: 1.3 },
+  { name: 'Zona termal', kind: 'urbano' as const, lat: 5.735, lng: -73.148, radioKm: 1.2, tortuosity: 1.35 },
+  { name: 'Vereda El Salitre', kind: 'rural' as const, lat: 5.814, lng: -73.076, radioKm: 2.6, tortuosity: 1.75 },
+  { name: 'Vereda Canocas', kind: 'rural' as const, lat: 5.73, lng: -73.07, radioKm: 2.9, tortuosity: 1.9 },
+  { name: 'Vereda Toibita', kind: 'rural' as const, lat: 5.815, lng: -73.17, radioKm: 2.9, tortuosity: 1.85 },
+  { name: 'Vereda Palermo', kind: 'rural' as const, lat: 5.725, lng: -73.185, radioKm: 2.6, tortuosity: 2.0 },
 ];
 
 /** En lo urbano la oleada 1 es estrecha y rápida; en vereda, ancha y paciente. */
@@ -63,7 +77,7 @@ export async function sembrarZonas(db: Database): Promise<number> {
         id: uuidv7(),
         name: zone.name,
         kind: zone.kind,
-        polygon: box(zone.lat, zone.lng, zone.dLat, zone.dLng),
+        polygon: circulo(zone.lat, zone.lng, zone.radioKm),
         tortuosity: zone.tortuosity,
         waves: zone.kind === 'urbano' ? URBAN_WAVES : RURAL_WAVES,
       })

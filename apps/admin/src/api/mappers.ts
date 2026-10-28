@@ -33,6 +33,8 @@ export interface ApiRide {
   createdAt: string;
   customerName: string | null;
   customerPhone: string;
+  customerId?: string;
+  customerEsPrueba?: boolean;
   pickupText: string;
   pickupReference: string | null;
   pickupLat: number | null;
@@ -86,6 +88,7 @@ export interface ApiDriver {
   phone: string;
   status: DriverStatus;
   active: boolean;
+  esPrueba?: boolean;
   deviceRegistered: boolean;
   shiftStartedAt: string | null;
   plate: string | null;
@@ -139,6 +142,8 @@ export function toRide(row: ApiRide): Ride {
     createdAt: row.createdAt,
     customerPhone: row.customerPhone,
     customerName: row.customerName ?? 'Sin nombre',
+    customerId: row.customerId,
+    customerEsPrueba: row.customerEsPrueba,
     pickup: {
       text: row.pickupText,
       reference: row.pickupReference ?? undefined,
@@ -209,6 +214,7 @@ export function toDriver(row: ApiDriver): Driver {
     phone: row.phone,
     status: row.status,
     active: row.active,
+    esPrueba: row.esPrueba ?? false,
     vehicle: {
       plate: row.plate ?? '—',
       type: row.vehicleType ?? 'sedan',

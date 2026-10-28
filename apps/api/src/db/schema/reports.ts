@@ -6,12 +6,25 @@ export type ExportFormat = 'xlsx' | 'pdf';
 export type ExportStatus = 'pending' | 'running' | 'ready' | 'failed';
 
 export interface ExportParams {
-  /** El periodo, hacia atrás desde que se pidió: 1 son las últimas 24 horas. */
-  days: number;
+  /**
+   * El periodo, hacia atrás desde que se pidió: 1 son las últimas 24 horas.
+   * Lo usan las exportaciones de *Carreras*; las de *Reportes* llevan
+   * `desde` y `hasta`.
+   */
+  days?: number;
+  /** Días de Paipa, `AAAA-MM-DD`, con los dos extremos incluidos. */
+  desde?: string;
+  hasta?: string;
   /** Solo en `carreras`: los filtros de la vista desde la que se pidió. */
   statuses?: string[];
   zoneId?: string;
   query?: string;
+  /** Los filtros del tablero de Reportes. */
+  zoneIds?: string[];
+  zoneKind?: 'urbano' | 'rural';
+  driverId?: string;
+  lines?: string[];
+  excludeTests?: boolean;
   /** Cómo se llamaba el filtro en el panel, para el título del archivo. */
   filterLabel?: string;
 }

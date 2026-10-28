@@ -19,6 +19,7 @@ export interface DriverWithPosition {
   phone: string;
   status: string;
   active: boolean;
+  esPrueba: boolean;
   shiftStartedAt: Date | null;
   plate: string | null;
   vehicleType: string | null;
@@ -454,6 +455,7 @@ export class FleetService {
         phone: drivers.phone,
         status: drivers.status,
         active: drivers.active,
+        esPrueba: drivers.esPrueba,
         shiftStartedAt: driverShifts.startedAt,
         plate: vehicles.plate,
         vehicleType: vehicles.type,

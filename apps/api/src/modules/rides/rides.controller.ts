@@ -16,7 +16,7 @@ import { z } from 'zod';
 import { RIDE_STATUSES, createRideSchema, pointSchema, type RideStatus } from '@tax/shared';
 import { zodBody } from '../../common/zod.pipe';
 import { AppError } from '../../common/problem';
-import { IdempotencyInterceptor } from '../../common/idempotency.interceptor';
+import { HuellaDeIdempotencia, IdempotencyInterceptor } from '../../common/idempotency.interceptor';
 import { ApiKeyGuard, Scopes } from '../identity/api-key.guard';
 import { RidesService, type Actor } from './rides.service';
 import { DispatchService } from '../dispatch/dispatch.service';
@@ -32,6 +32,29 @@ const addressSchema = z.object({
 const cancelSchema = z.object({
   reason: z.string().min(3, 'El motivo es obligatorio'),
 });
+
+/**
+ * Lo que identifica un pedido de taxi: quién lo pide y, si compartió su
+ * ubicación, dónde está.
+ *
+ * El resto del cuerpo lo redacta el agente de IA de n8n (`$fromAI`): la
+ * dirección dicha con palabras, la referencia, las notas. Si el agente vuelve
+ * a llamar dentro del mismo turno —su prompt se lo pide ante cualquier error—
+ * esas palabras pueden salir distintas, y comparar el cuerpo entero daba un
+ * 409 por un pedido que era el mismo: el agente le decía al cliente que hubo
+ * un inconveniente mientras el taxi ya iba en camino. La clave ya dice de qué
+ * turno es; la huella solo confirma que no se reutilizó para otro cliente u
+ * otro punto.
+ */
+const huellaDePedido = (cuerpo: unknown) => {
+  const pedido = (cuerpo ?? {}) as { customerPhone?: unknown; pickup?: { point?: { lat?: unknown; lng?: unknown } } };
+  const punto = pedido.pickup?.point;
+  const redondear = (n: unknown) => (typeof n === 'number' ? Math.round(n * 1e5) / 1e5 : null);
+  return {
+    telefono: pedido.customerPhone ?? null,
+    punto: punto ? [redondear(punto.lat), redondear(punto.lng)] : null,
+  };
+};
 
 const listQuerySchema = z.object({
   status: z
@@ -62,6 +85,7 @@ export class RidesController {
   @Post()
   @Scopes('rides:write')
   @UseInterceptors(IdempotencyInterceptor)
+  @HuellaDeIdempotencia(huellaDePedido)
   create(
     @Req() request: FastifyRequest,
     @Body(zodBody(createRideSchema)) body: z.infer<typeof createRideSchema>,

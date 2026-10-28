@@ -25,6 +25,8 @@ export interface Driver {
   positionAgeSeconds?: number;
   /** Si sigue trabajando. Un conductor inactivo no entra en ninguna oleada. */
   active: boolean;
+  /** Cuenta con la que el equipo prueba; Reportes la puede dejar fuera. */
+  esPrueba?: boolean;
   shiftStartedAt?: string;
   ridesToday: number;
   acceptanceRate: number;

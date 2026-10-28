@@ -1,21 +1,39 @@
 import { Body, Controller, Get, Param, ParseUUIDPipe, Post, Req, Res, UseGuards } from '@nestjs/common';
 import type { FastifyReply, FastifyRequest } from 'fastify';
 import { z } from 'zod';
-import { RIDE_STATUSES } from '@tax/shared';
+import { MAX_DIAS_INFORME, RIDE_STATUSES, diasDelRango } from '@tax/shared';
 import { zodBody } from '../../common/zod.pipe';
 import { SessionGuard } from '../identity/guards';
 import { ExportsService } from './exports.service';
 
-const solicitudSchema = z.object({
-  kind: z.enum(['resumen', 'carreras']),
-  format: z.enum(['xlsx', 'pdf']),
-  days: z.coerce.number().int().min(1).max(90),
-  /** Solo para `carreras`: los filtros de la vista desde la que se pidió. */
-  statuses: z.array(z.enum(RIDE_STATUSES)).max(RIDE_STATUSES.length).optional(),
-  zoneId: z.string().uuid().optional(),
-  query: z.string().trim().max(80).optional(),
-  filterLabel: z.string().trim().max(40).optional(),
-});
+const fecha = z.string().regex(/^\d{4}-\d{2}-\d{2}$/);
+
+const solicitudSchema = z
+  .object({
+    kind: z.enum(['resumen', 'carreras']),
+    format: z.enum(['xlsx', 'pdf']),
+    /** Desde *Carreras*: hacia atrás desde ahora. */
+    days: z.coerce.number().int().min(1).max(90).optional(),
+    /** Desde *Reportes*: los días del tablero, con los dos extremos. */
+    desde: fecha.optional(),
+    hasta: fecha.optional(),
+    /** Solo para `carreras`: los filtros de la vista desde la que se pidió. */
+    statuses: z.array(z.enum(RIDE_STATUSES)).max(RIDE_STATUSES.length).optional(),
+    zoneId: z.string().uuid().optional(),
+    query: z.string().trim().max(80).optional(),
+    /** Los filtros del tablero de Reportes. */
+    zoneIds: z.array(z.string().uuid()).max(50).optional(),
+    zoneKind: z.enum(['urbano', 'rural']).optional(),
+    driverId: z.string().uuid().optional(),
+    lines: z.array(z.string().trim().min(1).max(60)).max(50).optional(),
+    excludeTests: z.boolean().optional(),
+    filterLabel: z.string().trim().max(120).optional(),
+  })
+  .refine((v) => v.days !== undefined || (v.desde && v.hasta), 'Falta el periodo: `days`, o `desde` y `hasta`')
+  .refine(
+    (v) => !v.desde || !v.hasta || (v.desde <= v.hasta && diasDelRango(v.desde, v.hasta) <= MAX_DIAS_INFORME),
+    `El periodo va de \`desde\` a \`hasta\` y tiene hasta ${MAX_DIAS_INFORME} días`,
+  );
 
 /**
  * Exportaciones a Excel y PDF (§4.1). Las puede pedir cualquiera de la

@@ -28,6 +28,12 @@ export const drivers = pgTable(
     pinHash: text('pin_hash').notNull(),
     status: driverStatus('status').notNull().default('OFF_SHIFT'),
     active: boolean('active').notNull().default(true),
+    /**
+     * Cuenta con la que el equipo prueba la PWA. Despacha como cualquiera,
+     * pero sus carreras, ofertas y turnos no cuentan en Reportes con «No
+     * incluir pruebas».
+     */
+    esPrueba: boolean('es_prueba').notNull().default(false),
     /** Intentos fallidos seguidos; a los 5 se bloquea el acceso (§8.1). */
     failedAttempts: integer('failed_attempts').notNull().default(0),
     lockedUntil: timestamp('locked_until', { withTimezone: true }),

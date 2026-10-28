@@ -143,14 +143,22 @@ export interface StackedBarDatum {
 export function StackedBars({
   data,
   series,
+  colors = SERIES,
   height = 200,
   formatValue = (v: number) => String(v),
 }: {
   data: StackedBarDatum[];
   series: string[];
+  /**
+   * Colores propios en vez del orden de serie, cuando cada serie es un
+   * estado: terminadas en verde, sin taxi en rojo. El color sigue al estado,
+   * nunca a la posición.
+   */
+  colors?: string[];
   height?: number;
   formatValue?: (value: number) => string;
 }) {
+  const cadaCuanto = cadaCuantasEtiquetas(data.length);
   const [hover, setHover] = useState<number | null>(null);
   const width = 640;
   const padding = { top: 12, right: 8, bottom: 22, left: 30 };
@@ -224,20 +232,22 @@ export function StackedBars({
                     transition={{ duration: 0.38, delay: index * 0.012, ease: [0.05, 0.7, 0.1, 1] }}
                     style={{ transformOrigin: `center ${padding.top + plotHeight}px` }}
                     d={barPath(x, cursor + (seriesIndex > 0 ? 2 : 0), barWidth, segmentHeight, isTop)}
-                    fill={SERIES[seriesIndex]}
+                    fill={colors[seriesIndex]}
                     opacity={hover === null || hover === index ? 1 : 0.45}
                   />
                 );
               })}
 
-              <text
-                x={padding.left + index * step + step / 2}
-                y={height - 6}
-                textAnchor="middle"
-                className="fill-[var(--c-ink-muted)] text-[10px]"
-              >
-                {datum.label}
-              </text>
+              {index % cadaCuanto === 0 ? (
+                <text
+                  x={padding.left + index * step + step / 2}
+                  y={height - 6}
+                  textAnchor="middle"
+                  className="fill-[var(--c-ink-muted)] text-[10px]"
+                >
+                  {datum.label}
+                </text>
+              ) : null}
             </g>
           );
         })}
@@ -252,7 +262,7 @@ export function StackedBars({
             <p className="text-caption font-medium text-ink">{data[hover]?.label}</p>
             {series.map((name, i) => (
               <p key={name} className="flex items-center gap-1.5 text-micro text-ink-secondary">
-                <span className="size-2 rounded-xs" style={{ backgroundColor: SERIES[i] }} />
+                <span className="size-2 rounded-xs" style={{ backgroundColor: colors[i] }} />
                 {name}
                 <span className="ml-auto tnum font-medium text-ink">
                   {formatValue(data[hover]?.values[i] ?? 0)}
@@ -299,6 +309,7 @@ export function Lines({
 
   const max = niceMax(Math.max(...series.flatMap((s) => s.values)));
   const step = labels.length > 1 ? plotWidth / (labels.length - 1) : 0;
+  const cadaCuanto = cadaCuantasEtiquetas(labels.length);
 
   const pointAt = (index: number, value: number) => ({
     x: padding.left + index * step,
@@ -432,14 +443,16 @@ export function Lines({
               fill="transparent"
               onMouseEnter={() => setHover(index)}
             />
-            <text
-              x={padding.left + index * step}
-              y={height - 6}
-              textAnchor="middle"
-              className="fill-[var(--c-ink-muted)] text-[10px]"
-            >
-              {label}
-            </text>
+            {index % cadaCuanto === 0 ? (
+              <text
+                x={padding.left + index * step}
+                y={height - 6}
+                textAnchor="middle"
+                className="fill-[var(--c-ink-muted)] text-[10px]"
+              >
+                {label}
+              </text>
+            ) : null}
           </g>
         ))}
       </svg>
@@ -473,12 +486,14 @@ export function Lines({
 export function HorizontalBars({
   data,
   formatValue = (v: number) => String(v),
+  color = 'var(--c-series-1)',
 }: {
   /** `rural`: la pista va en tinte verde, para leer de un vistazo qué es vereda. */
   data: { label: string; value: number; hint?: string; rural?: boolean }[];
   formatValue?: (value: number) => string;
+  color?: string;
 }) {
-  const max = Math.max(...data.map((d) => d.value));
+  const max = Math.max(1, ...data.map((d) => d.value));
 
   return (
     <ul className="space-y-2">
@@ -501,13 +516,89 @@ export function HorizontalBars({
               animate={{ width: `${(item.value / max) * 100}%` }}
               transition={{ duration: 0.38, delay: index * 0.028, ease: [0.05, 0.7, 0.1, 1] }}
               className="h-full rounded-full"
-              style={{ backgroundColor: 'var(--c-series-1)' }}
+              style={{ backgroundColor: color }}
             />
           </div>
           {item.hint ? <p className="mt-0.5 text-micro text-ink-muted">{item.hint}</p> : null}
         </li>
       ))}
     </ul>
+  );
+}
+
+/* ---------------------------------------------------------- mapa de calor --- */
+
+/**
+ * Carreras por día de la semana y hora: dónde se llena el servicio.
+ *
+ * Un solo tono, de claro a oscuro, y la celda vacía en el gris de fondo: un
+ * cero no se confunde con «poco». Las horas de la madrugada sin ninguna
+ * carrera en todo el periodo se recortan, para que el resto respire.
+ */
+export function MapaDeCalor({ dias, valores }: { dias: string[]; valores: number[][] }) {
+  const [hover, setHover] = useState<{ dia: number; hora: number } | null>(null);
+  const max = Math.max(1, ...valores.flat());
+  const conCarreras = Array.from({ length: 24 }, (_, h) => valores.some((fila) => (fila[h] ?? 0) > 0));
+  const primera = Math.min(6, Math.max(0, conCarreras.indexOf(true)));
+  const horas = Array.from({ length: 24 - primera }, (_, i) => primera + i);
+
+  const fondo = (v: number) =>
+    v === 0
+      ? 'var(--c-surface-sunk)'
+      : `color-mix(in srgb, var(--brand) ${Math.round(18 + (v / max) * 82)}%, var(--surface))`;
+
+  return (
+    <div className="relative" onMouseLeave={() => setHover(null)}>
+      <div
+        className="grid gap-[2px]"
+        style={{ gridTemplateColumns: `2.25rem repeat(${horas.length}, minmax(0, 1fr))` }}
+      >
+        {dias.map((dia, d) => (
+          <div key={dia} className="contents">
+            <span className="self-center text-micro text-ink-muted">{dia}</span>
+            {horas.map((h) => {
+              const v = valores[d]?.[h] ?? 0;
+              const activa = hover?.dia === d && hover.hora === h;
+              return (
+                <span
+                  key={h}
+                  onMouseEnter={() => setHover({ dia: d, hora: h })}
+                  className={cn('h-6 rounded-xs', activa && 'ring-2 ring-[var(--ink)] ring-offset-1')}
+                  style={{ backgroundColor: fondo(v) }}
+                />
+              );
+            })}
+          </div>
+        ))}
+        <span />
+        {horas.map((h) => (
+          <span key={h} className="pt-1 text-center text-[10px] text-ink-muted">
+            {h % 3 === 0 ? h : ''}
+          </span>
+        ))}
+      </div>
+
+      <div className="mt-2 flex items-center justify-end gap-1.5 text-micro text-ink-muted">
+        Menos
+        {[0, 0.25, 0.5, 0.75, 1].map((p) => (
+          <span key={p} className="size-3 rounded-xs" style={{ backgroundColor: fondo(p * max) }} />
+        ))}
+        Más
+      </div>
+
+      <Tooltip visible={hover !== null} x={hover ? ((hover.hora - primera + 1) / (horas.length + 1)) * 100 : 0}>
+        {hover ? (
+          <>
+            <p className="text-caption font-medium text-ink">
+              {dias[hover.dia]} · {hover.hora}:00 a {hover.hora + 1}:00
+            </p>
+            <p className="text-micro text-ink-secondary">
+              <span className="tnum font-medium text-ink">{valores[hover.dia]?.[hover.hora] ?? 0}</span> carreras
+            </p>
+          </>
+        ) : null}
+      </Tooltip>
+    </div>
   );
 }
 
@@ -530,6 +621,11 @@ function Tooltip({ visible, x, children }: { visible: boolean; x: number; childr
       ) : null}
     </AnimatePresence>
   );
+}
+
+/** Con muchos días, una etiqueta de cada tantas: doce caben sin pisarse. */
+function cadaCuantasEtiquetas(total: number): number {
+  return Math.max(1, Math.ceil(total / 12));
 }
 
 /**

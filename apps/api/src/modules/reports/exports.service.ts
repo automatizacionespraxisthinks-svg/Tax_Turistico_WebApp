@@ -11,9 +11,10 @@ import {
   type ExportParams,
 } from '../../db/schema';
 import { AppError } from '../../common/problem';
-import { leerPeriodo, nombreDelPeriodo, ZONA_HORARIA } from './exports.data';
+import { leerPeriodo, textoDelPeriodo, ZONA_HORARIA } from './exports.data';
 import { generarExcel } from './exports.xlsx';
 import { generarPdf } from './exports.pdf';
+import { ReportsService, filtrosDeParams } from './reports.service';
 
 export const EXPORTS_QUEUE = 'exportaciones';
 export const GENERAR_JOB = 'generar';
@@ -66,6 +67,7 @@ export class ExportsService {
   constructor(
     @Inject(DB) private readonly db: Database,
     @InjectQueue(EXPORTS_QUEUE) private readonly queue: Queue<{ exportId: string }>,
+    private readonly reports: ReportsService,
   ) {}
 
   async solicitar(solicitud: Solicitud, pedidoPor: { id: string; name: string }) {
@@ -73,11 +75,12 @@ export class ExportsService {
       throw new AppError('VALIDATION_FAILED', 'El PDF es del resumen del periodo; las carreras sueltas van en Excel');
     }
 
-    const periodo = nombreDelPeriodo(solicitud.params.days);
+    const periodo = textoDelPeriodo(solicitud.params);
+    const filtro = solicitud.params.filterLabel;
     const titulo =
       solicitud.kind === 'resumen'
-        ? `Resumen de operación · ${periodo}`
-        : `Carreras${solicitud.params.filterLabel ? ` ${solicitud.params.filterLabel.toLowerCase()}` : ''} · ${periodo}`;
+        ? `Resumen de operación · ${periodo}${filtro ? ` · ${filtro}` : ''}`
+        : `Carreras${filtro ? ` ${filtro.toLowerCase()}` : ''} · ${periodo}`;
     const fileName = `${paraArchivo(titulo)}-${hoy()}.${solicitud.format}`;
 
     const id = uuidv7();
@@ -141,8 +144,18 @@ export class ExportsService {
     const inicio = Date.now();
 
     try {
-      const periodo = await leerPeriodo(this.db, fila.params);
-      const opciones = { titulo: fila.title, pedidoPor: fila.requestedByName };
+      // El resumen pedido desde Reportes sale del mismo tablero que se veía en
+      // pantalla: el resumen en palabras y la tabla de conductores con sus
+      // ofertas y turnos, no solo las carreras.
+      const desdeElTablero = fila.kind === 'resumen' && fila.params.desde && fila.params.hasta;
+      const armado = desdeElTablero ? await this.reports.tableroConPeriodo(filtrosDeParams(fila.params)) : null;
+      const periodo = armado?.periodo ?? (await leerPeriodo(this.db, fila.params));
+      const opciones = {
+        titulo: fila.title,
+        pedidoPor: fila.requestedByName,
+        tablero: armado?.tablero,
+        filtros: fila.params.filterLabel,
+      };
       const contenido =
         fila.format === 'pdf'
           ? await generarPdf(periodo, opciones)

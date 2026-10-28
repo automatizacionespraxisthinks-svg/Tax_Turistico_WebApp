@@ -6,4 +6,5 @@ export * from './domain/geo';
 export * from './domain/events';
 export * from './domain/system';
 export * from './domain/labels';
+export * from './domain/informes';
 export * from './format';

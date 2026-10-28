@@ -411,6 +411,11 @@ Crea las 7 zonas de Paipa con su factor de tortuosidad y sus oleadas. Es
 idempotente: repetirlo no duplica nada. Ya no siembra tarifas: el sistema no
 maneja precios.
 
+Las zonas son círculos, guardados como polígonos de 64 lados. Si la base se
+sembró cuando todavía eran rectángulos, la migración `0014_zonas_circulares`
+las cambia sola al desplegar; solo toca las que siguen siendo el rectángulo de
+la siembra.
+
 > **No ejecutes `dist/db/seed.js` aquí.** Ese es el sembrado de desarrollo y
 > además de las zonas crea cinco conductores de mentira **con el PIN
 > `4821`**, un usuario de oficina con la contraseña
@@ -603,6 +608,13 @@ cópialo directo a las credenciales de n8n.
     dirección geocodificada o una sin ubicar, y la PWA avisa al conductor en
     los dos últimos casos. Al destino solo hay botones si llega
     `dropoff.point`.
+- **Reportes cambió de endpoints (migración `0013_marcas_de_prueba`).** El
+  tablero se pide entero a `GET /v1/reports/dashboard` y sus opciones a
+  `GET /v1/reports/filters`; ya no existen `summary`, `rides-by-hour`,
+  `assignment-times`, `demand-by-zone` ni `automation-rate`. Solo los usaba el
+  panel, así que no hay que tocar n8n. La migración añade `es_prueba` a
+  `customers` y a `drivers`, en falso: hasta que alguien marque un teléfono o
+  una cuenta de conductor, «No incluir pruebas» no deja nada fuera.
 - **`MIN_DURACION_CARRERA_MIN`** (10 por defecto): minutos con el pasajero a
   bordo antes de poder finalizar. **`PHOTO_RETENTION_DAYS`** (30): cuánto se
   guarda la foto del lugar; se borra con la purga de madrugada.

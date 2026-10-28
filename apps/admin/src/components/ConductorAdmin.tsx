@@ -284,6 +284,21 @@ export function GestionConductor({ driver }: { driver: Driver }) {
     onError: () => toast.push({ tone: 'critical', title: 'No se pudo cambiar el estado' }),
   });
 
+  const cambiarPrueba = useMutation({
+    mutationFn: (esPrueba: boolean) => api.patch(`/v1/admin/drivers/${driver.id}`, { esPrueba }),
+    onSuccess: async (_r, esPrueba) => {
+      await actions.refreshDrivers();
+      toast.push({
+        tone: 'info',
+        title: esPrueba ? 'Marcado como cuenta de prueba' : 'Ya no es cuenta de prueba',
+        description: esPrueba
+          ? 'Despacha igual que siempre, pero Reportes puede dejar fuera sus carreras.'
+          : 'Sus carreras vuelven a contar en Reportes.',
+      });
+    },
+    onError: () => toast.push({ tone: 'critical', title: 'No se pudo cambiar la marca de prueba' }),
+  });
+
   const revocar = useMutation({
     mutationFn: (deviceId: string) => api.post(`/v1/admin/drivers/devices/${deviceId}/revoke`),
     onSuccess: async () => {
@@ -322,6 +337,25 @@ export function GestionConductor({ driver }: { driver: Driver }) {
               onClick={() => cambiarActivo.mutate(!driver.active)}
             >
               {driver.active ? 'Desactivar' : 'Activar'}
+            </Button>
+          </div>
+
+          <div className="flex items-center justify-between gap-3 border-t border-line pt-3">
+            <div className="min-w-0">
+              <p className="text-base text-ink">Cuenta de prueba</p>
+              <p className="text-micro text-ink-muted">
+                {driver.esPrueba
+                  ? 'Sus carreras, ofertas y turnos no cuentan en Reportes con «No incluir pruebas».'
+                  : 'Márcala si el equipo la usa para probar la aplicación.'}
+              </p>
+            </div>
+            <Button
+              size="sm"
+              variant="secondary"
+              loading={cambiarPrueba.isPending}
+              onClick={() => cambiarPrueba.mutate(!driver.esPrueba)}
+            >
+              {driver.esPrueba ? 'Quitar marca' : 'Marcar'}
             </Button>
           </div>
 

@@ -266,6 +266,9 @@ export interface Ride {
   createdAt: string;
   customerPhone: string;
   customerName: string;
+  customerId?: string;
+  /** Teléfono del equipo de pruebas: Reportes puede dejar fuera sus carreras. */
+  customerEsPrueba?: boolean;
   pickup: RideAddress;
   dropoff?: RideAddress;
   zoneId: string;

@@ -42,6 +42,12 @@ export const customers = pgTable(
     lastLat: doublePrecision('last_lat'),
     lastLng: doublePrecision('last_lng'),
     lastSeenAt: timestamp('last_seen_at', { withTimezone: true }),
+    /**
+     * Un teléfono del equipo con el que se prueba el servicio. Sus carreras
+     * no cuentan en Reportes con «No incluir pruebas»; se marca desde la
+     * ficha de cualquiera de sus carreras y vale también para las de antes.
+     */
+    esPrueba: boolean('es_prueba').notNull().default(false),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   },
   (table) => [uniqueIndex('customers_phone_key').on(table.phone)],

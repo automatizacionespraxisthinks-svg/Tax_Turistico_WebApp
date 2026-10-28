@@ -132,14 +132,20 @@ export class FleetAdminService {
 
   /* ------------------------------------------------------------ cambios */
 
-  /** Cambia nombre, teléfono o si sigue trabajando. */
+  /** Cambia nombre, teléfono, si sigue trabajando o si es una cuenta de prueba. */
   async updateDriver(
     driverId: string,
-    cambios: { name?: string; phone?: string; active?: boolean },
+    cambios: { name?: string; phone?: string; active?: boolean; esPrueba?: boolean },
     actor: AdminActor,
   ): Promise<void> {
     const [antes] = await this.db
-      .select({ code: drivers.code, name: drivers.name, phone: drivers.phone, active: drivers.active })
+      .select({
+        code: drivers.code,
+        name: drivers.name,
+        phone: drivers.phone,
+        active: drivers.active,
+        esPrueba: drivers.esPrueba,
+      })
       .from(drivers)
       .where(eq(drivers.id, driverId))
       .limit(1);
@@ -150,7 +156,16 @@ export class FleetAdminService {
       name: cambios.name?.trim() ?? antes.name,
       phone: cambios.phone?.trim() ?? antes.phone,
       active: cambios.active ?? antes.active,
+      esPrueba: cambios.esPrueba ?? antes.esPrueba,
     };
+    const accion =
+      despues.active === false && antes.active
+        ? 'Desactivó un conductor'
+        : despues.esPrueba !== antes.esPrueba
+          ? despues.esPrueba
+            ? 'Marcó un conductor como cuenta de prueba'
+            : 'Quitó la marca de prueba a un conductor'
+          : 'Editó un conductor';
 
     await this.db.transaction(async (tx) => {
       await tx
@@ -163,7 +178,7 @@ export class FleetAdminService {
           actorId: actor.id,
           actorName: actor.name,
           role: actor.role,
-          action: despues.active === false && antes.active ? 'Desactivó un conductor' : 'Editó un conductor',
+          action: accion,
           entity: 'drivers',
           entityId: antes.code,
           before: antes,

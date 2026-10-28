@@ -1,5 +1,5 @@
 import { sql, type SQL } from 'drizzle-orm';
-import { RIDE_STATUS_LABEL, type RideStatus } from '@tax/shared';
+import { RIDE_STATUS_LABEL, fechasDelRango, textoDelRango, type RideStatus } from '@tax/shared';
 import type { Database } from '../../db/db.module';
 import type { ExportParams } from '../../db/schema';
 
@@ -23,6 +23,7 @@ export interface FilaCarrera {
   vehiculo: string;
   cliente: string | null;
   telefono: string;
+  conductorId: string | null;
   conductorCodigo: string | null;
   conductor: string | null;
   placa: string | null;
@@ -45,28 +46,84 @@ export interface Periodo {
   params: ExportParams;
   desde: Date;
   hasta: Date;
+  /** «22 oct – 28 oct 2026», o «últimos 7 días» en las de *Carreras*. */
+  texto: string;
+  /** Los días del periodo, en orden; solo cuando se pidió por fechas. */
+  dias?: string[];
   filas: FilaCarrera[];
   /** Si había más carreras que `MAX_FILAS` y el archivo va recortado. */
   recortado: boolean;
 }
 
-/** Las carreras del periodo, con los filtros que traiga la petición. */
-export async function leerPeriodo(db: Database, params: ExportParams): Promise<Periodo> {
-  const hasta = new Date();
-  const desde = new Date(hasta.getTime() - params.days * 86_400_000);
-
-  const filtros: SQL[] = [sql`r.created_at >= ${desde.toISOString()}::timestamptz`];
-  if (params.statuses?.length) {
-    filtros.push(sql`r.status::text in (${sql.join(params.statuses.map((s) => sql`${s}`), sql`, `)})`);
+/**
+ * Dónde empieza y dónde acaba el periodo.
+ *
+ * Por fechas, son días de Paipa enteros: del 22 a las 00:00 al 29 a las
+ * 00:00, hora de Paipa. La conversión la hace PostgreSQL con la zona horaria,
+ * no este proceso con un desfase escrito a mano.
+ */
+export async function limitesDelPeriodo(db: Database, params: ExportParams): Promise<{ desde: Date; hasta: Date }> {
+  if (params.desde && params.hasta) {
+    const { rows } = await db.execute<{ desde: Date; hasta: Date }>(sql`
+      select (${params.desde}::date)::timestamp at time zone ${ZONA_HORARIA} as desde,
+             (${params.hasta}::date + 1)::timestamp at time zone ${ZONA_HORARIA} as hasta
+    `);
+    return { desde: new Date(rows[0]!.desde), hasta: new Date(rows[0]!.hasta) };
   }
-  if (params.zoneId) filtros.push(sql`r.zone_id = ${params.zoneId}::uuid`);
+  const hasta = new Date();
+  return { desde: new Date(hasta.getTime() - (params.days ?? 7) * 86_400_000), hasta };
+}
+
+/**
+ * Las condiciones de los filtros, sobre `rides r`, `zones z`, `customers c` y
+ * `drivers d` (el conductor de la carrera).
+ *
+ * Las ofertas se cuentan con las mismas carreras, pero el conductor que
+ * importa es el que recibió la oferta, no el que se la llevó: para ellas
+ * `deOfertas` deja fuera lo que mira a `d`, y la consulta pone lo suyo.
+ */
+export function condicionesDelPeriodo(
+  params: ExportParams,
+  limites: { desde: Date; hasta: Date },
+  opciones: { deOfertas?: boolean } = {},
+): SQL[] {
+  const condiciones: SQL[] = [
+    sql`r.created_at >= ${limites.desde.toISOString()}::timestamptz`,
+    sql`r.created_at < ${limites.hasta.toISOString()}::timestamptz`,
+  ];
+  const enLista = (valores: string[]) => sql.join(valores.map((v) => sql`${v}`), sql`, `);
+
+  if (params.statuses?.length) condiciones.push(sql`r.status::text in (${enLista(params.statuses)})`);
+  if (params.zoneId) condiciones.push(sql`r.zone_id = ${params.zoneId}::uuid`);
+  if (params.zoneIds?.length) condiciones.push(sql`r.zone_id::text in (${enLista(params.zoneIds)})`);
+  if (params.zoneKind) condiciones.push(sql`z.kind::text = ${params.zoneKind}`);
+  if (params.lines?.length) condiciones.push(sql`r.line in (${enLista(params.lines)})`);
   if (params.query?.trim()) {
     // La misma búsqueda que el panel: código, cliente, teléfono o dirección.
     const aguja = `%${params.query.trim()}%`;
-    filtros.push(
+    condiciones.push(
       sql`(r.code ilike ${aguja} or c.name ilike ${aguja} or c.phone ilike ${aguja} or r.pickup_text ilike ${aguja})`,
     );
   }
+  if (params.excludeTests) condiciones.push(sql`not c.es_prueba`);
+
+  if (!opciones.deOfertas) {
+    if (params.driverId) condiciones.push(sql`r.driver_id = ${params.driverId}::uuid`);
+    if (params.excludeTests) condiciones.push(sql`not coalesce(d.es_prueba, false)`);
+  }
+  return condiciones;
+}
+
+export function textoDelPeriodo(params: ExportParams): string {
+  if (params.desde && params.hasta) return textoDelRango(params.desde, params.hasta);
+  const dias = params.days ?? 7;
+  return dias === 1 ? 'últimas 24 horas' : `últimos ${dias} días`;
+}
+
+/** Las carreras del periodo, con los filtros que traiga la petición. */
+export async function leerPeriodo(db: Database, params: ExportParams): Promise<Periodo> {
+  const limites = await limitesDelPeriodo(db, params);
+  const condiciones = condicionesDelPeriodo(params, limites);
 
   const resultado = await db.execute<{
     codigo: string;
@@ -81,6 +138,7 @@ export async function leerPeriodo(db: Database, params: ExportParams): Promise<P
     vehiculo: string;
     cliente: string | null;
     telefono: string;
+    conductor_id: string | null;
     conductor_codigo: string | null;
     conductor: string | null;
     placa: string | null;
@@ -106,6 +164,7 @@ export async function leerPeriodo(db: Database, params: ExportParams): Promise<P
            r.vehicle_type::text as vehiculo,
            c.name as cliente,
            c.phone as telefono,
+           d.id as conductor_id,
            d.code as conductor_codigo,
            d.name as conductor,
            v.plate as placa,
@@ -126,7 +185,7 @@ export async function leerPeriodo(db: Database, params: ExportParams): Promise<P
       left join customers c on c.id = r.customer_id
       left join drivers d on d.id = r.driver_id
       left join vehicles v on v.id = r.vehicle_id
-     where ${sql.join(filtros, sql` and `)}
+     where ${sql.join(condiciones, sql` and `)}
      order by r.created_at desc
      limit ${MAX_FILAS + 1}
   `);
@@ -136,8 +195,9 @@ export async function leerPeriodo(db: Database, params: ExportParams): Promise<P
 
   return {
     params,
-    desde,
-    hasta,
+    ...limites,
+    texto: textoDelPeriodo(params),
+    dias: params.desde && params.hasta ? fechasDelRango(params.desde, params.hasta) : undefined,
     recortado,
     filas: crudas.slice(0, MAX_FILAS).map((f) => ({
       codigo: f.codigo,
@@ -153,6 +213,7 @@ export async function leerPeriodo(db: Database, params: ExportParams): Promise<P
       vehiculo: f.vehiculo,
       cliente: f.cliente,
       telefono: f.telefono,
+      conductorId: f.conductor_id,
       conductorCodigo: f.conductor_codigo,
       conductor: f.conductor,
       placa: f.placa,
@@ -173,7 +234,7 @@ export async function leerPeriodo(db: Database, params: ExportParams): Promise<P
 
 /* --------------------------------------------------------- agregados --- */
 
-function percentil(valores: number[], p: number): number | null {
+export function percentil(valores: number[], p: number): number | null {
   if (valores.length === 0) return null;
   const orden = [...valores].sort((a, b) => a - b);
   // Interpolación lineal, igual que `percentile_cont` de PostgreSQL.
@@ -181,6 +242,20 @@ function percentil(valores: number[], p: number): number | null {
   const bajo = Math.floor(pos);
   const alto = Math.ceil(pos);
   return Math.round(orden[bajo]! + (orden[alto]! - orden[bajo]!) * (pos - bajo));
+}
+
+const ABIERTA = (estado: RideStatus) => !['COMPLETED', 'CANCELLED', 'UNASSIGNED'].includes(estado);
+
+export interface ResumenConductor {
+  id: string;
+  codigo: string;
+  nombre: string;
+  asignadas: number;
+  finalizadas: number;
+  canceladas: number;
+  km: number;
+  duracionP50: number | null;
+  llegadaP50: number | null;
 }
 
 export interface Resumen {
@@ -194,45 +269,86 @@ export interface Resumen {
   asignacionP95: number | null;
   /** Mediana, en segundos, de aceptar a llegar al punto. */
   llegadaP50: number | null;
+  llegadaP95: number | null;
   /** Mediana, en minutos, de las carreras finalizadas. */
   duracionP50: number | null;
   sinIntervencion: number | null;
   /** La hora con más carreras: el pico del periodo. */
   horaPico: { hora: string; carreras: number } | null;
   porZona: { zona: string; tipo: string; carreras: number; finalizadas: number; canceladas: number }[];
-  porConductor: {
-    codigo: string;
-    nombre: string;
+  porConductor: ResumenConductor[];
+  porHora: { hora: string; carreras: number; urbano: number; rural: number }[];
+  porDia: {
+    dia: string;
+    carreras: number;
     finalizadas: number;
-    km: number;
-    duracionP50: number | null;
+    canceladas: number;
+    sinAsignar: number;
+    abiertas: number;
+    p50: number | null;
+    p95: number | null;
     llegadaP50: number | null;
+    sinIntervencion: number | null;
   }[];
-  porHora: { hora: string; carreras: number }[];
-  porDia: { dia: string; carreras: number; finalizadas: number; p50: number | null; p95: number | null }[];
+  /** Siete filas, de lunes a domingo, de 24 horas cada una. */
+  calor: number[][];
+  porLinea: { linea: string; carreras: number; finalizadas: number; sinIntervencion: number | null }[];
+  cancelaciones: { motivo: string; carreras: number }[];
 }
 
 const horaLocal = new Intl.DateTimeFormat('es-CO', { timeZone: ZONA_HORARIA, hour: '2-digit', hourCycle: 'h23' });
 const diaLocal = new Intl.DateTimeFormat('en-CA', { timeZone: ZONA_HORARIA, year: 'numeric', month: '2-digit', day: '2-digit' });
+const diaDeSemana = new Intl.DateTimeFormat('en-US', { timeZone: ZONA_HORARIA, weekday: 'short' });
+const LUNES_PRIMERO = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+
+export const SIN_LINEA = 'Sin línea';
+export const SIN_MOTIVO = 'Sin motivo escrito';
 
 /**
- * Todo lo que cuentan el Excel y el PDF, sacado de las mismas filas: si el
- * resumen dijera 40 finalizadas y la hoja de carreras tuviera 41, nadie se
- * fiaría de ninguno de los dos.
+ * Todo lo que cuentan el tablero, el Excel y el PDF, sacado de las mismas
+ * filas: si el resumen dijera 40 finalizadas y la hoja de carreras tuviera
+ * 41, nadie se fiaría de ninguno de los dos.
+ *
+ * `dias` son los días del periodo: con ellos, un día sin carreras sale en
+ * cero en vez de desaparecer de la gráfica.
  */
-export function resumir(filas: FilaCarrera[]): Resumen {
+export function resumir(filas: FilaCarrera[], dias?: string[]): Resumen {
   const finalizadas = filas.filter((f) => f.estado === 'COMPLETED');
   const asignaciones = filas.flatMap((f) => (f.asignacionSegundos === null ? [] : [f.asignacionSegundos]));
   const llegadas = filas.flatMap((f) => (f.llegadaSegundos === null ? [] : [f.llegadaSegundos]));
   const duraciones = filas.flatMap((f) => (f.duracionMinutos === null ? [] : [f.duracionMinutos]));
 
   const porZona = new Map<string, Resumen['porZona'][number]>();
-  const porConductor = new Map<
+  const porConductor = new Map<string, ResumenConductor & { duraciones: number[]; llegadas: number[] }>();
+  const porHora = new Map<string, { carreras: number; urbano: number; rural: number }>();
+  const porDia = new Map<
     string,
-    { codigo: string; nombre: string; finalizadas: number; km: number; duraciones: number[]; llegadas: number[] }
+    {
+      carreras: number;
+      finalizadas: number;
+      canceladas: number;
+      sinAsignar: number;
+      abiertas: number;
+      intervenidas: number;
+      asignaciones: number[];
+      llegadas: number[];
+    }
   >();
-  const porHora = new Map<string, number>();
-  const porDia = new Map<string, { carreras: number; finalizadas: number; asignaciones: number[] }>();
+  const porLinea = new Map<string, { carreras: number; finalizadas: number; intervenidas: number }>();
+  const cancelaciones = new Map<string, number>();
+  const calor = Array.from({ length: 7 }, () => Array.from({ length: 24 }, () => 0));
+
+  const nuevoDia = () => ({
+    carreras: 0,
+    finalizadas: 0,
+    canceladas: 0,
+    sinAsignar: 0,
+    abiertas: 0,
+    intervenidas: 0,
+    asignaciones: [] as number[],
+    llegadas: [] as number[],
+  });
+  for (const dia of dias ?? []) porDia.set(dia, nuevoDia());
 
   for (const f of filas) {
     const zona = f.zona ?? 'Sin zona';
@@ -242,65 +358,98 @@ export function resumir(filas: FilaCarrera[]): Resumen {
     if (f.estado === 'CANCELLED') z.canceladas += 1;
     porZona.set(zona, z);
 
-    if (f.conductorCodigo) {
-      const c = porConductor.get(f.conductorCodigo) ?? {
-        codigo: f.conductorCodigo,
+    if (f.conductorId) {
+      const c = porConductor.get(f.conductorId) ?? {
+        id: f.conductorId,
+        codigo: f.conductorCodigo ?? '',
         nombre: f.conductor ?? '',
+        asignadas: 0,
         finalizadas: 0,
+        canceladas: 0,
         km: 0,
+        duracionP50: null,
+        llegadaP50: null,
         duraciones: [],
         llegadas: [],
       };
+      c.asignadas += 1;
       if (f.estado === 'COMPLETED') {
         c.finalizadas += 1;
         c.km += f.distanciaKm ?? 0;
       }
+      if (f.estado === 'CANCELLED') c.canceladas += 1;
       if (f.duracionMinutos !== null) c.duraciones.push(f.duracionMinutos);
       if (f.llegadaSegundos !== null) c.llegadas.push(f.llegadaSegundos);
-      porConductor.set(f.conductorCodigo, c);
+      porConductor.set(f.conductorId, c);
     }
 
     const hora = horaLocal.format(f.creada).padStart(2, '0');
-    porHora.set(hora, (porHora.get(hora) ?? 0) + 1);
+    const h = porHora.get(hora) ?? { carreras: 0, urbano: 0, rural: 0 };
+    h.carreras += 1;
+    if (f.zonaTipo === 'rural') h.rural += 1;
+    if (f.zonaTipo === 'urbano') h.urbano += 1;
+    porHora.set(hora, h);
+
+    const semana = LUNES_PRIMERO.indexOf(diaDeSemana.format(f.creada));
+    if (semana >= 0) calor[semana]![Number(hora)]! += 1;
 
     const dia = diaLocal.format(f.creada);
-    const d = porDia.get(dia) ?? { carreras: 0, finalizadas: 0, asignaciones: [] };
+    const d = porDia.get(dia) ?? nuevoDia();
     d.carreras += 1;
     if (f.estado === 'COMPLETED') d.finalizadas += 1;
+    if (f.estado === 'CANCELLED') d.canceladas += 1;
+    if (f.estado === 'UNASSIGNED') d.sinAsignar += 1;
+    if (ABIERTA(f.estado)) d.abiertas += 1;
+    if (f.intervenida) d.intervenidas += 1;
     if (f.asignacionSegundos !== null) d.asignaciones.push(f.asignacionSegundos);
+    if (f.llegadaSegundos !== null) d.llegadas.push(f.llegadaSegundos);
     porDia.set(dia, d);
+
+    const linea = f.linea ?? SIN_LINEA;
+    const l = porLinea.get(linea) ?? { carreras: 0, finalizadas: 0, intervenidas: 0 };
+    l.carreras += 1;
+    if (f.estado === 'COMPLETED') l.finalizadas += 1;
+    if (f.intervenida) l.intervenidas += 1;
+    porLinea.set(linea, l);
+
+    if (f.estado === 'CANCELLED') {
+      const motivo = f.motivoCancelacion?.trim() || SIN_MOTIVO;
+      cancelaciones.set(motivo, (cancelaciones.get(motivo) ?? 0) + 1);
+    }
   }
 
-  const horas = Array.from({ length: 24 }, (_, h) => {
-    const hora = String(h).padStart(2, '0');
-    return { hora, carreras: porHora.get(hora) ?? 0 };
+  const horas = Array.from({ length: 24 }, (_, i) => {
+    const hora = String(i).padStart(2, '0');
+    return { hora, ...(porHora.get(hora) ?? { carreras: 0, urbano: 0, rural: 0 }) };
   });
-  const pico = horas.reduce<Resumen['horaPico']>((max, h) => (h.carreras > (max?.carreras ?? 0) ? h : max), null);
+  const pico = horas.reduce<Resumen['horaPico']>(
+    (max, h) => (h.carreras > (max?.carreras ?? 0) ? { hora: h.hora, carreras: h.carreras } : max),
+    null,
+  );
 
   return {
     creadas: filas.length,
     finalizadas: finalizadas.length,
     canceladas: filas.filter((f) => f.estado === 'CANCELLED').length,
     sinAsignar: filas.filter((f) => f.estado === 'UNASSIGNED').length,
-    enCurso: filas.filter((f) => !['COMPLETED', 'CANCELLED', 'UNASSIGNED'].includes(f.estado)).length,
+    enCurso: filas.filter((f) => ABIERTA(f.estado)).length,
     kmRecorridos: Math.round(finalizadas.reduce((s, f) => s + (f.distanciaKm ?? 0), 0) * 10) / 10,
     asignacionP50: percentil(asignaciones, 0.5),
     asignacionP95: percentil(asignaciones, 0.95),
     llegadaP50: percentil(llegadas, 0.5),
+    llegadaP95: percentil(llegadas, 0.95),
     duracionP50: percentil(duraciones, 0.5),
     sinIntervencion: filas.length ? filas.filter((f) => !f.intervenida).length / filas.length : null,
     horaPico: pico,
     porZona: [...porZona.values()].sort((a, b) => b.carreras - a.carreras),
     porConductor: [...porConductor.values()]
-      .map((c) => ({
-        codigo: c.codigo,
-        nombre: c.nombre,
-        finalizadas: c.finalizadas,
+      .map(({ duraciones: ds, llegadas: ls, ...c }) => ({
+        ...c,
         km: Math.round(c.km * 10) / 10,
-        duracionP50: percentil(c.duraciones, 0.5),
-        llegadaP50: percentil(c.llegadas, 0.5),
+        duracionP50: percentil(ds, 0.5),
+        llegadaP50: percentil(ls, 0.5),
       }))
-      .sort((a, b) => b.finalizadas - a.finalizadas),
+      .sort((a, b) => b.finalizadas - a.finalizadas || b.asignadas - a.asignadas),
     porHora: horas,
     porDia: [...porDia.entries()]
       .sort(([a], [b]) => a.localeCompare(b))
@@ -308,17 +457,30 @@ export function resumir(filas: FilaCarrera[]): Resumen {
         dia,
         carreras: d.carreras,
         finalizadas: d.finalizadas,
+        canceladas: d.canceladas,
+        sinAsignar: d.sinAsignar,
+        abiertas: d.abiertas,
         p50: percentil(d.asignaciones, 0.5),
         p95: percentil(d.asignaciones, 0.95),
+        llegadaP50: percentil(d.llegadas, 0.5),
+        sinIntervencion: d.carreras ? (d.carreras - d.intervenidas) / d.carreras : null,
       })),
+    calor,
+    porLinea: [...porLinea.entries()]
+      .map(([linea, l]) => ({
+        linea,
+        carreras: l.carreras,
+        finalizadas: l.finalizadas,
+        sinIntervencion: l.carreras ? (l.carreras - l.intervenidas) / l.carreras : null,
+      }))
+      .sort((a, b) => b.carreras - a.carreras),
+    cancelaciones: [...cancelaciones.entries()]
+      .map(([motivo, carreras]) => ({ motivo, carreras }))
+      .sort((a, b) => b.carreras - a.carreras),
   };
 }
 
 /* ------------------------------------------------------------ textos --- */
-
-export function nombreDelPeriodo(days: number): string {
-  return days === 1 ? 'últimas 24 horas' : `últimos ${days} días`;
-}
 
 const fechaHora = new Intl.DateTimeFormat('es-CO', {
   timeZone: ZONA_HORARIA,

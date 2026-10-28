@@ -26,7 +26,8 @@ export const ERROR_CODES = {
   UNAUTHORIZED: 'Credenciales ausentes o inválidas',
   FORBIDDEN: 'Sin permiso para esta operación',
   RATE_LIMITED: 'Demasiadas peticiones',
-  IDEMPOTENCY_MISMATCH: 'La misma clave de idempotencia con un cuerpo distinto',
+  IDEMPOTENCY_MISMATCH: 'La misma clave de idempotencia con una petición distinta',
+  IDEMPOTENCY_IN_PROGRESS: 'La misma petición todavía se está procesando',
 
   /*
    * Segundo factor (§8.1). Son tres situaciones distintas y el panel tiene
@@ -74,6 +75,7 @@ const STATUS_BY_CODE: Record<ErrorCode, HttpStatus> = {
   FORBIDDEN: HttpStatus.FORBIDDEN,
   RATE_LIMITED: HttpStatus.TOO_MANY_REQUESTS,
   IDEMPOTENCY_MISMATCH: HttpStatus.CONFLICT,
+  IDEMPOTENCY_IN_PROGRESS: HttpStatus.CONFLICT,
 
   TOTP_REQUIRED: HttpStatus.UNAUTHORIZED,
   TOTP_INVALID: HttpStatus.UNAUTHORIZED,

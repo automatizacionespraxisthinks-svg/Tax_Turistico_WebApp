@@ -447,6 +447,7 @@ export class RidesService {
         ride: rides,
         customerName: customers.name,
         customerPhone: customers.phone,
+        customerEsPrueba: customers.esPrueba,
       })
       .from(rides)
       .innerJoin(customers, eq(customers.id, rides.customerId));
@@ -456,8 +457,47 @@ export class RidesService {
     ride: typeof rides.$inferSelect;
     customerName: string | null;
     customerPhone: string;
+    customerEsPrueba: boolean;
   }) {
-    return { ...row.ride, customerName: row.customerName, customerPhone: row.customerPhone };
+    return {
+      ...row.ride,
+      customerName: row.customerName,
+      customerPhone: row.customerPhone,
+      customerEsPrueba: row.customerEsPrueba,
+    };
+  }
+
+  /**
+   * Marca un teléfono como del equipo de pruebas. Vale para todas sus
+   * carreras, también las de antes: Reportes las saca al contar.
+   */
+  async marcarClienteDePrueba(customerId: string, esPrueba: boolean, actor: Actor) {
+    const [antes] = await this.db
+      .select({ phone: customers.phone, esPrueba: customers.esPrueba })
+      .from(customers)
+      .where(eq(customers.id, customerId))
+      .limit(1);
+    if (!antes) throw new AppError('NOT_FOUND', 'Ese cliente no existe');
+    if (antes.esPrueba === esPrueba) return { esPrueba };
+
+    await this.db.transaction(async (tx) => {
+      await tx.update(customers).set({ esPrueba }).where(eq(customers.id, customerId));
+      await this.audit.record(
+        {
+          actorId: actor.id,
+          actorName: actor.name,
+          role: actor.role ?? actor.kind,
+          action: esPrueba ? 'Marcó un teléfono como de prueba' : 'Quitó la marca de prueba a un teléfono',
+          entity: 'customers',
+          entityId: antes.phone,
+          before: { esPrueba: antes.esPrueba },
+          after: { esPrueba },
+          ip: actor.ip,
+        },
+        tx as unknown as Database,
+      );
+    });
+    return { esPrueba };
   }
 
   async detail(rideId: string) {
