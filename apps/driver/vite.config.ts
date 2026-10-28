@@ -3,6 +3,7 @@ import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
 import tailwindcss from '@tailwindcss/vite';
 import { VitePWA } from 'vite-plugin-pwa';
+import { colorDeMarca, colorDeTema } from '../../packages/ui/marca.vite';
 
 const resolvePath = (relative: string) => fileURLToPath(new URL(relative, import.meta.url));
 
@@ -10,6 +11,8 @@ export default defineConfig({
   plugins: [
     react(),
     tailwindcss(),
+    // La barra del celular en tinta: continúa la cabecera (HU-UI-01).
+    colorDeTema('--ink'),
     VitePWA({
       /*
        * `injectManifest` y no `generateSW`: el service worker generado no
@@ -20,7 +23,6 @@ export default defineConfig({
       srcDir: 'src',
       filename: 'sw.ts',
       registerType: 'autoUpdate',
-      includeAssets: ['icon.svg'],
       manifest: {
         name: 'Tax Turístico · Conductor',
         short_name: 'Conductor',
@@ -29,22 +31,25 @@ export default defineConfig({
         start_url: '/',
         display: 'standalone',
         orientation: 'portrait',
-        background_color: '#121418',
-        theme_color: '#121418',
+        // Fondo de arranque con el de la app, para que no destelle al abrir.
+        background_color: colorDeMarca('--bg'),
+        theme_color: colorDeMarca('--ink'),
         /*
          * PNG y no solo SVG: Chrome en Android NO considera instalable una
          * aplicacion cuyo manifiesto solo ofrece iconos SVG, asi que
          * `beforeinstallprompt` no se dispara y el conductor no ve por donde
-         * instalarla. Los 192 y 512 son el minimo que exige.
+         * instalarla. Los 192 y 512 son el minimo que exige. Salen del logo
+         * con `scripts/generar-iconos.mjs`.
          */
         icons: [
           { src: 'icon-192.png', sizes: '192x192', type: 'image/png', purpose: 'any' },
           { src: 'icon-512.png', sizes: '512x512', type: 'image/png', purpose: 'any' },
           { src: 'icon-maskable-512.png', sizes: '512x512', type: 'image/png', purpose: 'maskable' },
-          { src: 'icon.svg', sizes: 'any', type: 'image/svg+xml', purpose: 'any' },
         ],
       },
       injectManifest: {
+        // Las woff2 son Atkinson Hyperlegible: precacheadas, el conductor la
+        // ve también sin conexión y no la que trae su celular.
         globPatterns: ['**/*.{js,css,html,svg,png,woff2}'],
       },
       // El service worker también en desarrollo: probar los avisos sin él

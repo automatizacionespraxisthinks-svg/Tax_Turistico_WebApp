@@ -18,10 +18,11 @@ import {
   X,
 } from 'lucide-react';
 import { WAHA_STATUS_LABEL, WAHA_STATUS_TONE, formatTime, type StatusTone } from '@tax/shared';
-import { Banner, LiveDot, StatusPill, ThemeToggle, cn, spring, transition } from '@tax/ui';
+import { Banner, LiveDot, StatusPill, cn, spring, transition } from '@tax/ui';
 import { actions, useLive, type AlertaRecibida } from '../live/store';
 import { api } from '../api/client';
 import { CambiarClave } from '../components/CambiarClave';
+import logo from '../assets/logo-tax-turistico.png';
 
 interface NavItem {
   to: string;
@@ -240,10 +241,15 @@ function Sidebar({
     <motion.aside
       animate={{ width: collapsed ? 60 : 228 }}
       transition={spring.gentle}
-      className="flex shrink-0 flex-col border-r border-line bg-surface"
+      className="flex shrink-0 flex-col border-r border-transparent bg-ink"
     >
-      <div className={cn('flex h-14 items-center gap-2.5 px-3', collapsed && 'justify-center px-0')}>
-        <Mark />
+      <div
+        className={cn(
+          'franja-marca flex h-14 items-center gap-2.5 px-3',
+          collapsed && 'justify-center px-0',
+        )}
+      >
+        <Logo />
         <AnimatePresence initial={false}>
           {!collapsed ? (
             <motion.div
@@ -253,10 +259,10 @@ function Sidebar({
               transition={transition.fast}
               className="min-w-0"
             >
-              <p className="truncate text-base font-semibold tracking-[-0.01em] text-ink">
+              <p className="truncate text-base font-semibold tracking-[-0.01em] text-on-ink">
                 Tax Turístico
               </p>
-              <p className="truncate text-micro text-ink-muted">Panel de oficina</p>
+              <p className="truncate text-micro text-on-ink-muted">Panel de oficina</p>
             </motion.div>
           ) : null}
         </AnimatePresence>
@@ -273,14 +279,19 @@ function Sidebar({
         ))}
       </nav>
 
-      <div className={cn('border-t border-line p-2', collapsed && 'flex flex-col items-center')}>
+      <div
+        className={cn(
+          'border-t border-on-ink-muted/25 p-2',
+          collapsed && 'flex flex-col items-center',
+        )}
+      >
         <button
           onClick={onToggle}
           aria-label={collapsed ? 'Expandir menú' : 'Contraer menú'}
           title={collapsed ? 'Expandir menú' : 'Contraer menú'}
           className={cn(
-            'flex h-8 w-full items-center gap-2.5 rounded-md px-2 text-caption text-ink-muted',
-            'transition-colors duration-150 ease-[var(--ease-standard)] hover:bg-surface-sunk hover:text-ink',
+            'flex h-8 w-full items-center gap-2.5 rounded-md px-2 text-caption text-on-ink-muted',
+            'transition-colors duration-150 ease-[var(--ease-standard)] hover:bg-on-ink/10 hover:text-on-ink',
             collapsed && 'w-8 justify-center px-0',
           )}
         >
@@ -289,29 +300,28 @@ function Sidebar({
         </button>
 
         <div className={cn('mt-1 flex items-center gap-2 rounded-md px-2 py-1.5', collapsed && 'px-0')}>
-          <div className="flex size-6 shrink-0 items-center justify-center rounded-full bg-accent-soft text-micro font-semibold text-accent-ink">
+          <div className="flex size-6 shrink-0 items-center justify-center rounded-full bg-brand text-micro font-semibold text-on-accent">
             {initials}
           </div>
           {!collapsed ? (
             <div className="min-w-0 flex-1">
-              <p className="truncate text-caption font-medium text-ink">{userName}</p>
+              <p className="truncate text-caption font-medium text-on-ink">{userName}</p>
               <div className="flex items-center gap-2">
                 <CambiarClave />
-                <span aria-hidden="true" className="text-micro text-ink-muted">
+                <span aria-hidden="true" className="text-micro text-on-ink-muted">
                   ·
                 </span>
                 <button
                   onClick={() => {
                     void api.post('/v1/auth/logout').finally(() => window.location.reload());
                   }}
-                  className="text-micro text-ink-muted transition-colors duration-150 hover:text-ink"
+                  className="text-micro text-on-ink-muted transition-colors duration-150 hover:text-on-ink"
                 >
                   Salir
                 </button>
               </div>
             </div>
           ) : null}
-          {!collapsed ? <ThemeToggle /> : null}
         </div>
       </div>
     </motion.aside>
@@ -334,9 +344,11 @@ function SidebarLink({
       {({ isActive }) => (
         <span
           className={cn(
-            'relative flex h-9 items-center gap-2.5 rounded-md px-2.5 text-base font-medium',
+            'relative flex h-9 items-center gap-2.5 rounded-md px-2.5 text-base',
             'transition-colors duration-150 ease-[var(--ease-standard)]',
-            isActive ? 'text-accent-ink' : 'text-ink-secondary hover:bg-surface-sunk hover:text-ink',
+            isActive
+              ? 'font-bold text-on-accent'
+              : 'font-medium text-on-ink hover:bg-on-ink/10',
             collapsed && 'justify-center px-0',
           )}
         >
@@ -346,13 +358,20 @@ function SidebarLink({
             <motion.span
               layoutId="nav-active"
               transition={spring.indicator}
-              className="absolute inset-0 rounded-md bg-accent-soft"
+              className="absolute inset-0 rounded-md bg-brand"
             />
           ) : null}
-          <Icon className="relative size-4 shrink-0" />
+          <Icon
+            className={cn('relative size-4 shrink-0', isActive ? 'text-on-accent' : 'text-on-ink-muted')}
+          />
           {!collapsed ? <span className="relative truncate">{item.label}</span> : null}
           {!collapsed && badge ? (
-            <span className="relative ml-auto tnum rounded-full bg-surface-sunk px-1.5 text-micro font-semibold text-ink-secondary">
+            <span
+              className={cn(
+                'relative ml-auto tnum rounded-full px-1.5 text-micro font-semibold',
+                isActive ? 'bg-surface text-brand' : 'bg-on-ink/15 text-on-ink',
+              )}
+            >
               {badge}
             </span>
           ) : null}
@@ -362,24 +381,19 @@ function SidebarLink({
   );
 }
 
-/** Marca de posición: un glifo neutro, pensado para sustituirse por el logo. */
-function Mark() {
+/**
+ * El logo oficial a 38 px sobre un círculo blanco. El archivo mide 128 px,
+ * así que sigue nítido en pantallas de densidad 3.
+ */
+function Logo() {
   return (
-    <div
-      aria-hidden="true"
-      className="flex size-8 shrink-0 items-center justify-center rounded-md border border-line bg-surface-sunk"
-    >
-      <svg viewBox="0 0 16 16" className="size-4 text-ink-secondary" fill="none">
-        <path
-          d="M2.5 11.5 8 3l5.5 8.5"
-          stroke="currentColor"
-          strokeWidth="1.6"
-          strokeLinecap="round"
-          strokeLinejoin="round"
-        />
-        <circle cx="8" cy="11.6" r="1.4" fill="currentColor" />
-      </svg>
-    </div>
+    <img
+      src={logo}
+      alt="Logo Tax Turístico"
+      width={38}
+      height={38}
+      className="size-[38px] shrink-0 rounded-full bg-surface"
+    />
   );
 }
 
@@ -396,10 +410,10 @@ function TopBar({ title }: { title: string }) {
   }, []);
 
   return (
-    <header className="flex h-14 shrink-0 items-center justify-between gap-4 border-b border-line bg-surface px-5">
+    <header className="flex h-14 shrink-0 items-center justify-between gap-4 border-b border-transparent bg-brand px-5">
       <div className="flex min-w-0 items-baseline gap-3">
-        <h1 className="truncate text-title font-semibold text-ink">{title}</h1>
-        <span className="hidden text-caption text-ink-muted sm:inline">
+        <h1 className="truncate text-title font-semibold text-on-accent">{title}</h1>
+        <span className="hidden text-caption text-on-brand-muted sm:inline">
           Paipa · <time className="tnum">{formatTime(now)}</time>
         </span>
       </div>
@@ -411,16 +425,26 @@ function TopBar({ title }: { title: string }) {
               key={session.id}
               tone={WAHA_STATUS_TONE[session.status]}
               live={session.status === 'working'}
+              inverse
             >
               {session.label} · {WAHA_STATUS_LABEL[session.status]}
             </StatusPill>
           ))}
         </div>
 
-        <span className="flex items-center gap-1.5 rounded-md border border-line px-2 py-1 text-micro text-ink-muted">
-          <LiveDot tone={connected ? 'positive' : 'critical'} live={connected} />
-          {connected ? 'En vivo' : 'Reconectando'}
-        </span>
+        {/* Sobre el azul: borde y texto blancos, y el punto en el verde que
+            se lee sobre fondos oscuros. Si se cae, píldora blanca con rojo. */}
+        {connected ? (
+          <span className="flex items-center gap-1.5 rounded-md border border-on-accent px-2 py-1 text-micro text-on-accent">
+            <LiveDot live className="[--tone-solid:var(--success-on-ink)]" />
+            En vivo
+          </span>
+        ) : (
+          <span className="tone-critical flex items-center gap-1.5 rounded-md border border-transparent bg-surface px-2 py-1 text-micro text-[var(--tone-ink)]">
+            <LiveDot tone="critical" />
+            Reconectando
+          </span>
+        )}
       </div>
     </header>
   );

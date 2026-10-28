@@ -56,8 +56,8 @@ porque un archivo mal escrito no da error: da un mapa en blanco.
 | `places` | Veredas, barrios y puntos de referencia (hospital, colegios, terminal) |
 
 El estilo que las pinta está en `apps/admin/src/map/style.ts` y usa los
-tokens del sistema de diseño, no una paleta de terceros: el mapa cambia con el
-tema claro/oscuro como el resto del panel.
+tokens del sistema de diseño, no una paleta de terceros: terreno y agua llevan
+los colores de mapa de la marca, como el resto del panel.
 
 ## Atribución
 

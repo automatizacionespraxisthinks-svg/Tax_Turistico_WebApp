@@ -414,7 +414,7 @@ function QrDeLinea({ lineaId, onClose }: { lineaId: string | null; onClose: () =
           <img
             src={qr.data.image}
             alt={`Código QR para vincular ${linea?.label ?? 'la línea'}`}
-            className="mx-auto w-full max-w-xs rounded-md bg-white p-3"
+            className="mx-auto w-full max-w-xs rounded-md bg-surface p-3"
           />
         ) : (
           <Skeleton className="mx-auto aspect-square h-auto max-w-xs" />

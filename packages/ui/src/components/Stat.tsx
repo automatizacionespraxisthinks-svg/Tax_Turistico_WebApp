@@ -60,6 +60,12 @@ export interface StatProps {
   hint?: ReactNode;
   tone?: StatusTone;
   icon?: ReactNode;
+  /**
+   * Color del cuadro del ícono, que no siempre es el del número: «Sin
+   * asignar» lleva el cuadro rojo aunque el número esté en verde. Sin él,
+   * el ícono va suelto y en gris.
+   */
+  iconTone?: StatusTone;
   /** Serie para la mini-gráfica de contexto; sin ejes, solo la forma. */
   trend?: number[];
   className?: string;
@@ -69,19 +75,44 @@ export interface StatProps {
  * Ficha de indicador. Un número grande con su etiqueta; la mini-gráfica es
  * contexto, no un gráfico: sin ejes, sin marcas, sin leyenda.
  */
-export function Stat({ label, value, unit, hint, tone = 'neutral', icon, trend, className }: StatProps) {
+export function Stat({
+  label,
+  value,
+  unit,
+  hint,
+  tone = 'neutral',
+  icon,
+  iconTone,
+  trend,
+  className,
+}: StatProps) {
   return (
     <div
       className={cn(
         TONE_CLASS[tone],
-        'group relative overflow-hidden rounded-lg border border-line bg-surface p-3.5',
-        'transition-colors duration-150 ease-[var(--ease-standard)] hover:border-line-strong',
+        'group relative overflow-hidden rounded-lg border border-transparent bg-surface p-3.5 shadow-sm',
+        'transition-shadow duration-150 ease-[var(--ease-standard)] hover:shadow-md',
         className,
       )}
     >
       <div className="flex items-center justify-between gap-2">
         <p className="text-micro font-semibold uppercase tracking-[0.06em] text-ink-muted">{label}</p>
-        {icon ? <span className="text-ink-muted">{icon}</span> : null}
+        {icon && iconTone ? (
+          // Cuadro de 26 px que sobresale de la fila sin hacerla más alta: con
+          // 6 px de margen negativo por lado ocupa 14, menos que la etiqueta,
+          // y la ficha no cambia de tamaño.
+          <span
+            className={cn(
+              TONE_CLASS[iconTone],
+              '-my-1.5 flex size-[26px] shrink-0 items-center justify-center rounded-md',
+              'bg-[var(--tone-solid)] text-on-accent',
+            )}
+          >
+            {icon}
+          </span>
+        ) : icon ? (
+          <span className="text-ink-muted">{icon}</span>
+        ) : null}
       </div>
 
       <div className="mt-2 flex items-baseline gap-1">
@@ -108,7 +139,10 @@ export function Stat({ label, value, unit, hint, tone = 'neutral', icon, trend, 
   );
 }
 
-/** Línea de 2 px sin ejes: forma de la última hora, no un gráfico consultable. */
+/**
+ * Línea de 2 px sin ejes: forma de la última hora, no un gráfico consultable.
+ * Debajo, un área con el tinte del tono.
+ */
 function Sparkline({ values }: { values: number[] }) {
   const width = 100;
   const height = 22;
@@ -131,6 +165,7 @@ function Sparkline({ values }: { values: number[] }) {
       aria-hidden="true"
       focusable="false"
     >
+      <polygon points={`0,${height} ${points.join(' ')} ${width},${height}`} fill="var(--tone-bg)" />
       <polyline
         points={points.join(' ')}
         fill="none"
@@ -139,7 +174,6 @@ function Sparkline({ values }: { values: number[] }) {
         strokeLinecap="round"
         strokeLinejoin="round"
         vectorEffect="non-scaling-stroke"
-        opacity="0.75"
       />
     </svg>
   );

@@ -283,7 +283,7 @@ function Lugares({ places }: { places: Place[] }) {
                   initial={{ width: 0 }}
                   animate={{ width: `${(place.uses / max) * 100}%` }}
                   transition={{ duration: 0.56, ease: [0.05, 0.7, 0.1, 1] }}
-                  className="h-full rounded-full bg-[var(--c-ramp-5)]"
+                  className="h-full rounded-full bg-[var(--c-series-1)]"
                 />
               </div>
               <span className="tnum w-8 text-right text-micro text-ink-muted">{place.uses}</span>

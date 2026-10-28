@@ -20,12 +20,15 @@ export function Segmented<T extends string>({
   value,
   onChange,
   size = 'md',
+  ink,
   className,
 }: {
   options: SegmentedOption<T>[];
   value: T;
   onChange: (next: T) => void;
   size?: 'sm' | 'md';
+  /** Contenedor de tinta con la opción activa en azul: el selector de periodo. */
+  ink?: boolean;
   className?: string;
 }) {
   const layoutId = useId();
@@ -34,7 +37,8 @@ export function Segmented<T extends string>({
     <div
       role="tablist"
       className={cn(
-        'inline-flex items-center gap-0.5 rounded-md border border-line bg-surface-sunk p-0.5',
+        'inline-flex items-center gap-0.5 rounded-md border p-0.5',
+        ink ? 'border-transparent bg-ink' : 'border-line bg-surface-sunk',
         className,
       )}
     >
@@ -50,14 +54,23 @@ export function Segmented<T extends string>({
               'relative inline-flex items-center gap-1.5 rounded-sm font-medium',
               'transition-colors duration-150 ease-[var(--ease-standard)]',
               size === 'sm' ? 'h-6 px-2 text-caption' : 'h-7.5 px-3 text-base',
-              active ? 'text-ink' : 'text-ink-muted hover:text-ink-secondary',
+              ink
+                ? active
+                  ? 'text-on-accent'
+                  : 'text-on-ink hover:text-on-accent'
+                : active
+                  ? 'text-ink'
+                  : 'text-ink-muted hover:text-ink-secondary',
             )}
           >
             {active ? (
               <motion.span
                 layoutId={layoutId}
                 transition={spring.indicator}
-                className="absolute inset-0 rounded-sm border border-line bg-surface shadow-sm"
+                className={cn(
+                  'absolute inset-0 rounded-sm border',
+                  ink ? 'border-transparent bg-brand' : 'border-line bg-surface shadow-sm',
+                )}
               />
             ) : null}
             <span className="relative">{option.label}</span>

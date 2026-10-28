@@ -3,21 +3,14 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <meta name="color-scheme" content="light dark" />
+    <!-- Un solo tema, claro (HU-UI-01): el modo oscuro del sistema no lo cambia. -->
+    <meta name="color-scheme" content="light" />
+    <!-- El color sale de --brand en tokens.css; lo pone vite.config.ts al servir. -->
+    <meta name="theme-color" content="%COLOR_TEMA%" />
     <meta name="description" content="Panel de operación de Tax Turístico: despacho, flota y reportes." />
+    <link rel="icon" href="/favicon-32.png" sizes="32x32" type="image/png" />
+    <link rel="icon" href="/favicon-16.png" sizes="16x16" type="image/png" />
     <title>Operación · Tax Turístico</title>
-    <script>
-      // Antes del primer pintado, para que no haya destello de tema claro.
-      (function () {
-        try {
-          var mode = localStorage.getItem('tax.theme') || 'system';
-          var dark =
-            mode === 'dark' ||
-            (mode === 'system' && window.matchMedia('(prefers-color-scheme: dark)').matches);
-          if (dark) document.documentElement.classList.add('dark');
-        } catch (e) {}
-      })();
-    </script>
   </head>
   <body>
     <div id="root"></div>

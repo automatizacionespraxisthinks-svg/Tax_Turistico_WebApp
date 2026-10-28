@@ -3,6 +3,7 @@ import { fileURLToPath, URL } from 'node:url';
 import { defineConfig, type Plugin } from 'vite';
 import react from '@vitejs/plugin-react';
 import tailwindcss from '@tailwindcss/vite';
+import { colorDeTema } from '../../packages/ui/marca.vite';
 
 const resolvePath = (relative: string) => fileURLToPath(new URL(relative, import.meta.url));
 
@@ -101,7 +102,8 @@ function copiarWorkerDeMapLibre(): Plugin {
 }
 
 export default defineConfig({
-  plugins: [react(), tailwindcss(), copiarWorkerDeMapLibre()],
+  // La barra del navegador en el azul de marca (HU-UI-01).
+  plugins: [react(), tailwindcss(), copiarWorkerDeMapLibre(), colorDeTema('--brand')],
   resolve: {
     alias: {
       '@': resolvePath('./src'),

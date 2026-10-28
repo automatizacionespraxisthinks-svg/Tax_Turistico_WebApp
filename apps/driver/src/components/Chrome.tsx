@@ -2,13 +2,15 @@ import { useEffect } from 'react';
 import type { ReactNode } from 'react';
 import { AnimatePresence, motion } from 'motion/react';
 import { CloudOff, Signal } from 'lucide-react';
-import { LiveDot, ThemeToggle, cn, transition } from '@tax/ui';
+import { LiveDot, cn, transition } from '@tax/ui';
 
 /**
  * Elementos fijos de la PWA.
  *
- * La barra superior es informativa y nunca interactiva salvo el tema: el
- * conductor no tiene que buscar nada ahí mientras conduce.
+ * La barra superior es informativa y nunca interactiva: el conductor no
+ * tiene que buscar nada ahí mientras conduce. Va en tinta con la franja de
+ * marca arriba, y el `theme-color` del HTML es esa misma tinta para que la
+ * barra del celular la continúe.
  */
 
 export function TopStatus({
@@ -41,16 +43,21 @@ export function TopStatus({
   }, [notice, onDismissNotice]);
 
   return (
-    <header className="flex h-12 shrink-0 items-center justify-between gap-3 border-b border-line px-4">
-      <span className="flex items-center gap-2 text-caption text-ink-secondary">
-        <LiveDot tone={online ? 'positive' : 'critical'} live={online} />
+    <header className="franja-marca flex h-12 shrink-0 items-center justify-between gap-3 border-b border-transparent bg-ink px-4">
+      {/* Sobre tinta, los colores de estado claros: los de siempre no se leen. */}
+      <span
+        className={cn(
+          'flex items-center gap-2 text-caption',
+          online
+            ? 'text-success-on-ink [--tone-solid:var(--success-on-ink)]'
+            : 'text-legend-danger [--tone-solid:var(--legend-danger)]',
+        )}
+      >
+        <LiveDot live={online} />
         {online ? 'Conectado' : 'Sin conexión'}
       </span>
 
-      <div className="flex items-center gap-2">
-        {right}
-        <ThemeToggle />
-      </div>
+      <div className="flex items-center gap-2">{right}</div>
 
       <AnimatePresence>
         {notice ? (
@@ -111,10 +118,13 @@ export function Screen({ children, className }: { children: ReactNode; className
   );
 }
 
-/** Zona de acciones fija al fondo: siempre en el mismo sitio, siempre a 64 px. */
+/**
+ * Zona de acciones fija al fondo: siempre en el mismo sitio, siempre a 64 px.
+ * Es un panel blanco con las esquinas de arriba redondeadas a 22 px.
+ */
 export function ActionBar({ children }: { children: ReactNode }) {
   return (
-    <div className="shrink-0 space-y-2.5 border-t border-line px-5 pb-[max(1.25rem,env(safe-area-inset-bottom))] pt-4">
+    <div className="shrink-0 space-y-2.5 rounded-t-[22px] border-t border-transparent bg-surface px-5 pb-[max(1.25rem,env(safe-area-inset-bottom))] pt-4">
       {children}
     </div>
   );

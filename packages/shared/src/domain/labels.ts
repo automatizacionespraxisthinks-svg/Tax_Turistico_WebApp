@@ -19,12 +19,18 @@ export const RIDE_STATUS_LABEL: Record<RideStatus, string> = {
  */
 export type StatusTone = 'neutral' | 'info' | 'accent' | 'progress' | 'positive' | 'warning' | 'critical';
 
+/**
+ * Los mismos colores que las columnas del tablero (HU-UI-01): en oferta
+ * ámbar, asignada azul, en el sitio rojo —hay un cliente por recoger— y en
+ * curso verde. La PWA no los usa para sus botones de etapa: allí «Pasajero a
+ * bordo» sería un botón rojo grande, y el rojo es para lo destructivo.
+ */
 export const RIDE_STATUS_TONE: Record<RideStatus, StatusTone> = {
   PENDING: 'neutral',
   NOTIFIED: 'warning',
   ASSIGNED: 'info',
-  DRIVER_ARRIVED: 'accent',
-  IN_PROGRESS: 'progress',
+  DRIVER_ARRIVED: 'critical',
+  IN_PROGRESS: 'positive',
   COMPLETED: 'positive',
   CANCELLED: 'neutral',
   UNASSIGNED: 'critical',
@@ -94,8 +100,9 @@ export const WAHA_STATUS_TONE: Record<WahaSessionStatus, StatusTone> = {
   starting: 'info',
   scan_qr: 'warning',
   failed: 'critical',
-  // Detenida no es neutral para la oficina: es una línea que no atiende.
-  stopped: 'warning',
+  // Detenida no es neutral para la oficina: es una línea que no atiende, y
+  // va en rojo como el letrero que la anuncia (HU-UI-01, criterio 9).
+  stopped: 'critical',
   no_response: 'critical',
   missing: 'neutral',
 };

@@ -60,6 +60,7 @@ export function Reportes() {
       {/* Los filtros van en una sola fila, encima de todas las gráficas. */}
       <div className="flex flex-wrap items-center justify-between gap-3">
         <Segmented
+          ink
           value={range}
           onChange={setRange}
           options={[
@@ -68,9 +69,11 @@ export function Reportes() {
             { value: '30d', label: '30 días' },
           ]}
         />
-        {/* Del periodo elegido arriba: lo mismo que se está viendo. */}
+        {/* Del periodo elegido arriba: lo mismo que se está viendo. Cada
+            formato con su color de siempre: Excel verde, PDF rojo. */}
         <div className="flex gap-2">
           <Button
+            variant="success-solid"
             icon={<FileSpreadsheet className="size-3.5" />}
             loading={generando('resumen-xlsx')}
             title="Todas las carreras del periodo, y las tablas por conductor, zona, día y hora"
@@ -79,6 +82,7 @@ export function Reportes() {
             Excel
           </Button>
           <Button
+            variant="danger-solid"
             icon={<FileText className="size-3.5" />}
             loading={generando('resumen-pdf')}
             title="Resumen del periodo para imprimir o enviar"
@@ -129,7 +133,7 @@ export function Reportes() {
             label="Sin intervención humana"
             value={r?.sinIntervencion != null ? Math.round(r.sinIntervencion * 100) : 0}
             unit="%"
-            tone="progress"
+            tone="positive"
             hint="Meta inicial 80 %"
             trend={automationRate.map((d) => d.rate * 100)}
           />
@@ -197,7 +201,7 @@ export function Reportes() {
           subtitle="Segundos entre crear la carrera y que un conductor la acepte"
           legend={[
             { label: 'Mediana (p50)', color: 'var(--c-series-1)' },
-            { label: 'p95', color: 'var(--c-series-2)' },
+            { label: 'p95', color: 'var(--danger-fill)' },
           ]}
           table={
             <DataTable
@@ -213,7 +217,12 @@ export function Reportes() {
               labels={assignmentSeconds.map((d) => d.day.slice(5))}
               series={[
                 { name: 'p50', values: assignmentSeconds.map((d) => d.p50) },
-                { name: 'p95', values: assignmentSeconds.map((d) => d.p95) },
+                {
+                  name: 'p95',
+                  values: assignmentSeconds.map((d) => d.p95),
+                  color: 'var(--danger-fill)',
+                  markMax: true,
+                },
               ]}
               unit=" s"
             />
@@ -235,6 +244,7 @@ export function Reportes() {
                 label: d.zone,
                 value: d.rides,
                 hint: d.kind === 'rural' ? 'Vereda' : undefined,
+                rural: d.kind === 'rural',
               }))}
             />
           )}
@@ -259,6 +269,7 @@ export function Reportes() {
                 {
                   name: 'Automatizadas',
                   values: automationRate.map((d) => Math.round((d.rate ?? 0) * 100)),
+                  area: 'var(--brand-tint)',
                 },
               ]}
               unit=" %"

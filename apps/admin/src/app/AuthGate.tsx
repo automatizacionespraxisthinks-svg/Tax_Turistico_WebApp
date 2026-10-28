@@ -523,7 +523,7 @@ function TotpEnrollment({ onDone, paso }: { onDone: () => void; paso?: string })
           <div className="mt-3 flex justify-center">
             {qr ? (
               <div
-                className="rounded-md bg-white p-4 [&>svg]:size-44"
+                className="rounded-md bg-surface p-4 [&>svg]:size-44"
                 dangerouslySetInnerHTML={{ __html: qr }}
               />
             ) : (

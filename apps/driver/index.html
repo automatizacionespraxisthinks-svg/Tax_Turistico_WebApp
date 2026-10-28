@@ -6,11 +6,16 @@
       name="viewport"
       content="width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover"
     />
-    <meta name="color-scheme" content="dark light" />
-    <meta name="theme-color" content="#121418" />
+    <!-- Un solo tema, claro (HU-UI-01): se ve igual al sol y de noche, y el
+         modo oscuro del sistema no lo cambia. -->
+    <meta name="color-scheme" content="light" />
+    <!-- La tinta de la cabecera, para que la barra del celular la continúe.
+         Sale de --ink en tokens.css; lo pone vite.config.ts al servir. -->
+    <meta name="theme-color" content="%COLOR_TEMA%" />
     <meta name="mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
-    <link rel="icon" href="/icon.svg" type="image/svg+xml" />
+    <link rel="icon" href="/favicon-32.png" sizes="32x32" type="image/png" />
+    <link rel="icon" href="/favicon-16.png" sizes="16x16" type="image/png" />
     <!--
       Safari en iOS ignora los iconos del manifiesto para la pantalla de
       inicio: usa este. Sin el, el icono acaba siendo una captura de la
@@ -20,18 +25,6 @@
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-title" content="Conductor" />
     <title>Conductor · Tax Turístico</title>
-    <script>
-      // La PWA se usa al sol y de noche: por defecto sigue al sistema.
-      (function () {
-        try {
-          var mode = localStorage.getItem('tax.theme') || 'system';
-          var dark =
-            mode === 'dark' ||
-            (mode === 'system' && window.matchMedia('(prefers-color-scheme: dark)').matches);
-          if (dark) document.documentElement.classList.add('dark');
-        } catch (e) {}
-      })();
-    </script>
   </head>
   <body>
     <div id="root"></div>

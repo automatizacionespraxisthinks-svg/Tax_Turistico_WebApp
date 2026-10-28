@@ -9,16 +9,21 @@ import { cn } from '@tax/ui';
  *
  * Reglas que cumplen todas:
  *  - Un solo eje de valor. Dos medidas de escala distinta van en dos gráficas.
- *  - Los colores de serie salen del orden fijo --c-series-*, nunca ciclado;
- *    la paleta está validada para visión normal y daltonismo en ambos temas.
+ *  - Los colores de serie salen del orden fijo --c-series-*, nunca ciclado:
+ *    azul de marca, verde y ámbar. El rojo no entra en el orden; lo pide a
+ *    mano la serie que mide algo fuera de objetivo, como el p95.
  *  - Con dos o más series siempre hay leyenda, y además etiqueta directa
  *    cuando caben: la identidad nunca depende solo del color.
  *  - Toda gráfica trae capa de interacción y una vista de tabla equivalente.
- *  - Marcas finas, rejilla discreta, texto con color de texto (nunca el de la
- *    serie) y 2 px de separación entre segmentos apilados.
+ *  - Marcas finas, rejilla en --grid, línea base en tinta, etiquetas de eje
+ *    en --muted (nunca el color de la serie) y 2 px de separación entre
+ *    segmentos apilados.
  */
 
-const SERIES = ['var(--c-series-1)', 'var(--c-series-2)', 'var(--c-series-3)', 'var(--c-series-4)'];
+const SERIES = ['var(--c-series-1)', 'var(--c-series-2)', 'var(--c-series-3)'];
+
+/** Rejilla discreta y línea base en tinta (HU-UI-01). */
+const gridStroke = (ratio: number) => (ratio === 0 ? 'var(--ink)' : 'var(--grid)');
 
 /* ------------------------------------------------------------------- marco */
 
@@ -40,7 +45,7 @@ export function ChartFrame({
   const [showTable, setShowTable] = useState(false);
 
   return (
-    <section className={cn('rounded-lg border border-line bg-surface p-4', className)}>
+    <section className={cn('rounded-lg border border-transparent bg-surface p-4 shadow-sm', className)}>
       <header className="flex items-start justify-between gap-3">
         <div className="min-w-0">
           <h2 className="text-base font-semibold text-ink">{title}</h2>
@@ -170,7 +175,7 @@ export function StackedBars({
                 x2={width - padding.right}
                 y1={y}
                 y2={y}
-                stroke="var(--c-line)"
+                stroke={gridStroke(ratio)}
                 strokeWidth="1"
               />
               <text
@@ -266,6 +271,12 @@ export function StackedBars({
 export interface LineSeries {
   name: string;
   values: number[];
+  /** Color propio en vez del que toca por orden: el rojo del p95. */
+  color?: string;
+  /** Punto fijo en el valor más alto: dónde se fue el p95. */
+  markMax?: boolean;
+  /** Relleno bajo la línea, del color que se indique. */
+  area?: string;
 }
 
 export function Lines({
@@ -315,7 +326,7 @@ export function Lines({
                 x2={width - padding.right}
                 y1={y}
                 y2={y}
-                stroke="var(--c-line)"
+                stroke={gridStroke(ratio)}
                 strokeWidth="1"
               />
               <text
@@ -347,27 +358,49 @@ export function Lines({
           const points = line.values.map((value, index) => pointAt(index, value));
           const d = points.map((p, i) => `${i === 0 ? 'M' : 'L'}${p.x},${p.y}`).join(' ');
           const last = points[points.length - 1];
+          const color = line.color ?? SERIES[seriesIndex];
+          const maxIndex = line.values.indexOf(Math.max(...line.values));
+          const base = padding.top + plotHeight;
 
           return (
             <g key={line.name}>
               <g clipPath={`url(#${clipId})`}>
+                {line.area && points.length > 1 ? (
+                  <motion.path
+                    initial={{ opacity: 0 }}
+                    animate={{ opacity: 1 }}
+                    transition={{ duration: 0.56, ease: [0.05, 0.7, 0.1, 1] }}
+                    d={`${d} L${last!.x},${base} L${points[0]!.x},${base} Z`}
+                    fill={line.area}
+                  />
+                ) : null}
                 <motion.path
                   initial={{ pathLength: 0 }}
                   animate={{ pathLength: 1 }}
                   transition={{ duration: 0.56, ease: [0.05, 0.7, 0.1, 1] }}
                   d={d}
                   fill="none"
-                  stroke={SERIES[seriesIndex]}
+                  stroke={color}
                   strokeWidth="2"
                   strokeLinecap="round"
                   strokeLinejoin="round"
                 />
+                {line.markMax && points[maxIndex] ? (
+                  <circle
+                    cx={points[maxIndex]!.x}
+                    cy={points[maxIndex]!.y}
+                    r="4"
+                    fill={color}
+                    stroke="var(--c-surface)"
+                    strokeWidth="2"
+                  />
+                ) : null}
                 {hover !== null && points[hover] ? (
                   <circle
                     cx={points[hover]!.x}
                     cy={points[hover]!.y}
                     r="4.5"
-                    fill={SERIES[seriesIndex]}
+                    fill={color}
                     stroke="var(--c-surface)"
                     strokeWidth="2"
                   />
@@ -420,7 +453,7 @@ export function Lines({
             <p className="text-caption font-medium text-ink">{labels[hover]}</p>
             {series.map((line, i) => (
               <p key={line.name} className="flex items-center gap-1.5 text-micro text-ink-secondary">
-                <span className="size-2 rounded-xs" style={{ backgroundColor: SERIES[i] }} />
+                <span className="size-2 rounded-xs" style={{ backgroundColor: line.color ?? SERIES[i] }} />
                 {line.name}
                 <span className="ml-auto tnum font-medium text-ink">
                   {line.values[hover]}
@@ -441,7 +474,8 @@ export function HorizontalBars({
   data,
   formatValue = (v: number) => String(v),
 }: {
-  data: { label: string; value: number; hint?: string }[];
+  /** `rural`: la pista va en tinte verde, para leer de un vistazo qué es vereda. */
+  data: { label: string; value: number; hint?: string; rural?: boolean }[];
   formatValue?: (value: number) => string;
 }) {
   const max = Math.max(...data.map((d) => d.value));
@@ -456,13 +490,18 @@ export function HorizontalBars({
               {formatValue(item.value)}
             </span>
           </div>
-          <div className="mt-1 h-2 overflow-hidden rounded-full bg-surface-sunk">
+          <div
+            className={cn(
+              'mt-1 h-2 overflow-hidden rounded-full',
+              item.rural ? 'bg-success-tint' : 'bg-surface-sunk',
+            )}
+          >
             <motion.div
               initial={{ width: 0 }}
               animate={{ width: `${(item.value / max) * 100}%` }}
               transition={{ duration: 0.38, delay: index * 0.028, ease: [0.05, 0.7, 0.1, 1] }}
               className="h-full rounded-full"
-              style={{ backgroundColor: 'var(--c-ramp-5)' }}
+              style={{ backgroundColor: 'var(--c-series-1)' }}
             />
           </div>
           {item.hint ? <p className="mt-0.5 text-micro text-ink-muted">{item.hint}</p> : null}

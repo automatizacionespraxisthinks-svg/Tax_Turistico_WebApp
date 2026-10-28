@@ -4,8 +4,9 @@ import type { StyleSpecification } from 'maplibre-gl';
  * Estilo del mapa base.
  *
  * Se construye a partir de los tokens del sistema de diseño en vez de usar un
- * estilo de terceros: así el mapa no es una isla visual dentro del panel y
- * cambia con el tema claro/oscuro como todo lo demás.
+ * estilo de terceros: así el mapa no es una isla visual dentro del panel.
+ * Terreno y agua llevan los colores de mapa de la marca (HU-UI-01); el
+ * esquema de capas no cambia.
  *
  * El esquema de capas es el que genera `@tax/tiles`, no el de un proveedor:
  * roads, water, landuse, buildings y places, con las etiquetas justas.
@@ -14,13 +15,15 @@ import type { StyleSpecification } from 'maplibre-gl';
 /**
  * Resuelve un color del sistema de diseño a algo que MapLibre entienda.
  *
- * Los tokens están en `oklch()` y MapLibre solo lee colores CSS clásicos. No
- * basta con asignarlo a `fillStyle` y volver a leerlo: el navegador acepta
- * `oklch()` y lo devuelve tal cual, así que el valor llegaría igual de crudo
- * y el estilo entero se rechazaría con «color expected».
+ * MapLibre solo lee colores CSS clásicos, y un token puede llegar en
+ * cualquier sintaxis que el navegador acepte (`oklch()`, `color-mix()`…).
+ * No basta con asignarlo a `fillStyle` y volver a leerlo: el navegador lo
+ * devuelve tal cual, así que el valor llegaría igual de crudo y el estilo
+ * entero se rechazaría con «color expected».
  *
  * Lo que sí es inequívoco es pintarlo: se rasteriza un píxel y se lee su
- * valor sRGB ya convertido.
+ * valor sRGB ya convertido. Un token que falte deja la capa transparente:
+ * se nota, pero no tumba el mapa entero.
  */
 let scratch: CanvasRenderingContext2D | null | undefined;
 
@@ -51,14 +54,14 @@ export function resolveColor(value: string, fallback: string): string {
 }
 
 /** Lee un token del sistema de diseño y lo deja listo para MapLibre. */
-export function token(name: string, fallback: string): string {
+export function token(name: string, fallback = 'transparent'): string {
   if (typeof document === 'undefined') return fallback;
   const raw = getComputedStyle(document.documentElement).getPropertyValue(name).trim();
   return raw ? resolveColor(raw, fallback) : fallback;
 }
 
 export interface MapPalette {
-  canvas: string;
+  land: string;
   surface: string;
   line: string;
   lineStrong: string;
@@ -70,14 +73,14 @@ export interface MapPalette {
 
 export function readPalette(): MapPalette {
   return {
-    canvas: token('--c-canvas', '#f9fafb'),
-    surface: token('--c-surface', '#ffffff'),
-    line: token('--c-line', '#e6e8ec'),
-    lineStrong: token('--c-line-strong', '#d2d6dd'),
-    ink: token('--c-ink', '#2b2f38'),
-    inkMuted: token('--c-ink-muted', '#878d99'),
-    water: token('--t-progress-bg', '#dbeef5'),
-    green: token('--t-positive-bg', '#e1f1e6'),
+    land: token('--map-land'),
+    surface: token('--c-surface'),
+    line: token('--c-line'),
+    lineStrong: token('--c-line-strong'),
+    ink: token('--c-ink'),
+    inkMuted: token('--c-ink-muted'),
+    water: token('--map-water'),
+    green: token('--success-tint'),
   };
 }
 
@@ -130,7 +133,7 @@ export function buildStyle(tilesUrl: string, palette: MapPalette): StyleSpecific
       {
         id: 'fondo',
         type: 'background',
-        paint: { 'background-color': palette.canvas },
+        paint: { 'background-color': palette.land },
       },
 
       {
@@ -197,8 +200,9 @@ export function buildStyle(tilesUrl: string, palette: MapPalette): StyleSpecific
         filter: ['!', ['in', ['get', 'highway'], ['literal', [...MAJOR, ...MEDIUM]]]],
         minzoom: 13,
         layout: { 'line-cap': 'round', 'line-join': 'round' },
+        // Vías blancas sobre el terreno, también las menores.
         paint: {
-          'line-color': palette.line,
+          'line-color': palette.surface,
           'line-width': roadWidth(1.4) as never,
         },
       },
@@ -239,7 +243,7 @@ export function buildStyle(tilesUrl: string, palette: MapPalette): StyleSpecific
         },
         paint: {
           'text-color': palette.inkMuted,
-          'text-halo-color': palette.canvas,
+          'text-halo-color': palette.land,
           'text-halo-width': 1.2,
         },
       },
@@ -266,7 +270,7 @@ export function buildStyle(tilesUrl: string, palette: MapPalette): StyleSpecific
         },
         paint: {
           'text-color': palette.ink,
-          'text-halo-color': palette.canvas,
+          'text-halo-color': palette.land,
           'text-halo-width': 1.5,
         },
       },

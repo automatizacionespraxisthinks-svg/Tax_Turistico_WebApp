@@ -8,12 +8,16 @@ export interface CardProps extends HTMLAttributes<HTMLDivElement> {
   flush?: boolean;
 }
 
+/**
+ * La tarjeta se separa del fondo con sombra, no con borde. El borde se queda
+ * transparente para que la tarjeta mida lo mismo que cuando lo tenía.
+ */
 export function Card({ sunk, flush, className, ...rest }: CardProps) {
   return (
     <div
       className={cn(
-        'rounded-lg border border-line',
-        sunk ? 'bg-surface-sunk' : 'bg-surface',
+        'rounded-lg border',
+        sunk ? 'border-line bg-surface-sunk' : 'border-transparent bg-surface shadow-sm',
         !flush && 'p-4',
         className,
       )}

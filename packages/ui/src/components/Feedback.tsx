@@ -12,12 +12,15 @@ export function Skeleton({ className }: { className?: string }) {
 
 export function EmptyState({
   icon,
+  tone,
   title,
   description,
   action,
   className,
 }: {
   icon?: ReactNode;
+  /** Círculo sólido del tono con el ícono en blanco; sin tono, gris discreto. */
+  tone?: StatusTone;
   title: string;
   description?: string;
   action?: ReactNode;
@@ -31,7 +34,14 @@ export function EmptyState({
       className={cn('flex flex-col items-center justify-center px-6 py-12 text-center', className)}
     >
       {icon ? (
-        <div className="mb-3 flex size-10 items-center justify-center rounded-full border border-line bg-surface-sunk text-ink-muted">
+        <div
+          className={cn(
+            'mb-3 flex size-10 items-center justify-center rounded-full border',
+            tone
+              ? cn(TONE_CLASS[tone], 'border-transparent bg-[var(--tone-solid)] text-on-accent')
+              : 'border-line bg-surface-sunk text-ink-muted',
+          )}
+        >
           {icon}
         </div>
       ) : null}
@@ -101,6 +111,10 @@ export function ProgressRing({
 /**
  * Banda de aviso persistente. A diferencia del toast, no se va sola: se usa
  * para condiciones que siguen siendo verdad (sin conexión, línea caída).
+ *
+ * La alerta (tono crítico) va en rojo sólido con texto blanco: es lo único
+ * que tiene que verse desde el otro lado de la oficina. Los demás tonos se
+ * quedan en su fondo suave.
  */
 export function Banner({
   tone,
@@ -115,6 +129,8 @@ export function Banner({
   action?: ReactNode;
   className?: string;
 }) {
+  const solid = tone === 'critical';
+
   return (
     <motion.div
       initial={{ opacity: 0, y: -6 }}
@@ -123,12 +139,15 @@ export function Banner({
       transition={{ duration: duration.base, ease: ease.entrance }}
       className={cn(
         TONE_CLASS[tone],
-        'flex items-center gap-2.5 rounded-md border border-[var(--tone-line)] bg-[var(--tone-bg)] px-3 py-2',
+        'flex items-center gap-2.5 rounded-md border px-3 py-2',
+        solid
+          ? 'border-transparent bg-[var(--tone-solid)] text-on-accent'
+          : 'border-[var(--tone-line)] bg-[var(--tone-bg)] text-[var(--tone-ink)]',
         className,
       )}
     >
-      {icon ? <span className="shrink-0 text-[var(--tone-ink)]">{icon}</span> : null}
-      <div className="min-w-0 flex-1 text-base text-[var(--tone-ink)]">{children}</div>
+      {icon ? <span className="shrink-0">{icon}</span> : null}
+      <div className="min-w-0 flex-1 text-base">{children}</div>
       {action ? <div className="shrink-0">{action}</div> : null}
     </motion.div>
   );

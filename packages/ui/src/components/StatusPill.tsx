@@ -20,16 +20,31 @@ export interface StatusPillProps {
   /** Halo latiendo: reservado para lo que está ocurriendo ahora mismo. */
   live?: boolean;
   size?: 'sm' | 'md';
+  /**
+   * Píldora blanca, para ir sobre un fondo de color (la cabecera azul del
+   * panel, la PWA): el texto y el punto conservan el color del estado.
+   */
+  inverse?: boolean;
   className?: string;
 }
 
-export function StatusPill({ tone, children, dot = true, live, size = 'sm', className }: StatusPillProps) {
+export function StatusPill({
+  tone,
+  children,
+  dot = true,
+  live,
+  size = 'sm',
+  inverse,
+  className,
+}: StatusPillProps) {
   return (
     <span
       className={cn(
         TONE_CLASS[tone],
         'inline-flex items-center gap-1.5 whitespace-nowrap rounded-full border font-medium',
-        'border-[var(--tone-line)] bg-[var(--tone-bg)] text-[var(--tone-ink)]',
+        inverse
+          ? 'border-transparent bg-surface text-[var(--tone-ink)]'
+          : 'border-[var(--tone-line)] bg-[var(--tone-bg)] text-[var(--tone-ink)]',
         size === 'sm' ? 'h-5.5 px-2 text-micro' : 'h-7 px-2.5 text-caption',
         className,
       )}

@@ -63,32 +63,40 @@ Las credenciales de desarrollo las imprime el `seed`.
 pnpm typecheck && pnpm build
 ```
 
-## Diseño sobrio, sin marca
+## Identidad de marca con tema único (HU-UI-01)
 
-La identidad visual está concentrada a propósito. Todo el color vive en
-`packages/ui/src/styles/tokens.css`; ningún componente escribe un color a mano.
+Un solo tema, claro, hecho con los cuatro colores del logo: el azul del
+engranaje guía la interfaz, la tinta escribe, y el verde y el rojo dicen si algo
+va bien o pide atención. Todo el color vive en
+`packages/ui/src/styles/tokens.css`, en un solo bloque `:root`: los
+hexadecimales solo están ahí y ningún componente escribe un color a mano. Hasta
+el `theme-color` del HTML y los colores del manifiesto de la PWA se leen de ese
+archivo al compilar (`packages/ui/marca.vite.ts`).
 
-- **Acento.** Un solo bloque de variables (`--c-accent*`). Cambiar ese bloque
-  cambia la marca en las dos apps. Hoy es un azul neutro, deliberadamente
-  anónimo: es un marcador de posición, no una propuesta de marca.
-- **Superficies y tinta.** Escala neutra con un punto frío. La jerarquía la
-  llevan las líneas, no las sombras: las sombras son mínimas y se reservan para
-  lo que flota (hojas, avisos, menús).
-- **Tonos de estado.** Siete tonos semánticos (`neutral`, `info`, `accent`,
-  `progress`, `positive`, `warning`, `critical`), cada uno con tinta, fondo,
-  línea y sólido. Los estados de carrera y de conductor se mapean a un tono en
-  `packages/shared/src/domain/labels.ts`, así que el color de un estado se
-  decide una sola vez.
-- **Modo oscuro.** Pasos elegidos para el fondo oscuro, no una inversión
-  automática del claro. Sigue al sistema por defecto.
-- **Tipografía.** Pila del sistema, sin fuentes de red: cero peticiones y cero
-  destello al cargar. Números tabulares en todo dato que se actualiza.
-- **Marca de posición.** El glifo de la barra lateral y el icono de la PWA son
-  neutros y están pensados para sustituirse por el logo real.
-- **Gráficas.** Seis colores de serie en orden fijo, validados para visión
-  normal y para daltonismo (deuteranopía y tritanopía) contra la superficie
-  clara y la oscura: separación ΔE ≥ 8 entre colores contiguos y contraste
-  ≥ 3:1. Nunca se ciclan; una séptima serie se agruparía en «Otras».
+- **Paleta.** Los tokens de la HU (`--ink`, `--brand`, `--success*`,
+  `--danger*`, `--warning*`, `--bg`, `--surface`, `--map-*`, `--legend-*`,
+  `--plate`) y, debajo, la capa semántica que leen los componentes (`--c-*`,
+  `--t-*`). Para cambiar un color se toca la paleta, nunca la capa de abajo.
+- **Sin tema oscuro.** No hay interruptor ni preferencia guardada, y
+  `color-scheme: light` hace que el modo oscuro del sistema no cambie nada.
+- **Tonos de estado.** Verde es bien o disponible, azul es en curso, ámbar es
+  pausa y rojo es atención. Los estados de carrera y de conductor se mapean a un
+  tono en `packages/shared/src/domain/labels.ts`, así que el color de un estado
+  se decide una sola vez. La única excepción son los botones de etapa de la
+  PWA, que no van en rojo (ver `screens/Carrera.tsx`).
+- **Tarjetas.** Blancas sobre el fondo azul claro, separadas por sombra y no
+  por borde.
+- **Tipografía.** Atkinson Hyperlegible 400 y 700, servida desde la propia app
+  con `font-display: swap` y precacheada en la PWA: el conductor la ve aunque
+  su celular tenga otra fuente y aunque no tenga señal. Números tabulares en
+  todo dato que se actualiza.
+- **Logo.** El original está en `packages/ui/src/assets/`; los íconos de la
+  PWA, los favicon y el logo de la barra lateral salen de él con
+  `node apps/driver/scripts/generar-iconos.mjs`. Hoy es un PNG de 256 px:
+  cuando exista el vector, se exporta a 1024 px y se vuelve a correr.
+- **Gráficas.** Colores de serie en orden fijo (azul, verde, ámbar), nunca
+  ciclados. El rojo no entra en el orden: lo lleva a mano la serie que mide
+  algo fuera de objetivo, como el p95.
 
 ## Movimiento definido
 

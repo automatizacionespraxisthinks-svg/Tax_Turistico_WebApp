@@ -99,7 +99,8 @@ export function CambiarClave() {
     <>
       <button
         onClick={() => setAbierto(true)}
-        className="text-micro text-ink-muted transition-colors duration-150 hover:text-ink"
+        // Vive en el pie de la barra lateral, sobre tinta.
+        className="text-micro text-on-ink-muted transition-colors duration-150 hover:text-on-ink"
       >
         Cambiar contraseña
       </button>

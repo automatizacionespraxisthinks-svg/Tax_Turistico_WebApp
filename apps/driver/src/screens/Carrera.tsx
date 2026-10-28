@@ -3,7 +3,7 @@ import type { ReactNode } from 'react';
 import { AnimatePresence, motion } from 'motion/react';
 import { Camera, Flag, LocateFixed, Lock, Navigation, Phone, UserCheck, X } from 'lucide-react';
 import type { RideStatus, StatusTone } from '@tax/shared';
-import { RIDE_STATUS_LABEL, RIDE_STATUS_TONE, formatDistance } from '@tax/shared';
+import { RIDE_STATUS_LABEL, formatDistance } from '@tax/shared';
 import { StatusPill, TONE_CLASS, cn, spring, transition } from '@tax/ui';
 import { ActionBar, AddressBlock, Screen } from '../components/Chrome';
 import { AvisoDeUbicacion, IrConMapas } from '../components/IrConMapas';
@@ -15,12 +15,24 @@ type ActiveStatus = Extract<RideStatus, 'ASSIGNED' | 'DRIVER_ARRIVED' | 'IN_PROG
 const STEPS: ActiveStatus[] = ['ASSIGNED', 'DRIVER_ARRIVED', 'IN_PROGRESS'];
 
 /**
+ * Color de cada etapa en la PWA: azul mientras va a recoger y en el punto,
+ * verde con el pasajero a bordo. No es el del panel, que pone «En el sitio»
+ * en rojo: aquí ese color iría en el botón «Pasajero a bordo», y un botón
+ * rojo grande se lee como «peligro» o «borrar» (decisión de la empresa con
+ * la HU-UI-01).
+ */
+const STAGE_TONE: Record<ActiveStatus, StatusTone> = {
+  ASSIGNED: 'info',
+  DRIVER_ARRIVED: 'info',
+  IN_PROGRESS: 'positive',
+};
+
+/**
  * Carrera en curso: un solo botón grande por estado.
  *
- * El botón lleva el color de la etapa, el mismo que la carrera tiene en el
- * panel de la oficina: azul mientras va a recoger, morado en el punto, verde
- * azulado con el pasajero a bordo. Así el conductor sabe en qué paso está sin
- * leer, y la oficina y él hablan del mismo color.
+ * El botón lleva el color de la etapa: azul mientras va a recoger y en el
+ * punto, verde con el pasajero a bordo. Así el conductor sabe en qué paso
+ * está sin leer.
  *
  * Debajo de la dirección van Maps y Waze, ya con la ruta pedida, y un aviso
  * cuando el punto no es la ubicación que compartió el cliente.
@@ -53,7 +65,7 @@ export function Carrera({
   const conPunto = offer.pickupPoint !== undefined;
   const nearby = conPunto && metersToPickup !== null && metersToPickup <= 150;
   const stepIndex = STEPS.indexOf(status);
-  const tone = RIDE_STATUS_TONE[status];
+  const tone = STAGE_TONE[status];
   const faltan = useFaltaParaFinalizar(status === 'IN_PROGRESS' ? offer.startedAt : undefined, minRideMinutes);
 
   return (
@@ -353,7 +365,7 @@ function FotoDelLugar({ rideId, version }: { rideId: string; version: string }) 
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
             transition={transition.fast}
-            className="fixed inset-0 z-50 flex items-center justify-center bg-black/90 p-3"
+            className="fixed inset-0 z-50 flex items-center justify-center bg-ink/90 p-3"
             onClick={() => setGrande(false)}
           >
             <img src={url} alt="Foto del lugar de recogida" className="max-h-full max-w-full object-contain" />
@@ -361,7 +373,7 @@ function FotoDelLugar({ rideId, version }: { rideId: string; version: string }) 
               type="button"
               aria-label="Cerrar la foto"
               onClick={() => setGrande(false)}
-              className="absolute right-4 top-4 flex size-12 items-center justify-center rounded-full bg-white/15 text-white"
+              className="absolute right-4 top-4 flex size-12 items-center justify-center rounded-full bg-on-accent/15 text-on-accent"
             >
               <X className="size-6" />
             </button>

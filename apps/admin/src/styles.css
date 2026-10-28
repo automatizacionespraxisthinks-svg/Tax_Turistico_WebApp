@@ -5,3 +5,19 @@
    debe mirar ahí para generar sus clases. */
 @source '../../../packages/ui/src';
 @source './';
+
+/* Zoom del mapa en el azul de marca con los íconos en blanco (HU-UI-01). Los
+   controles los dibuja MapLibre con su propia hoja; `.mapa-marca` gana en
+   especificidad sin tener que cargarla antes ni usar !important. */
+.mapa-marca .maplibregl-ctrl-group {
+  background-color: var(--brand);
+}
+.mapa-marca .maplibregl-ctrl-group button + button {
+  border-top-color: var(--brand-line);
+}
+.mapa-marca .maplibregl-ctrl-group button .maplibregl-ctrl-icon {
+  filter: brightness(0) invert(1);
+}
+.mapa-marca .maplibregl-ctrl-group button:not(:disabled):hover {
+  background-color: var(--brand-hover);
+}

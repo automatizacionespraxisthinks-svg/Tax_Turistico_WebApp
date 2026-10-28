@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react';
 import { AnimatePresence, motion } from 'motion/react';
-import { Bot, CarFront, Inbox, Timer, TriangleAlert } from 'lucide-react';
+import { Bot, CarFront, Check, Inbox, Timer, TriangleAlert } from 'lucide-react';
 import type { Ride, RideStatus } from '@tax/shared';
 import { RIDE_STATUS_LABEL, RIDE_STATUS_TONE, formatRelative } from '@tax/shared';
 import {
@@ -8,7 +8,6 @@ import {
   Card,
   EmptyState,
   ProgressRing,
-  SectionLabel,
   Sheet,
   Stat,
   StatusPill,
@@ -21,13 +20,24 @@ import { RideCard } from '../components/RideCard';
 import { RideDetail } from '../components/RideDetail';
 import { actions, useLive } from '../live/store';
 
-/** Columnas del tablero: el ciclo de vida leído de izquierda a derecha. */
-const COLUMNS: { status: RideStatus; title: string }[] = [
-  { status: 'NOTIFIED', title: 'En oferta' },
-  { status: 'ASSIGNED', title: 'Asignadas' },
-  { status: 'DRIVER_ARRIVED', title: 'En el sitio' },
-  { status: 'IN_PROGRESS', title: 'En curso' },
+/**
+ * Columnas del tablero: el ciclo de vida leído de izquierda a derecha. Cada
+ * una lleva una banda sólida con el color de su estado; la de oferta usa el
+ * ámbar oscuro, que es el que deja leer el texto blanco.
+ */
+const COLUMNS: { status: RideStatus; title: string; band: string }[] = [
+  { status: 'NOTIFIED', title: 'En oferta', band: 'bg-warning-band' },
+  { status: 'ASSIGNED', title: 'Asignadas', band: 'bg-brand' },
+  { status: 'DRIVER_ARRIVED', title: 'En el sitio', band: 'bg-danger-fill' },
+  { status: 'IN_PROGRESS', title: 'En curso', band: 'bg-success' },
 ];
+
+/*
+ * Tiempo a asignación: cifras de muestra fijas hasta que la API lo dé en
+ * vivo. El p95 se pinta en rojo cuando supera el objetivo.
+ */
+const P95_ASIGNACION_S = 58;
+const OBJETIVO_OFERTA_S = 3;
 
 export function Operacion() {
   const rides = useLive((s) => s.rides);
@@ -51,6 +61,7 @@ export function Operacion() {
           label="Carreras activas"
           value={live.length}
           icon={<Inbox className="size-3.5" />}
+          iconTone="info"
           hint={`${rides.length} hoy en total`}
         />
         <Stat
@@ -58,6 +69,7 @@ export function Operacion() {
           value={live.filter((r) => r.status === 'UNASSIGNED').length}
           tone={live.some((r) => r.status === 'UNASSIGNED') ? 'critical' : 'positive'}
           icon={<TriangleAlert className="size-3.5" />}
+          iconTone="critical"
           hint="Tres oleadas agotadas"
         />
         <Stat
@@ -65,6 +77,7 @@ export function Operacion() {
           value={available}
           tone="positive"
           icon={<CarFront className="size-3.5" />}
+          iconTone="positive"
           hint={`${onShift} de 62 en turno`}
         />
         <Stat
@@ -73,15 +86,25 @@ export function Operacion() {
           unit="s"
           tone="info"
           icon={<Timer className="size-3.5" />}
-          hint="p95 hoy: 58 s · objetivo < 3 s para ofertar"
+          iconTone="info"
+          hint={
+            <>
+              p95 hoy:{' '}
+              <span className={cn(P95_ASIGNACION_S > OBJETIVO_OFERTA_S && 'text-danger')}>
+                {P95_ASIGNACION_S} s
+              </span>{' '}
+              · objetivo &lt; {OBJETIVO_OFERTA_S} s para ofertar
+            </>
+          }
           trend={[31, 28, 26, 30, 24, 22, 25, 23]}
         />
         <Stat
           label="Sin intervención"
           value={83}
           unit="%"
-          tone="progress"
+          tone="positive"
           icon={<Bot className="size-3.5" />}
+          iconTone="positive"
           hint="Meta inicial 80 %"
           trend={[72, 74, 77, 72, 69, 75, 81, 83]}
         />
@@ -101,10 +124,16 @@ export function Operacion() {
         {COLUMNS.map((column) => {
           const items = live.filter((r) => r.status === column.status);
           return (
-            <Card key={column.status} flush className="flex min-h-40 flex-col bg-surface-sunk">
-              <div className="flex items-center justify-between gap-2 px-3 pb-2 pt-2.5">
-                <SectionLabel>{column.title}</SectionLabel>
-                <span className="tnum rounded-full bg-surface px-1.5 text-micro font-semibold text-ink-secondary">
+            <Card key={column.status} flush className="flex min-h-40 flex-col overflow-hidden">
+              {/* La banda cede 4 px de su relleno al hueco de debajo: así las
+                  tarjetas no quedan pegadas al color y empiezan donde antes. */}
+              <div
+                className={cn('flex items-center justify-between gap-2 px-3 pb-1.5 pt-2', column.band)}
+              >
+                <p className="text-micro font-semibold uppercase tracking-[0.07em] text-on-accent">
+                  {column.title}
+                </p>
+                <span className="tnum rounded-full bg-ink/25 px-1.5 text-micro font-semibold text-on-accent">
                   {items.length}
                 </span>
               </div>
@@ -113,7 +142,7 @@ export function Operacion() {
                 variants={staggerList(items.length)}
                 initial="hidden"
                 animate="visible"
-                className="flex-1 space-y-2 px-2 pb-2"
+                className="flex-1 space-y-2 px-2 pb-2 pt-1"
               >
                 <AnimatePresence mode="popLayout" initial={false}>
                   {items.map((ride) => (
@@ -169,12 +198,12 @@ function AttentionPanel({
 
   return (
     <Card flush className="flex flex-col overflow-hidden">
-      <div className="flex items-center justify-between gap-2 border-b border-line px-3.5 py-2.5">
+      <div className="flex items-center justify-between gap-2 border-b border-transparent bg-ink px-3.5 py-2.5">
         <div>
-          <h2 className="text-base font-semibold text-ink">Requieren atención</h2>
-          <p className="text-micro text-ink-muted">Sin conductor o esperando la primera oleada</p>
+          <h2 className="text-base font-semibold text-on-ink">Requieren atención</h2>
+          <p className="text-micro text-on-ink-muted">Sin conductor o esperando la primera oleada</p>
         </div>
-        <span className="tnum rounded-full bg-surface-sunk px-2 py-0.5 text-micro font-semibold text-ink-secondary">
+        <span className="tnum rounded-full bg-on-ink/15 px-2 py-0.5 text-micro font-semibold text-on-ink">
           {rides.length}
         </span>
       </div>
@@ -245,7 +274,8 @@ function AttentionPanel({
 
         {rides.length === 0 ? (
           <EmptyState
-            icon={<Inbox className="size-4" />}
+            icon={<Check className="size-4" strokeWidth={3} />}
+            tone="positive"
             title="Nada pendiente"
             description="Todas las carreras tienen conductor o están en curso."
           />

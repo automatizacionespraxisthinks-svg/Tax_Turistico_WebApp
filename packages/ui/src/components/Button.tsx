@@ -4,18 +4,40 @@ import { motion } from 'motion/react';
 import { spring } from '../motion';
 import { cn } from '../lib/cn';
 
-export type ButtonVariant = 'primary' | 'secondary' | 'ghost' | 'danger';
+export type ButtonVariant =
+  | 'primary'
+  | 'secondary'
+  | 'outline'
+  | 'ghost'
+  | 'ghost-danger'
+  | 'danger'
+  | 'success-solid'
+  | 'danger-solid';
 export type ButtonSize = 'sm' | 'md' | 'lg' | 'touch';
+
+/*
+ * Los rellenos sólidos de color de estado se oscurecen al pasar el puntero
+ * con un filtro, no con otro tono: así no hacen falta dos verdes ni dos
+ * rojos más en la paleta.
+ */
+const VEIL = 'hover:brightness-90 active:brightness-[0.82]';
 
 const VARIANT: Record<ButtonVariant, string> = {
   primary:
     'bg-accent text-on-accent border border-transparent hover:bg-accent-hover active:bg-accent-active shadow-sm',
   secondary:
     'bg-surface text-ink border border-line hover:border-line-strong hover:bg-surface-sunk',
+  /** Blanco con borde de tinta de 2 px: la acción secundaria grande de la PWA. */
+  outline: 'bg-surface text-ink border-2 border-ink hover:bg-surface-sunk',
   ghost:
     'bg-transparent text-ink-secondary border border-transparent hover:bg-surface-sunk hover:text-ink',
+  /** Texto rojo sin caja: cerrar turno. */
+  'ghost-danger':
+    'bg-transparent text-[var(--t-critical-ink)] border border-transparent hover:bg-[var(--t-critical-bg)]',
   danger:
     'bg-transparent text-[var(--t-critical-ink)] border border-[var(--t-critical-line)] hover:bg-[var(--t-critical-bg)]',
+  'success-solid': `bg-success text-on-accent border border-transparent shadow-sm ${VEIL}`,
+  'danger-solid': `bg-danger-fill text-on-accent border border-transparent shadow-sm ${VEIL}`,
 };
 
 const SIZE: Record<ButtonSize, string> = {

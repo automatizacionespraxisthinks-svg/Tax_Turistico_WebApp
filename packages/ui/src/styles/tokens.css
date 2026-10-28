@@ -1,191 +1,171 @@
 /* =============================================================================
    Tax Turistico — tokens del sistema de diseño
    -----------------------------------------------------------------------------
-   Deliberadamente SIN MARCA. Toda la identidad visual vive en el bloque de
-   acento y en las superficies. Para aplicar la marca definitiva basta
-   reemplazar esas variables: ningun componente codifica un color a mano.
+   Tema único de marca (HU-UI-01). Los cuatro colores salen del logo: el azul
+   del engranaje guía la interfaz, la tinta escribe, y el verde y el rojo de
+   los cuadrantes dicen si algo va bien o pide atención.
+
+   No hay tema oscuro ni interruptor: el panel y la PWA se ven igual con el
+   sistema en modo oscuro. Los valores hexadecimales solo viven en este
+   archivo; ningún componente codifica un color, todos leen estas variables.
+
+   Regla de color de estado: verde es bien o disponible, azul es en curso,
+   ámbar es pausa y rojo es atención. El mismo estado usa el mismo color en
+   el mapa, los chips, las columnas y las gráficas.
 
    Se importa despues de `@import "tailwindcss"` en cada app.
    ============================================================================= */
 
-@custom-variant dark (&:where(.dark, .dark *));
+/* Atkinson Hyperlegible 400 y 700, servida desde la propia app y con
+   `font-display: swap`. La PWA la precachea con el resto de la aplicación,
+   así que también se ve sin conexión. */
+@import '@fontsource/atkinson-hyperlegible/400.css';
+@import '@fontsource/atkinson-hyperlegible/700.css';
 
-/* ---------------------------------------------------------------- 1. Modo claro */
 :root {
   color-scheme: light;
 
-  /* Superficies ------------------------------------------------------------ */
-  --c-canvas:         oklch(0.982 0.002 265);
-  --c-surface:        oklch(1 0 265);
-  --c-surface-sunk:   oklch(0.966 0.003 265);
-  --c-surface-raised: oklch(1 0 265);
-  --c-overlay:        oklch(0.30 0.015 265 / 0.38);
+  /* ------------------------------------------------- 1. Paleta de marca
+     Nombres y valores de la HU-UI-01 (página 3). Contraste según WCAG 2.1:
+     4,5:1 para texto y 3:1 para íconos y texto de 24 px o más. */
+  --ink: #1F1A17;             /* texto; barra lateral, cabecera de la PWA, leyenda */
+  --on-ink: #E9E4DF;          /* texto sobre tinta, 13,6:1 */
+  --on-ink-muted: #B8AEA5;    /* íconos y texto secundario sobre tinta, 7,9:1 */
 
-  /* Lineas ----------------------------------------------------------------- */
-  --c-line:        oklch(0.920 0.004 265);
-  --c-line-strong: oklch(0.860 0.006 265);
+  --brand: #0070B2;           /* cabecera, menú activo, botón primario, serie principal */
+  --on-brand-muted: #EAF3FA;  /* texto secundario sobre azul */
 
-  /* Tinta ------------------------------------------------------------------ */
-  --c-ink:           oklch(0.235 0.012 265);
-  --c-ink-secondary: oklch(0.455 0.011 265);
-  --c-ink-muted:     oklch(0.595 0.009 265);
-  --c-ink-inverse:   oklch(0.985 0.002 265);
+  --bg: #E3EEF7;              /* fondo general */
+  --surface: #FFFFFF;         /* tarjetas, paneles, pie de la PWA */
+  --muted: #4F5D6E;           /* etiquetas, ayudas y ejes, 6,7:1 en blanco */
+  --border: #C9DAE8;          /* divisores */
+  --grid: #E3EAF1;            /* cuadrícula de gráficas */
+  --shadow-card: 0 1px 2px rgba(31, 26, 23, 0.08); /* reemplaza el borde de las tarjetas */
 
-  /* Acento — UNICO punto de personalizacion de marca ----------------------- */
-  --c-accent:        oklch(0.520 0.130 264);
-  --c-accent-hover:  oklch(0.460 0.135 264);
-  --c-accent-active: oklch(0.410 0.130 264);
-  --c-accent-soft:   oklch(0.960 0.020 264);
-  --c-accent-line:   oklch(0.880 0.045 264);
-  --c-accent-ink:    oklch(0.450 0.140 264);
-  --c-on-accent:     oklch(0.995 0 265);
+  --success: #0B7A38;         /* texto verde, botón Excel, banda En curso */
+  --success-fill: #00923F;    /* íconos, radar, serie Rural, marcador Disponible; no para texto */
+  --success-tint: #E1F2E7;    /* área de sparkline, pista de veredas */
+  --success-on-ink: #7CE0A4;  /* Conectado y En vivo sobre tinta o azul */
 
-  /* Tonos semanticos de estado -------------------------------------------- */
-  --t-neutral-ink:   oklch(0.455 0.010 265);
-  --t-neutral-bg:    oklch(0.960 0.003 265);
-  --t-neutral-line:  oklch(0.890 0.004 265);
-  --t-neutral-solid: oklch(0.600 0.010 265);
+  --danger: #C21F18;          /* texto rojo */
+  --danger-fill: #DA251C;     /* banner de alerta, botón PDF, banda En el sitio, pin de cliente, p95 */
 
-  --t-info-ink:   oklch(0.470 0.140 264);
-  --t-info-bg:    oklch(0.962 0.018 264);
-  --t-info-line:  oklch(0.880 0.040 264);
-  --t-info-solid: oklch(0.550 0.150 264);
+  --warning: #D98A00;         /* marcador e ícono En pausa */
+  --warning-band: #9A5B00;    /* banda En oferta; también texto ámbar, 5,4:1 */
 
-  --t-accent-ink:   oklch(0.470 0.150 305);
-  --t-accent-bg:    oklch(0.963 0.020 305);
-  --t-accent-line:  oklch(0.890 0.040 305);
-  --t-accent-solid: oklch(0.540 0.160 305);
+  --map-land: #E1EEE2;
+  --map-water: #9CC8EA;
 
-  --t-progress-ink:   oklch(0.460 0.100 200);
-  --t-progress-bg:    oklch(0.960 0.022 200);
-  --t-progress-line:  oklch(0.878 0.042 200);
-  --t-progress-solid: oklch(0.560 0.120 200);
+  /* Puntos de estado sobre tinta: leyenda del mapa */
+  --legend-success: #3FC57A;
+  --legend-brand: #4FA8EC;
+  --legend-warning: #F2B544;
+  --legend-danger: #FF5A4E;
 
-  --t-positive-ink:   oklch(0.455 0.110 150);
-  --t-positive-bg:    oklch(0.961 0.022 150);
-  --t-positive-line:  oklch(0.878 0.042 150);
-  --t-positive-solid: oklch(0.560 0.130 150);
+  --plate: #FFD43B;           /* placa del vehículo, con borde tinta */
 
-  --t-warning-ink:   oklch(0.490 0.110 70);
-  --t-warning-bg:    oklch(0.964 0.030 80);
-  --t-warning-line:  oklch(0.888 0.050 80);
-  --t-warning-solid: oklch(0.690 0.150 72);
+  /* ----------------------------------------- 2. Derivados de la paleta
+     Pasos que la HU no nombra pero que los componentes necesitan: estados
+     de pulsación, tintes de fondo y líneas de cada tono. Todos son el mismo
+     tono de su color base, más claro o más oscuro. */
+  --brand-hover: #005F97;
+  --brand-active: #004F7E;
+  --brand-tint: #EAF3FA;      /* tinte azul: el mismo valor que --on-brand-muted */
+  --brand-line: #B3D3EA;
 
-  --t-critical-ink:   oklch(0.495 0.170 25);
-  --t-critical-bg:    oklch(0.962 0.022 25);
-  --t-critical-line:  oklch(0.886 0.045 25);
-  --t-critical-solid: oklch(0.560 0.200 25);
+  --surface-sunk: #F1F6FA;
+  --line-strong: #A8C1D6;
+  --overlay: rgba(31, 26, 23, 0.38);
 
-  /* Series de graficas — orden fijo, validado para vision normal y daltonismo
-     sobre superficie blanca (delta-E deutan >= 8, contraste >= 3:1). No se
-     cicla: una septima serie se agrupa en "Otras". */
-  --c-series-1: oklch(0.550 0.130 264);
-  --c-series-2: oklch(0.620 0.140 70);
-  --c-series-3: oklch(0.600 0.130 185);
-  --c-series-4: oklch(0.560 0.160 18);
-  --c-series-5: oklch(0.520 0.150 310);
-  --c-series-6: oklch(0.600 0.130 145);
+  --success-line: #A8D9B9;
+  --danger-tint: #FBE6E4;
+  --danger-line: #F1B9B4;
+  --warning-tint: #FCF1DC;
+  --warning-line: #EDCF94;
 
-  /* Rampa secuencial de un solo tono (magnitud) */
-  --c-ramp-1: oklch(0.945 0.020 264);
-  --c-ramp-2: oklch(0.880 0.045 264);
-  --c-ramp-3: oklch(0.790 0.075 264);
-  --c-ramp-4: oklch(0.690 0.105 264);
-  --c-ramp-5: oklch(0.590 0.130 264);
-  --c-ramp-6: oklch(0.470 0.135 264);
+  /* ------------------------------------------ 3. Capa semántica
+     Lo que leen los componentes. Cada variable apunta a la paleta: para
+     cambiar un color se toca arriba, nunca aquí. */
 
-  /* Sombras: discretas, la jerarquia la llevan las lineas ------------------ */
-  --sh-1: 0 1px 2px oklch(0.25 0.02 265 / 0.05), 0 1px 1px oklch(0.25 0.02 265 / 0.04);
-  --sh-2: 0 2px 4px oklch(0.25 0.02 265 / 0.05), 0 6px 14px oklch(0.25 0.02 265 / 0.07);
-  --sh-3: 0 8px 20px oklch(0.25 0.02 265 / 0.10), 0 24px 48px oklch(0.25 0.02 265 / 0.12);
-}
+  /* Superficies */
+  --c-canvas: var(--bg);
+  --c-surface: var(--surface);
+  --c-surface-sunk: var(--surface-sunk);
+  --c-surface-raised: var(--surface);
+  --c-overlay: var(--overlay);
 
-/* ---------------------------------------------------------------- 2. Modo oscuro
-   Pasos elegidos para el fondo oscuro, no una inversion automatica del claro. */
-.dark {
-  color-scheme: dark;
+  /* Líneas */
+  --c-line: var(--border);
+  --c-line-strong: var(--line-strong);
 
-  --c-canvas:         oklch(0.168 0.008 265);
-  --c-surface:        oklch(0.205 0.009 265);
-  --c-surface-sunk:   oklch(0.185 0.008 265);
-  --c-surface-raised: oklch(0.238 0.010 265);
-  --c-overlay:        oklch(0.10 0.010 265 / 0.62);
+  /* Tinta */
+  --c-ink: var(--ink);
+  --c-ink-secondary: var(--muted);
+  --c-ink-muted: var(--muted);
+  --c-ink-inverse: var(--surface);
 
-  --c-line:        oklch(0.295 0.010 265);
-  --c-line-strong: oklch(0.380 0.012 265);
+  /* Acento: el azul de marca */
+  --c-accent: var(--brand);
+  --c-accent-hover: var(--brand-hover);
+  --c-accent-active: var(--brand-active);
+  --c-accent-soft: var(--brand-tint);
+  --c-accent-line: var(--brand-line);
+  --c-accent-ink: var(--brand);
+  --c-on-accent: var(--surface);
 
-  --c-ink:           oklch(0.958 0.003 265);
-  --c-ink-secondary: oklch(0.760 0.008 265);
-  --c-ink-muted:     oklch(0.620 0.010 265);
-  --c-ink-inverse:   oklch(0.180 0.010 265);
+  /* Tonos de estado. «accent» y «progress» no tienen color propio: la paleta
+     del logo solo tiene azul para lo que está en curso, así que comparten el
+     de «info». */
+  --t-neutral-ink: var(--muted);
+  --t-neutral-bg: var(--surface-sunk);
+  --t-neutral-line: var(--border);
+  --t-neutral-solid: var(--muted);
 
-  --c-accent:        oklch(0.680 0.130 264);
-  --c-accent-hover:  oklch(0.740 0.125 264);
-  --c-accent-active: oklch(0.790 0.115 264);
-  --c-accent-soft:   oklch(0.285 0.050 264);
-  --c-accent-line:   oklch(0.385 0.070 264);
-  --c-accent-ink:    oklch(0.790 0.110 264);
-  --c-on-accent:     oklch(0.160 0.015 264);
+  --t-info-ink: var(--brand);
+  --t-info-bg: var(--brand-tint);
+  --t-info-line: var(--brand-line);
+  --t-info-solid: var(--brand);
 
-  --t-neutral-ink:   oklch(0.720 0.012 265);
-  --t-neutral-bg:    oklch(0.262 0.010 265);
-  --t-neutral-line:  oklch(0.340 0.012 265);
-  --t-neutral-solid: oklch(0.600 0.012 265);
+  --t-accent-ink: var(--t-info-ink);
+  --t-accent-bg: var(--t-info-bg);
+  --t-accent-line: var(--t-info-line);
+  --t-accent-solid: var(--t-info-solid);
 
-  --t-info-ink:   oklch(0.790 0.110 264);
-  --t-info-bg:    oklch(0.282 0.050 264);
-  --t-info-line:  oklch(0.380 0.070 264);
-  --t-info-solid: oklch(0.620 0.140 264);
+  --t-progress-ink: var(--t-info-ink);
+  --t-progress-bg: var(--t-info-bg);
+  --t-progress-line: var(--t-info-line);
+  --t-progress-solid: var(--t-info-solid);
 
-  --t-accent-ink:   oklch(0.790 0.110 305);
-  --t-accent-bg:    oklch(0.285 0.055 305);
-  --t-accent-line:  oklch(0.385 0.075 305);
-  --t-accent-solid: oklch(0.600 0.150 305);
+  --t-positive-ink: var(--success);
+  --t-positive-bg: var(--success-tint);
+  --t-positive-line: var(--success-line);
+  --t-positive-solid: var(--success-fill);
 
-  --t-progress-ink:   oklch(0.810 0.090 200);
-  --t-progress-bg:    oklch(0.278 0.045 200);
-  --t-progress-line:  oklch(0.372 0.060 200);
-  --t-progress-solid: oklch(0.660 0.120 200);
+  --t-warning-ink: var(--warning-band);
+  --t-warning-bg: var(--warning-tint);
+  --t-warning-line: var(--warning-line);
+  --t-warning-solid: var(--warning);
 
-  --t-positive-ink:   oklch(0.805 0.100 150);
-  --t-positive-bg:    oklch(0.278 0.045 150);
-  --t-positive-line:  oklch(0.372 0.060 150);
-  --t-positive-solid: oklch(0.665 0.130 150);
+  --t-critical-ink: var(--danger);
+  --t-critical-bg: var(--danger-tint);
+  --t-critical-line: var(--danger-line);
+  --t-critical-solid: var(--danger-fill);
 
-  --t-warning-ink:   oklch(0.835 0.110 75);
-  --t-warning-bg:    oklch(0.290 0.050 70);
-  --t-warning-line:  oklch(0.390 0.070 70);
-  --t-warning-solid: oklch(0.760 0.140 75);
+  /* Series de gráficas, en orden fijo: Urbano y mediana en azul, Rural en
+     verde. El rojo no entra en el ciclo: solo lo lleva una serie que mide
+     algo fuera de objetivo, como el p95. */
+  --c-series-1: var(--brand);
+  --c-series-2: var(--success-fill);
+  --c-series-3: var(--warning);
 
-  --t-critical-ink:   oklch(0.765 0.140 25);
-  --t-critical-bg:    oklch(0.292 0.060 25);
-  --t-critical-line:  oklch(0.392 0.090 25);
-  --t-critical-solid: oklch(0.605 0.190 25);
+  /* Sombras: la tarjeta lleva la de la HU; las demás, la misma tinta */
+  --sh-1: var(--shadow-card);
+  --sh-2: 0 2px 4px rgba(31, 26, 23, 0.06), 0 6px 14px rgba(31, 26, 23, 0.08);
+  --sh-3: 0 8px 20px rgba(31, 26, 23, 0.10), 0 24px 48px rgba(31, 26, 23, 0.12);
 
-  /* Series revalidadas contra la superficie oscura */
-  --c-series-1: oklch(0.620 0.140 264);
-  --c-series-2: oklch(0.670 0.140 70);
-  --c-series-3: oklch(0.650 0.130 185);
-  --c-series-4: oklch(0.540 0.170 18);
-  --c-series-5: oklch(0.580 0.160 310);
-  --c-series-6: oklch(0.640 0.140 145);
-
-  --c-ramp-1: oklch(0.275 0.035 264);
-  --c-ramp-2: oklch(0.345 0.060 264);
-  --c-ramp-3: oklch(0.430 0.090 264);
-  --c-ramp-4: oklch(0.520 0.120 264);
-  --c-ramp-5: oklch(0.615 0.140 264);
-  --c-ramp-6: oklch(0.715 0.125 264);
-
-  --sh-1: 0 1px 2px oklch(0 0 0 / 0.40);
-  --sh-2: 0 2px 6px oklch(0 0 0 / 0.42), 0 8px 20px oklch(0 0 0 / 0.34);
-  --sh-3: 0 10px 28px oklch(0 0 0 / 0.50), 0 28px 60px oklch(0 0 0 / 0.42);
-}
-
-/* ------------------------------------------------- 3. Movimiento: tokens fijos
-   Cinco duraciones y cuatro curvas. Ninguna animacion de la app usa valores
-   fuera de esta tabla; asi el producto se mueve siempre igual. */
-:root {
+  /* ------------------------------------------------- 4. Movimiento
+     Cinco duraciones y cuatro curvas. Ninguna animacion de la app usa
+     valores fuera de esta tabla; asi el producto se mueve siempre igual. */
   --mo-instant: 90ms;      /* realimentacion tactil: pulsar, marcar */
   --mo-fast: 150ms;        /* hover, foco, cambio de color */
   --mo-base: 240ms;        /* entrada y salida de elementos pequenos */
@@ -203,7 +183,7 @@
   --mo-slide: 24px;
 }
 
-/* ------------------------------------------------------- 4. Mapa a Tailwind v4 */
+/* ------------------------------------------------------- 5. Mapa a Tailwind v4 */
 @theme inline {
   --color-canvas: var(--c-canvas);
   --color-surface: var(--c-surface);
@@ -227,6 +207,26 @@
   --color-accent-ink: var(--c-accent-ink);
   --color-on-accent: var(--c-on-accent);
 
+  /* La paleta de marca, para los elementos que la HU pinta con un color
+     concreto: barra lateral, cabecera, bandas del tablero, placa. */
+  --color-brand: var(--brand);
+  --color-on-brand-muted: var(--on-brand-muted);
+  --color-on-ink: var(--on-ink);
+  --color-on-ink-muted: var(--on-ink-muted);
+  --color-success: var(--success);
+  --color-success-fill: var(--success-fill);
+  --color-success-tint: var(--success-tint);
+  --color-success-on-ink: var(--success-on-ink);
+  --color-danger: var(--danger);
+  --color-danger-fill: var(--danger-fill);
+  --color-warning: var(--warning);
+  --color-warning-band: var(--warning-band);
+  --color-legend-success: var(--legend-success);
+  --color-legend-brand: var(--legend-brand);
+  --color-legend-warning: var(--legend-warning);
+  --color-legend-danger: var(--legend-danger);
+  --color-plate: var(--plate);
+
   --color-tone-ink: var(--tone-ink);
   --color-tone-bg: var(--tone-bg);
   --color-tone-line: var(--tone-line);
@@ -235,12 +235,9 @@
   --color-series-1: var(--c-series-1);
   --color-series-2: var(--c-series-2);
   --color-series-3: var(--c-series-3);
-  --color-series-4: var(--c-series-4);
-  --color-series-5: var(--c-series-5);
-  --color-series-6: var(--c-series-6);
 
-  --font-sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto,
-    "Helvetica Neue", Arial, "Noto Sans", sans-serif;
+  --font-sans: 'Atkinson Hyperlegible', ui-sans-serif, system-ui, -apple-system, 'Segoe UI',
+    Roboto, 'Helvetica Neue', Arial, 'Noto Sans', sans-serif;
   --font-mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas,
     "Liberation Mono", monospace;
 
@@ -278,7 +275,7 @@
   --ease-soft: cubic-bezier(0.4, 0, 0.2, 1);
 }
 
-/* ------------------------------------------------------------ 5. Base y reset */
+/* ------------------------------------------------------------ 6. Base y reset */
 @layer base {
   * {
     border-color: var(--c-line);
@@ -336,7 +333,20 @@
   }
 }
 
-/* ------------------------------------------------------------- 6. Tonos
+/* Franja de marca: 4 px arriba, azul 60 %, verde 20 % y rojo 20 %. Es una
+   imagen de fondo, así que no ocupa sitio ni empuja nada. */
+@utility franja-marca {
+  background-image: linear-gradient(
+    90deg,
+    var(--brand) 0 60%,
+    var(--success-fill) 60% 80%,
+    var(--danger-fill) 80% 100%
+  );
+  background-size: 100% 4px;
+  background-repeat: no-repeat;
+}
+
+/* ------------------------------------------------------------- 7. Tonos
    Una clase por tono expone cuatro variables; los componentes solo leen
    --tone-*, nunca un color concreto. */
 .tone-neutral {
@@ -382,7 +392,7 @@
   --tone-solid: var(--t-critical-solid);
 }
 
-/* ------------------------------------------------- 7. Animaciones con nombre
+/* ------------------------------------------------- 8. Animaciones con nombre
    Cada keyframe tiene un uso declarado; no se improvisan animaciones nuevas. */
 
 /* Aparicion simple */
@@ -513,7 +523,7 @@
   border-radius: var(--radius-sm);
 }
 
-/* ------------------------------------------- 8. Respeto por reducir movimiento
+/* ------------------------------------------- 9. Respeto por reducir movimiento
    Obligatorio: la app sigue siendo usable sin una sola animacion. */
 @media (prefers-reduced-motion: reduce) {
   *,

@@ -2,7 +2,7 @@ import { motion } from 'motion/react';
 import { BellOff, BellRing, Coffee, LogOut, Play, Radar } from 'lucide-react';
 import { formatDuration } from '@tax/shared';
 import { useState } from 'react';
-import { Button, Field, Input, StatusPill, transition } from '@tax/ui';
+import { Button, Field, Input, StatusPill, cn, transition } from '@tax/ui';
 import { ActionBar, DataRow, Screen } from '../components/Chrome';
 import type { SessionState } from '../state/session';
 import type { PushState } from '../api/push';
@@ -63,23 +63,23 @@ export function Turno({
     <>
       <Screen>
         <div className="flex flex-col items-center justify-center gap-5 py-10 text-center">
-          {/* Mientras está disponible, el halo late: la app está escuchando. */}
+          {/* Mientras está disponible, el halo late: la app está escuchando.
+              Es blanco al 20 %, que con el desvanecido del latido queda en
+              torno al 10 % sobre el azul. */}
           <div className="relative flex size-28 items-center justify-center">
             {available ? (
               <>
                 <span
-                  className="tone-positive absolute size-16 rounded-full bg-[var(--tone-solid)] opacity-20"
+                  className="absolute size-16 rounded-full bg-on-accent/20 opacity-20"
                   style={{ animation: 'tax-beacon 2.4s var(--ease-soft) infinite' }}
                 />
                 <span
-                  className="tone-positive absolute size-16 rounded-full bg-[var(--tone-solid)] opacity-20"
+                  className="absolute size-16 rounded-full bg-on-accent/20 opacity-20"
                   style={{ animation: 'tax-beacon 2.4s var(--ease-soft) infinite 1.2s' }}
                 />
               </>
             ) : null}
-            <div
-              className={cnTone(available ? 'tone-positive' : paused ? 'tone-warning' : 'tone-neutral')}
-            >
+            <div className={radar(available ? 'available' : paused ? 'paused' : 'off')}>
               <Radar className="size-8" />
             </div>
           </div>
@@ -90,11 +90,14 @@ export function Turno({
               initial={{ opacity: 0, y: 6 }}
               animate={{ opacity: 1, y: 0 }}
               transition={transition.enter}
-              className="text-display font-semibold tracking-[-0.02em] text-ink"
+              className={cn(
+                'text-display font-semibold tracking-[-0.02em]',
+                onShift ? 'text-on-accent' : 'text-ink',
+              )}
             >
               {available ? 'Esperando carrera' : paused ? 'En pausa' : 'Fuera de turno'}
             </motion.h1>
-            <p className="mt-2 text-lg text-ink-secondary">
+            <p className={cn('mt-2 text-lg', onShift ? 'text-on-brand-muted' : 'text-ink-secondary')}>
               {available
                 ? 'Te avisamos con sonido y vibración cuando llegue una oferta.'
                 : paused
@@ -104,7 +107,7 @@ export function Turno({
           </div>
 
           {onShift ? (
-            <StatusPill tone={available ? 'positive' : 'warning'} size="md" live={available}>
+            <StatusPill tone={available ? 'positive' : 'warning'} size="md" live={available} inverse>
               Turno abierto · {formatDuration(shiftSeconds)}
             </StatusPill>
           ) : null}
@@ -123,9 +126,23 @@ export function Turno({
           </Field>
         ) : null}
 
-        <div className="rounded-lg border border-line bg-surface px-4">
-          <DataRow label="Carreras de hoy" value={session.ridesToday} />
-          {plate ? <DataRow label="Vehículo" value={plate} /> : null}
+        <div className="rounded-lg border border-transparent bg-surface px-4 shadow-sm">
+          <DataRow
+            label="Carreras de hoy"
+            value={<span className="text-brand">{session.ridesToday}</span>}
+          />
+          {plate ? (
+            <DataRow
+              label="Vehículo"
+              value={
+                // Como la placa de verdad: amarilla con borde negro. El
+                // interlineado ajustado deja la fila con la misma altura.
+                <span className="rounded-sm border border-ink bg-plate px-1.5 leading-tight text-ink">
+                  {plate}
+                </span>
+              }
+            />
+          ) : null}
         </div>
 
         <Instalar compacto />
@@ -153,7 +170,12 @@ export function Turno({
         ) : null}
 
         {available ? (
-          <Button size="touch" icon={<Coffee className="size-5" />} onClick={onPause}>
+          <Button
+            variant="outline"
+            size="touch"
+            icon={<Coffee className="size-5 text-warning" />}
+            onClick={onPause}
+          >
             Tomar una pausa
           </Button>
         ) : null}
@@ -165,7 +187,13 @@ export function Turno({
         ) : null}
 
         {onShift ? (
-          <Button variant="ghost" size="lg" className="w-full" icon={<LogOut className="size-4" />} onClick={onEndShift}>
+          <Button
+            variant="ghost-danger"
+            size="lg"
+            className="w-full"
+            icon={<LogOut className="size-4" />}
+            onClick={onEndShift}
+          >
             Cerrar turno
           </Button>
         ) : null}
@@ -174,8 +202,16 @@ export function Turno({
   );
 }
 
-function cnTone(tone: string) {
-  return `${tone} relative flex size-16 items-center justify-center rounded-full border border-[var(--tone-line)] bg-[var(--tone-bg)] text-[var(--tone-ink)]`;
+/**
+ * El círculo del radar. Disponible: verde lleno con borde blanco de 5 px e
+ * ícono blanco. En pausa: ámbar con el ícono en tinta, que es el que se lee
+ * sobre ese ámbar. Fuera de turno, sobre el fondo claro, el gris de siempre.
+ */
+function radar(estado: 'available' | 'paused' | 'off') {
+  const base = 'relative flex size-16 items-center justify-center rounded-full';
+  if (estado === 'available') return `${base} border-[5px] border-on-accent bg-success-fill text-on-accent`;
+  if (estado === 'paused') return `${base} border-[5px] border-on-accent bg-warning text-ink`;
+  return `tone-neutral ${base} border border-[var(--tone-line)] bg-[var(--tone-bg)] text-[var(--tone-ink)]`;
 }
 
 /**
@@ -188,9 +224,10 @@ function cnTone(tone: string) {
 function AvisoPush({ estado, onActivar }: { estado: PushState; onActivar: () => void }) {
   if (estado === 'no-soportado') return null;
 
+  // Solo se muestra con el turno abierto, sobre el azul de marca.
   if (estado === 'activo') {
     return (
-      <p className="flex items-center justify-center gap-1.5 text-caption text-ink-muted">
+      <p className="flex items-center justify-center gap-1.5 text-caption text-on-brand-muted">
         <BellRing className="size-3.5" />
         Te avisamos aunque cierres la aplicación.
       </p>

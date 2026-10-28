@@ -98,8 +98,9 @@ worker.addEventListener('push', ((event: PushEvent) => {
       requireInteraction: true,
       silent: false,
       data: { rideId: aviso.rideId },
-      icon: '/icon.svg',
-      badge: '/icon-maskable.svg',
+      icon: '/icon-192.png',
+      // Android solo mira la forma del icono pequeño de la barra de avisos.
+      badge: '/badge-96.png',
     } as NotificationOptions),
   );
 }) as never);

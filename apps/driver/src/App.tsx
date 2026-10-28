@@ -4,7 +4,7 @@ import { MotionConfig, motion } from 'motion/react';
 import { Wifi, WifiOff } from 'lucide-react';
 import type { Oleada, Point } from '@tax/shared';
 import { haversineKm } from '@tax/shared';
-import { screenTransition } from '@tax/ui';
+import { cn, screenTransition } from '@tax/ui';
 import { TopStatus } from './components/Chrome';
 import { Acceso } from './screens/Acceso';
 import { Turno } from './screens/Turno';
@@ -375,9 +375,9 @@ export function App() {
           }
           right={
             enLinea ? (
-              <Wifi className="size-3.5 text-ink-muted" />
+              <Wifi className="size-3.5 text-on-ink-muted" />
             ) : (
-              <WifiOff className="size-3.5 text-[var(--t-warning-ink)]" />
+              <WifiOff className="size-3.5 text-legend-warning" />
             )
           }
         />
@@ -407,12 +407,17 @@ export function App() {
         * cambiado. La dirección de entrada basta para decir si la carrera
         * avanza o retrocede.
         */}
+      {/* Con el turno abierto y esperando, la pantalla va sobre el azul de
+          marca (HU-UI-01), también detrás de las esquinas del pie. */}
       <motion.div
           key={session.phase}
           variants={screenTransition(direction)}
           initial="hidden"
           animate="visible"
-          className="flex min-h-0 flex-1 flex-col"
+          className={cn(
+            'flex min-h-0 flex-1 flex-col',
+            (session.phase === 'available' || session.phase === 'paused') && 'bg-brand',
+          )}
         >
             {session.phase === 'off_shift' || session.phase === 'available' || session.phase === 'paused' ? (
               <Turno

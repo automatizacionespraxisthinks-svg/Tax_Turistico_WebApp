@@ -12,5 +12,3 @@ export { Segmented, Tabs } from './components/Segmented';
 export type { SegmentedOption } from './components/Segmented';
 export { ToastProvider, useToast } from './components/Toast';
 export { Skeleton, EmptyState, ProgressRing, Banner } from './components/Feedback';
-export { useTheme, ThemeToggle } from './components/theme';
-export type { ThemeMode } from './components/theme';

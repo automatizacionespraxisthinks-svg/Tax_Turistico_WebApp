@@ -45,7 +45,7 @@ function registerPmtiles(): void {
 
 /** Color de un tono del sistema de diseño, resuelto para MapLibre. */
 function toneColor(tone: string): string {
-  return token(`--t-${tone}-solid`, '#888888');
+  return token(`--t-${tone}-solid`);
 }
 
 /*
@@ -55,7 +55,7 @@ function toneColor(tone: string): string {
  *
  * Las capas de MapLibre no leen SVG: se dibuja en un lienzo y se registra como
  * imagen. Va en blanco y a doble resolución; el color lo pone el círculo de
- * debajo, que es el del estado de la carrera.
+ * debajo, el rojo del cliente por recoger.
  */
 const ICONO_PERSONA = 'persona';
 const ICONO_PIXEL_RATIO = 2;
@@ -71,7 +71,7 @@ function iconoPersona(): ImageData {
   const escala = (lado * 0.6) / 24;
   ctx.translate((lado - 24 * escala) / 2, (lado - 24 * escala) / 2);
   ctx.scale(escala, escala);
-  ctx.fillStyle = '#ffffff';
+  ctx.fillStyle = token('--c-surface');
   ctx.beginPath();
   ctx.arc(12, 7, 4.5, 0, Math.PI * 2);
   ctx.fill();
@@ -80,6 +80,7 @@ function iconoPersona(): ImageData {
   return ctx.getImageData(0, 0, lado, lado);
 }
 
+/** Disponible verde, en carrera azul, en pausa ámbar: lo mismo que en Flota. */
 const DRIVER_TONE: Record<Driver['status'], string> = {
   AVAILABLE: 'positive',
   ON_RIDE: 'progress',
@@ -132,7 +133,14 @@ function ridesToGeoJson(rides: Ride[], selectedId?: string | null): FeatureColle
           id: ride.id,
           code: ride.code,
           estado: RIDE_STATUS_LABEL[ride.status],
-          color: toneColor(RIDE_STATUS_TONE[ride.status]),
+          // El pin es el cliente, y el cliente por recoger va siempre en rojo
+          // (HU-UI-01): el rojo del mapa no se confunde con ningún conductor.
+          // Con el pasajero ya a bordo no queda nadie por recoger, así que el
+          // punto toma el verde de «En curso».
+          color:
+            ride.status === 'IN_PROGRESS'
+              ? toneColor(RIDE_STATUS_TONE.IN_PROGRESS)
+              : token('--danger-fill'),
           // Lo que espera a alguien lleva halo; lo que ya está en marcha, no.
           esperando:
             ride.status === 'NOTIFIED' || ride.status === 'UNASSIGNED' || ride.status === 'PENDING',
@@ -186,8 +194,8 @@ export function MapCanvas({ rides, selectedRideId, onSelectRide, className }: Ma
   /*
    * Último dato conocido de cada capa.
    *
-   * Al cambiar de tema el estilo se reemplaza entero y las capas propias se
-   * vuelven a montar con sus fuentes vacías. Apoyarse en un indicador de
+   * Si el estilo se reemplaza entero, las capas propias se vuelven a montar
+   * con sus fuentes vacías. Apoyarse en un indicador de
    * «listo» no sirve: pasa a falso y a verdadero en el mismo ciclo de React,
    * que no ve cambio y no vuelve a ejecutar los efectos. Así que el remontaje
    * siembra las fuentes él mismo con lo que haya aquí.
@@ -261,11 +269,12 @@ export function MapCanvas({ rides, selectedRideId, onSelectRide, className }: Ma
         source: 'zonas',
         paint: { 'fill-color': ['get', 'color'], 'fill-opacity': 0.06 },
       });
+      // Borde de 2 px: azul la zona urbana, verde las veredas y el lago.
       instance.addLayer({
         id: 'zonas-borde',
         type: 'line',
         source: 'zonas',
-        paint: { 'line-color': ['get', 'color'], 'line-width': 1.5, 'line-opacity': 0.5 },
+        paint: { 'line-color': ['get', 'color'], 'line-width': 2 },
       });
       instance.addLayer({
         id: 'zonas-nombre',
@@ -279,9 +288,8 @@ export function MapCanvas({ rides, selectedRideId, onSelectRide, className }: Ma
           'text-letter-spacing': 0.08,
         },
         paint: {
-          'text-color': ['get', 'color'],
-          'text-opacity': 0.8,
-          'text-halo-color': colors.canvas,
+          'text-color': ['get', 'texto'],
+          'text-halo-color': colors.land,
           'text-halo-width': 1.5,
         },
       });
@@ -292,7 +300,7 @@ export function MapCanvas({ rides, selectedRideId, onSelectRide, className }: Ma
         source: 'oleada',
         paint: {
           'circle-radius': ['get', 'radio'],
-          'circle-color': 'rgba(0,0,0,0)',
+          'circle-color': 'transparent',
           'circle-stroke-color': ['get', 'color'],
           'circle-stroke-width': 2,
           'circle-stroke-opacity': ['get', 'opacidad'],
@@ -319,8 +327,8 @@ export function MapCanvas({ rides, selectedRideId, onSelectRide, className }: Ma
         filter: ['get', 'esperando'],
         paint: { 'circle-radius': 20, 'circle-color': ['get', 'color'], 'circle-opacity': 0.14 },
       });
-      // El círculo lleva el color del estado y recibe los clics; la persona
-      // va encima, en blanco.
+      // El círculo es rojo y recibe los clics; la persona va encima, en
+      // blanco. Todos los marcadores llevan borde blanco de 2,5 px.
       instance.addLayer({
         id: 'pines',
         type: 'circle',
@@ -329,7 +337,7 @@ export function MapCanvas({ rides, selectedRideId, onSelectRide, className }: Ma
           'circle-radius': ['case', ['get', 'seleccionada'], 13, 10],
           'circle-color': ['get', 'color'],
           'circle-stroke-color': colors.surface,
-          'circle-stroke-width': ['case', ['get', 'seleccionada'], 3, 2],
+          'circle-stroke-width': ['case', ['get', 'seleccionada'], 3, 2.5],
         },
       });
       instance.addLayer({
@@ -361,7 +369,7 @@ export function MapCanvas({ rides, selectedRideId, onSelectRide, className }: Ma
           'circle-color': ['get', 'color'],
           'circle-opacity': ['case', ['get', 'vieja'], 0.4, 1],
           'circle-stroke-color': colors.surface,
-          'circle-stroke-width': 1.5,
+          'circle-stroke-width': 2.5,
         },
       });
 
@@ -371,8 +379,8 @@ export function MapCanvas({ rides, selectedRideId, onSelectRide, className }: Ma
     /*
      * `style.load` y no `styledata`: el segundo se emite durante la carga,
      * cuando el estilo todavía no está listo, y deja de emitirse en cuanto lo
-     * está. Al cambiar de tema las capas propias nunca volvían, y el operador
-     * se quedaba con el mapa pero sin conductores ni carreras encima.
+     * está. Si el estilo se reemplazara, las capas propias nunca volverían y
+     * el operador se quedaría con el mapa pero sin conductores ni carreras.
      */
     instance.on('style.load', addOverlays);
 
@@ -419,20 +427,6 @@ export function MapCanvas({ rides, selectedRideId, onSelectRide, className }: Ma
     };
   }, []);
 
-  /* ------------------------------------------------------------- tema --- */
-
-  useEffect(() => {
-    const observer = new MutationObserver(() => {
-      const instance = map.current;
-      if (!instance) return;
-      setReady(false);
-      instance.setStyle(buildStyle(TILES_URL, readPalette()));
-    });
-
-    observer.observe(document.documentElement, { attributes: true, attributeFilter: ['class'] });
-    return () => observer.disconnect();
-  }, []);
-
   /* ------------------------------------------------------------ datos --- */
 
   const zonesGeoJson = useMemo<FeatureCollection>(
@@ -452,9 +446,12 @@ export function MapCanvas({ rides, selectedRideId, onSelectRide, className }: Ma
               ],
             ],
           },
+          // El borde puede ir en el verde de relleno; el nombre, que es
+          // texto, en el verde que se lee sobre el terreno.
           properties: {
             name: zone.name,
-            color: toneColor(zone.kind === 'rural' ? 'accent' : 'info'),
+            color: toneColor(zone.kind === 'rural' ? 'positive' : 'info'),
+            texto: zone.kind === 'rural' ? token('--t-positive-ink') : toneColor('info'),
           },
         })),
     }),
@@ -577,7 +574,12 @@ export function MapCanvas({ rides, selectedRideId, onSelectRide, className }: Ma
   const onShift = drivers.filter((d) => d.position).length;
 
   return (
-    <div className={cn('relative overflow-hidden rounded-lg border border-line', className)}>
+    <div
+      className={cn(
+        'mapa-marca relative overflow-hidden rounded-lg border border-transparent shadow-sm',
+        className,
+      )}
+    >
       <div ref={container} className="size-full" />
 
       {failed ? (
@@ -591,7 +593,7 @@ export function MapCanvas({ rides, selectedRideId, onSelectRide, className }: Ma
 
       <div className="pointer-events-none absolute inset-x-0 top-0 flex items-start justify-between gap-2 p-3">
         <Legend />
-        <span className="mr-10 rounded-md border border-line bg-surface/85 px-2 py-1 text-micro text-ink-muted backdrop-blur-sm">
+        <span className="mr-10 rounded-md border border-transparent bg-ink px-2 py-1 text-micro text-on-ink">
           {onShift} en turno
         </span>
       </div>
@@ -610,27 +612,28 @@ export function MapCanvas({ rides, selectedRideId, onSelectRide, className }: Ma
   );
 }
 
+/**
+ * Leyenda en una píldora de tinta. Los puntos usan la variante clara de cada
+ * color de estado, la que se distingue sobre fondo oscuro.
+ */
 function Legend() {
   const items = [
-    { tone: 'tone-positive', label: 'Disponible' },
-    { tone: 'tone-progress', label: 'En carrera' },
-    { tone: 'tone-warning', label: 'En pausa' },
+    { dot: 'bg-legend-success', label: 'Disponible' },
+    { dot: 'bg-legend-brand', label: 'En carrera' },
+    { dot: 'bg-legend-warning', label: 'En pausa' },
   ];
 
   return (
-    <div className="flex flex-wrap items-center gap-x-3 gap-y-1 rounded-md border border-line bg-surface/85 px-2.5 py-1.5 backdrop-blur-sm">
+    <div className="flex flex-wrap items-center gap-x-3 gap-y-1 rounded-md border border-transparent bg-ink px-2.5 py-1.5">
       {items.map((item) => (
-        <span
-          key={item.label}
-          className={cn(item.tone, 'flex items-center gap-1.5 text-micro text-ink-secondary')}
-        >
-          <span className="size-2 rounded-full bg-[var(--tone-solid)]" />
+        <span key={item.label} className="flex items-center gap-1.5 text-micro text-on-ink">
+          <span className={cn('size-2 rounded-full', item.dot)} />
           {item.label}
         </span>
       ))}
-      <span className="flex items-center gap-1.5 border-l border-line pl-3 text-micro text-ink-secondary">
-        <span className="flex size-3.5 items-center justify-center rounded-full bg-ink-secondary">
-          <User className="size-2.5 text-surface" strokeWidth={3} />
+      <span className="flex items-center gap-1.5 border-l border-on-ink-muted/40 pl-3 text-micro text-on-ink">
+        <span className="flex size-3.5 items-center justify-center rounded-full bg-legend-danger">
+          <User className="size-2.5 text-on-accent" strokeWidth={3} />
         </span>
         Cliente por recoger
       </span>
