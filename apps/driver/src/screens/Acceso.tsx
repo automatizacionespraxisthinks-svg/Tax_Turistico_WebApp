@@ -4,6 +4,7 @@ import { ShieldCheck } from 'lucide-react';
 import { Instalar } from '../components/Instalar';
 import { Button, Field, Input, transition } from '@tax/ui';
 import { Screen } from '../components/Chrome';
+import logo from '../assets/logo-tax-turistico.png';
 
 /**
  * Acceso del conductor: código + placa + PIN personal (§8.1).
@@ -48,21 +49,15 @@ export function Acceso({
         className="space-y-6"
       >
         <div>
-          <div
-            aria-hidden="true"
-            className="mb-5 flex size-12 items-center justify-center rounded-lg border border-line bg-surface-sunk"
-          >
-            <svg viewBox="0 0 16 16" className="size-6 text-ink-secondary" fill="none">
-              <path
-                d="M2.5 11.5 8 3l5.5 8.5"
-                stroke="currentColor"
-                strokeWidth="1.6"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-              />
-              <circle cx="8" cy="11.6" r="1.4" fill="currentColor" />
-            </svg>
-          </div>
+          {/* El logo grande va aquí: es lo primero que ve el conductor y lo
+              que le dice que esta es la aplicación de la empresa. */}
+          <img
+            src={logo}
+            alt="Logo Tax Turístico"
+            width={64}
+            height={64}
+            className="mb-5 size-16 rounded-full bg-surface shadow-sm"
+          />
           <h1 className="text-display font-semibold tracking-[-0.02em] text-ink">Entrar al turno</h1>
           <p className="mt-1.5 text-lg text-ink-secondary">
             Tax Turístico · aplicación de conductores

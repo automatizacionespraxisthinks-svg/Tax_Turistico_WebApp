@@ -6,7 +6,8 @@ import { fileURLToPath } from 'node:url';
 /**
  * Genera, a partir del logo oficial, todo lo que la marca necesita en mapa
  * de bits: los iconos de la PWA, el aviso de Web Push, los favicon de las
- * dos aplicaciones y el logo de la barra lateral del panel (HU-UI-01).
+ * dos aplicaciones, el logo de la barra lateral del panel (HU-UI-01) y el de
+ * la PWA.
  *
  * Hacen falta PNG, no basta con un SVG: Chrome en Android **no considera
  * instalable** una aplicación cuyo manifiesto solo ofrece iconos SVG, así que
@@ -309,6 +310,8 @@ const salidas = [
   // Barra lateral del panel: se pinta a 38 px, así que 128 lo deja nítido
   // hasta en pantallas de densidad 3.
   { archivo: join(RAIZ, 'apps/admin/src/assets/logo-tax-turistico.png'), tamano: 128 },
+  // PWA: 64 px en el acceso y 24 en la cabecera; 192 cubre la densidad 3.
+  { archivo: join(RAIZ, 'apps/driver/src/assets/logo-tax-turistico.png'), tamano: 192 },
 ];
 
 for (const { archivo, tamano, ...opciones } of salidas) {

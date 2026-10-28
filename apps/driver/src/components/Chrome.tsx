@@ -3,6 +3,7 @@ import type { ReactNode } from 'react';
 import { AnimatePresence, motion } from 'motion/react';
 import { CloudOff, Signal } from 'lucide-react';
 import { LiveDot, cn, transition } from '@tax/ui';
+import logo from '../assets/logo-tax-turistico.png';
 
 /**
  * Elementos fijos de la PWA.
@@ -44,18 +45,30 @@ export function TopStatus({
 
   return (
     <header className="franja-marca flex h-12 shrink-0 items-center justify-between gap-3 border-b border-transparent bg-ink px-4">
-      {/* Sobre tinta, los colores de estado claros: los de siempre no se leen. */}
-      <span
-        className={cn(
-          'flex items-center gap-2 text-caption',
-          online
-            ? 'text-success-on-ink [--tone-solid:var(--success-on-ink)]'
-            : 'text-legend-danger [--tone-solid:var(--legend-danger)]',
-        )}
-      >
-        <LiveDot live={online} />
-        {online ? 'Conectado' : 'Sin conexión'}
-      </span>
+      <div className="flex items-center gap-3">
+        {/* La marca en pequeño, en todas las pantallas. Es decorativa para el
+            lector de pantalla: no dice nada que haga falta oír en cada una. */}
+        <img
+          src={logo}
+          alt=""
+          aria-hidden="true"
+          width={24}
+          height={24}
+          className="size-6 shrink-0 rounded-full bg-surface"
+        />
+        {/* Sobre tinta, los colores de estado claros: los de siempre no se leen. */}
+        <span
+          className={cn(
+            'flex items-center gap-2 text-caption',
+            online
+              ? 'text-success-on-ink [--tone-solid:var(--success-on-ink)]'
+              : 'text-legend-danger [--tone-solid:var(--legend-danger)]',
+          )}
+        >
+          <LiveDot live={online} />
+          {online ? 'Conectado' : 'Sin conexión'}
+        </span>
+      </div>
 
       <div className="flex items-center gap-2">{right}</div>
 

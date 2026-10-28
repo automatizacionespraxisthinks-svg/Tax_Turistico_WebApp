@@ -91,7 +91,8 @@ archivo al compilar (`packages/ui/marca.vite.ts`).
   su celular tenga otra fuente y aunque no tenga señal. Números tabulares en
   todo dato que se actualiza.
 - **Logo.** El original está en `packages/ui/src/assets/`; los íconos de la
-  PWA, los favicon y el logo de la barra lateral salen de él con
+  PWA, los favicon, el logo de la barra lateral del panel y el de la PWA (en
+  el acceso y en la cabecera) salen de él con
   `node apps/driver/scripts/generar-iconos.mjs`. Hoy es un PNG de 256 px:
   cuando exista el vector, se exporta a 1024 px y se vuelve a correr.
 - **Gráficas.** Colores de serie en orden fijo (azul, verde, ámbar), nunca
