@@ -8,6 +8,8 @@ export { StatusPill, LiveDot, Meta, TONE_CLASS } from './components/StatusPill';
 export { Stat, AnimatedNumber } from './components/Stat';
 export { Field, Input, Textarea, Select, Switch } from './components/Field';
 export { Sheet } from './components/Sheet';
+export { Modal } from './components/Modal';
+export type { ModalProps } from './components/Modal';
 export { Segmented, Tabs } from './components/Segmented';
 export type { SegmentedOption } from './components/Segmented';
 export { ToastProvider, useToast } from './components/Toast';

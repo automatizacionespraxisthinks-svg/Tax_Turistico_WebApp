@@ -1,4 +1,5 @@
-import type { StyleSpecification } from 'maplibre-gl';
+import { addProtocol, type StyleSpecification } from 'maplibre-gl';
+import { Protocol } from 'pmtiles';
 
 /**
  * Estilo del mapa base.
@@ -276,4 +277,18 @@ export function buildStyle(tilesUrl: string, palette: MapPalette): StyleSpecific
       },
     ],
   };
+}
+
+/** El archivo de teselas de Paipa; lo comparten el mapa de operación y los formularios. */
+export const TILES_URL: string = import.meta.env.VITE_PMTILES_URL ?? '/tiles/paipa.pmtiles';
+
+export const PAIPA_CENTER: [number, number] = [-73.1142, 5.7803];
+
+/** Una sola vez por página: registrar el protocolo dos veces lanza error. */
+let protocolRegistered = false;
+
+export function registerPmtiles(): void {
+  if (protocolRegistered) return;
+  addProtocol('pmtiles', new Protocol().tile);
+  protocolRegistered = true;
 }

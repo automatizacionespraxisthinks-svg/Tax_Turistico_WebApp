@@ -1,4 +1,5 @@
 import { uuidv7 } from 'uuidv7';
+import { poligonoCircular } from '@tax/shared';
 import type { Database } from './db.module';
 import * as schema from './schema';
 
@@ -16,27 +17,8 @@ import * as schema from './schema';
  * las vigentes al desplegar.
  */
 
-const RADIO_TIERRA_KM = 6371.0088;
-
-/**
- * Círculo alrededor de un punto, como polígono GeoJSON (lng, lat) de
- * `lados` lados, en sentido contrario a las agujas del reloj (RFC 7946).
- *
- * Sigue siendo un polígono, no un centro y un radio: así el despacho, el mapa
- * y la búsqueda de zona usan la misma geometría que antes, solo que redonda.
- * Con 64 lados el borde se aparta del círculo verdadero menos de un 0,2 %.
- */
-export function circulo(lat: number, lng: number, radioKm: number, lados = 64) {
-  const dLat = (radioKm / RADIO_TIERRA_KM) * (180 / Math.PI);
-  const dLng = dLat / Math.cos((lat * Math.PI) / 180);
-  const redondear = (n: number) => Math.round(n * 1e6) / 1e6;
-  const anillo = Array.from({ length: lados }, (_, i): [number, number] => {
-    const t = (2 * Math.PI * i) / lados;
-    return [redondear(lng + dLng * Math.cos(t)), redondear(lat + dLat * Math.sin(t))];
-  });
-  anillo.push(anillo[0]!);
-  return { type: 'Polygon' as const, coordinates: [anillo] };
-}
+/** El mismo círculo que dibuja el panel al crear una zona. */
+export const circulo = poligonoCircular;
 
 /**
  * Las zonas de Paipa, como círculos.

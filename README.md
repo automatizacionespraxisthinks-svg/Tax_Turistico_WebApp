@@ -153,8 +153,18 @@ El panel no inventa acciones: cada botón sale de la tabla de transiciones.
   carreras) o una cuenta de conductor (desde *Flota*) se marcan como de
   prueba, y con «No incluir pruebas» Reportes deja fuera todo lo suyo, también
   lo de antes de marcarlo.
-- **Outbox**: estados de entrega, reintentos y cola muerta visibles en
-  *Sistema*, con reenvío manual.
+- **Zonas y lugares desde el panel**: en *Zonas*, una ventana sobre la vista
+  crea zonas (círculos que no pueden montarse sobre otra; solo
+  administradores) y lugares del catálogo con sus palabras clave, como los
+  nombran los clientes. Una carrera sin ubicación compartida se ubica así:
+  con nomenclatura («Calle 25 #18-40») primero el geocodificador; sin ella
+  («frente a la terminal») primero el catálogo, y queda con `pickup_source =
+  'catalogo'`. Las oleadas de cada zona ya se guardan de verdad. Prueba:
+  `src/test/e2e-catalogo.ts`.
+- **Outbox**: estados de entrega, reintentos y cola muerta. Ya no se ven en el
+  panel —la empresa dejó *Sistema* con solo Usuarios y Auditoría—, pero
+  la API reintenta igual, `/status` cuenta la cola muerta y
+  `GET /v1/admin/outbox` sigue disponible.
 - **Líneas de WhatsApp vigiladas**: un monitor pregunta a WAHA cada minuto.
   Una caída clara (FAILED, STOPPED, pide QR, la sesión desapareció) alerta en
   el acto; una dudosa (STARTING, WAHA sin contestar) solo si se repite en la

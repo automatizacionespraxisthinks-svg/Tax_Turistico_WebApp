@@ -3,17 +3,15 @@ import {
   GeoJSONSource,
   Map as MapLibreMap,
   NavigationControl,
-  addProtocol,
   type MapLayerMouseEvent,
 } from 'maplibre-gl';
-import { Protocol } from 'pmtiles';
 import type { FeatureCollection } from 'geojson';
 import { User } from 'lucide-react';
 import type { Driver, Ride } from '@tax/shared';
 import { DRIVER_STATUS_LABEL, RIDE_STATUS_LABEL, RIDE_STATUS_TONE } from '@tax/shared';
 import { cn } from '@tax/ui';
 import { useLive } from '../live/store';
-import { buildStyle, readPalette, token } from '../map/style';
+import { PAIPA_CENTER, TILES_URL, buildStyle, readPalette, registerPmtiles, token } from '../map/style';
 import 'maplibre-gl/dist/maplibre-gl.css';
 
 /**
@@ -29,19 +27,6 @@ import 'maplibre-gl/dist/maplibre-gl.css';
  * marcadores del DOM sería mover 62 nodos a la vez; así es un solo dibujo por
  * fotograma en la GPU.
  */
-
-const TILES_URL = import.meta.env.VITE_PMTILES_URL ?? '/tiles/paipa.pmtiles';
-
-const PAIPA_CENTER: [number, number] = [-73.1142, 5.7803];
-
-/** Una sola vez por página: registrar el protocolo dos veces lanza error. */
-let protocolRegistered = false;
-
-function registerPmtiles(): void {
-  if (protocolRegistered) return;
-  addProtocol('pmtiles', new Protocol().tile);
-  protocolRegistered = true;
-}
 
 /** Color de un tono del sistema de diseño, resuelto para MapLibre. */
 function toneColor(tone: string): string {

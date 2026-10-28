@@ -29,6 +29,11 @@ export const ERROR_CODES = {
   IDEMPOTENCY_MISMATCH: 'La misma clave de idempotencia con una petición distinta',
   IDEMPOTENCY_IN_PROGRESS: 'La misma petición todavía se está procesando',
 
+  /* Zonas y lugares creados desde el panel. */
+  ZONE_OVERLAP: 'La zona se monta sobre otra',
+  NAME_TAKEN: 'Ya existe otro con ese nombre',
+  KEYWORD_TAKEN: 'Esa palabra clave ya es de otro lugar',
+
   /*
    * Segundo factor (§8.1). Son tres situaciones distintas y el panel tiene
    * que ramificar por ellas: pedir el código, decir que no sirvió, o llevar
@@ -76,6 +81,10 @@ const STATUS_BY_CODE: Record<ErrorCode, HttpStatus> = {
   RATE_LIMITED: HttpStatus.TOO_MANY_REQUESTS,
   IDEMPOTENCY_MISMATCH: HttpStatus.CONFLICT,
   IDEMPOTENCY_IN_PROGRESS: HttpStatus.CONFLICT,
+
+  ZONE_OVERLAP: HttpStatus.CONFLICT,
+  NAME_TAKEN: HttpStatus.CONFLICT,
+  KEYWORD_TAKEN: HttpStatus.CONFLICT,
 
   TOTP_REQUIRED: HttpStatus.UNAUTHORIZED,
   TOTP_INVALID: HttpStatus.UNAUTHORIZED,

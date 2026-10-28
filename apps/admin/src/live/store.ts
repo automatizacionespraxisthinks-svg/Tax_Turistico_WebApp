@@ -191,6 +191,12 @@ function reportError(error: unknown): void {
 /* ------------------------------------------------------------ acciones --- */
 
 export const actions = {
+  /** Las zonas otra vez, después de crear una o cambiar sus oleadas. */
+  async refreshZones() {
+    const zones = await api.get<ApiZone[]>('/v1/admin/zones');
+    emit({ zones: zones.map(toZone) });
+  },
+
   /**
    * Recarga la flota.
    *

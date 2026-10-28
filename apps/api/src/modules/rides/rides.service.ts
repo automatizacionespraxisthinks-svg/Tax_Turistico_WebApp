@@ -2,7 +2,7 @@ import { Inject, Injectable, Logger, forwardRef } from '@nestjs/common';
 import { and, desc, eq, gt, inArray, isNull, sql } from 'drizzle-orm';
 import { uuidv7 } from 'uuidv7';
 import type { CreateRideInput, Point, RideStatus, TransitionActor } from '@tax/shared';
-import { canTransition, formatRideCode, haversineKm } from '@tax/shared';
+import { canTransition, formatRideCode, haversineKm, tieneNomenclatura } from '@tax/shared';
 import { DB, type Database, type Tx } from '../../db/db.module';
 import {
   customers,
@@ -19,6 +19,7 @@ import { OutboxService } from '../integrations/outbox.service';
 import { TrayectosService } from '../pricing/trayectos.service';
 import { GeocodingService } from '../pricing/geocoding.service';
 import { ZonesService } from '../pricing/zones.service';
+import { CatalogoService } from '../pricing/catalogo.service';
 import { DispatchService } from '../dispatch/dispatch.service';
 import { isUniqueViolation } from '../../common/pg-errors';
 import { RealtimeGateway } from '../../realtime/realtime.gateway';
@@ -70,6 +71,7 @@ export class RidesService {
     private readonly trayectos: TrayectosService,
     private readonly geocoding: GeocodingService,
     private readonly zones: ZonesService,
+    @Inject(CatalogoService) private readonly catalogo: CatalogoService,
     private readonly realtime: RealtimeGateway,
     private readonly fotos: FotosService,
     @Inject(forwardRef(() => DispatchService))
@@ -89,15 +91,41 @@ export class RidesService {
      * contra las zonas con servicio.
      */
     let point = input.pickup.point;
-    let pickupSource: 'compartida' | 'geocodificada' | 'sin_ubicar' = 'compartida';
+    let pickupSource: 'compartida' | 'catalogo' | 'geocodificada' | 'sin_ubicar' = 'compartida';
     let direccionResuelta: string | undefined;
 
-    if (!point) {
+    /*
+     * Sin ubicación compartida hay dos ayudas, y el orden depende de cómo lo
+     * dijo el cliente. Con nomenclatura («Calle 25 #18-40») manda el
+     * geocodificador, que llega a la puerta. Sin ella («frente a la
+     * terminal») manda el catálogo de lugares: sus palabras clave son como
+     * la gente de Paipa nombra los sitios, y el geocodificador no las conoce.
+     * La referencia también cuenta, porque es donde el cliente suele nombrar
+     * el lugar.
+     */
+    type Hallazgo = { point: Point; source: 'catalogo' | 'geocodificada'; direccion: string };
+    const delCatalogo = async (): Promise<Hallazgo | null> => {
+      const texto = [input.pickup.text, input.pickup.reference].filter(Boolean).join('. ');
+      const lugar = await this.catalogo.reconocer(texto);
+      return lugar ? { point: lugar.point, source: 'catalogo', direccion: lugar.name } : null;
+    };
+    const delGeocodificador = async (): Promise<Hallazgo | null> => {
       const hallada = await this.geocoding.resolve(input.pickup.text);
-      if (hallada) {
-        point = hallada.point;
-        pickupSource = 'geocodificada';
-        direccionResuelta = hallada.formatted;
+      return hallada ? { point: hallada.point, source: 'geocodificada', direccion: hallada.formatted } : null;
+    };
+
+    if (!point) {
+      const ayudas = tieneNomenclatura(input.pickup.text)
+        ? [delGeocodificador, delCatalogo]
+        : [delCatalogo, delGeocodificador];
+      for (const ayuda of ayudas) {
+        const hallazgo = await ayuda();
+        if (hallazgo) {
+          point = hallazgo.point;
+          pickupSource = hallazgo.source;
+          direccionResuelta = hallazgo.direccion;
+          break;
+        }
       }
     }
 

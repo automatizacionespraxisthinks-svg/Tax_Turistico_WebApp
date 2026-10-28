@@ -80,8 +80,10 @@ export const rides = pgTable(
      * geocodificador, y esa puede quedarse en la calle sin el numero. Cuando
      * un conductor dice que el cliente no estaba ahi, esta columna es la
      * diferencia entre buscar el fallo en el GPS o en la direccion.
+     * `catalogo` es un lugar del catalogo reconocido por sus palabras clave
+     * («frente a la terminal»): el punto es el del lugar, no el de la puerta.
      */
-    pickupSource: text('pickup_source').$type<'compartida' | 'geocodificada' | 'sin_ubicar'>(),
+    pickupSource: text('pickup_source').$type<'compartida' | 'catalogo' | 'geocodificada' | 'sin_ubicar'>(),
     dropoffText: text('dropoff_text'),
     dropoffLat: doublePrecision('dropoff_lat'),
     dropoffLng: doublePrecision('dropoff_lng'),

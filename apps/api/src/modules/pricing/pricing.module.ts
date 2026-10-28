@@ -2,6 +2,7 @@ import { Module } from '@nestjs/common';
 import { ZonesService } from './zones.service';
 import { TrayectosService } from './trayectos.service';
 import { GeocodingService } from './geocoding.service';
+import { CatalogoService } from './catalogo.service';
 import { AdminPricingController, PricingController } from './pricing.controller';
 
 /**
@@ -13,8 +14,8 @@ import { AdminPricingController, PricingController } from './pricing.controller'
  * empresa no las maneja desde el sistema.
  */
 @Module({
-  providers: [ZonesService, TrayectosService, GeocodingService],
+  providers: [ZonesService, TrayectosService, GeocodingService, CatalogoService],
   controllers: [PricingController, AdminPricingController],
-  exports: [ZonesService, TrayectosService, GeocodingService],
+  exports: [ZonesService, TrayectosService, GeocodingService, CatalogoService],
 })
 export class PricingModule {}

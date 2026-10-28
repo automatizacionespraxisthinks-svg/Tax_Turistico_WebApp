@@ -20,11 +20,12 @@ export type Phase =
 /**
  * De dónde salió el punto de recogida, tal como lo guarda la API.
  *
- * `compartida` es la ubicación que mandó el cliente, exacta. `geocodificada`
+ * `compartida` es la ubicación que mandó el cliente, exacta. `catalogo` es un
+ * lugar conocido de Paipa que el cliente nombró («la terminal»). `geocodificada`
  * es una dirección escrita que el geocodificador resolvió, y puede quedarse
  * en la calle sin el número. `sin_ubicar` es una dirección que no resolvió.
  */
-export type OrigenDelPunto = 'compartida' | 'geocodificada' | 'sin_ubicar';
+export type OrigenDelPunto = 'compartida' | 'catalogo' | 'geocodificada' | 'sin_ubicar';
 
 export interface OfferedRide {
   /** Identificador de la carrera: es lo que apuntan los comandos. */

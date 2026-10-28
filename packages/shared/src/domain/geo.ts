@@ -56,6 +56,38 @@ export function haversineKm(a: Point, b: Point): number {
   return 2 * EARTH_RADIUS_KM * Math.asin(Math.sqrt(h));
 }
 
+/**
+ * Círculo alrededor de un punto, como polígono GeoJSON (lng, lat) de `lados`
+ * lados, en sentido contrario a las agujas del reloj (RFC 7946).
+ *
+ * Las zonas son círculos guardados como polígonos: así el despacho, el mapa y
+ * la búsqueda de zona usan la misma geometría de siempre. La misma función
+ * dibuja la vista previa en el panel y crea la zona en la API, de modo que lo
+ * que se ve al crearla es exactamente lo que se guarda. Con 64 lados el borde
+ * se aparta del círculo verdadero menos de un 0,2 %.
+ */
+export function poligonoCircular(lat: number, lng: number, radioKm: number, lados = 64) {
+  // El radio medio de la Tierra de la IUGG; la migración 0014 se generó con él.
+  const dLat = (radioKm / 6371.0088) * (180 / Math.PI);
+  const dLng = dLat / Math.cos((lat * Math.PI) / 180);
+  const redondear = (n: number) => Math.round(n * 1e6) / 1e6;
+  const anillo = Array.from({ length: lados }, (_, i): [number, number] => {
+    const t = (2 * Math.PI * i) / lados;
+    return [redondear(lng + dLng * Math.cos(t)), redondear(lat + dLat * Math.sin(t))];
+  });
+  anillo.push(anillo[0]!);
+  return { type: 'Polygon' as const, coordinates: [anillo] };
+}
+
+/**
+ * Si dos polígonos se tocan: algún vértice de uno cae dentro del otro. Con
+ * zonas circulares de 64 lados basta para no dejar crear una zona encima de
+ * otra, que haría ambiguo en cuál cae un punto.
+ */
+export function poligonosSeTocan(a: Point[], b: Point[]): boolean {
+  return a.some((p) => pointInPolygon(p, b)) || b.some((p) => pointInPolygon(p, a));
+}
+
 /** Punto en polígono (ray casting), equivalente al booleanPointInPolygon de Turf. */
 export function pointInPolygon(point: Point, polygon: Point[]): boolean {
   let inside = false;
