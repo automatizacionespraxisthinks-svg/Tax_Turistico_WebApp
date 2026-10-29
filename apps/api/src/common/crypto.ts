@@ -73,6 +73,19 @@ export function verifyWebhook(
   return safeEqual(signWebhook(secret, timestamp, body), signature);
 }
 
+/**
+ * Huella de un documento de identidad: HMAC-SHA256 con la clave de cifrado.
+ *
+ * El cifrado AES-GCM da otro texto cada vez, así que no sirve para buscar a
+ * la misma persona. Esta huella sí: siempre la misma para la misma cédula, y
+ * sin la clave no se puede recorrer el espacio de cédulas para adivinarla.
+ */
+export function documentHash(keyHex: string, documento: string): string {
+  return createHmac('sha256', Buffer.from(keyHex, 'hex'))
+    .update(`documento:${documento.replace(/\D/g, '')}`)
+    .digest('hex');
+}
+
 /* ------------------------------------------------- cifrado de columnas --- */
 
 const IV_BYTES = 12;

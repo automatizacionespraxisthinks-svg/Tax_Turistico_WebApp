@@ -11,6 +11,16 @@ export interface Vehicle {
   active: boolean;
 }
 
+export interface MovilVinculado {
+  /** El número del móvil en la empresa: «002». */
+  interno?: string;
+  placa: string;
+  marca?: string;
+  modelo?: number;
+  rol: 'conductor' | 'relevador';
+  activo: boolean;
+}
+
 export interface Driver {
   id: string;
   /** Código interno del conductor; junto con placa y PIN forma el acceso (§8.1). */
@@ -27,6 +37,11 @@ export interface Driver {
   active: boolean;
   /** Cuenta con la que el equipo prueba; Reportes la puede dejar fuera. */
   esPrueba?: boolean;
+  /** Del listado maestro: vencimiento de la licencia (`AAAA-MM-DD`) y su restricción. */
+  licenciaVence?: string;
+  licenciaRestriccion?: string;
+  /** Los móviles a los que está vinculado, como conductor o relevador. */
+  moviles?: MovilVinculado[];
   shiftStartedAt?: string;
   ridesToday: number;
   acceptanceRate: number;

@@ -6,17 +6,30 @@ import type { Point, VehicleType } from '@tax/shared';
 import { estimateEtaMinutes, haversineKm } from '@tax/shared';
 import { DB, type Database } from '../../db/db.module';
 import { REDIS, redisKeys } from '../../redis/redis.module';
-import { driverDevices, driverPositions, driverShifts, drivers, vehicles } from '../../db/schema';
+import { driverDevices, driverPositions, driverShifts, drivers, vehicleDrivers, vehicles } from '../../db/schema';
 import { AppError } from '../../common/problem';
 import { loadEnv } from '../../config/env';
 import { ZonesService } from '../pricing/zones.service';
 import { isUniqueViolation } from '../../common/pg-errors';
 
+/** Un móvil al que está vinculado un conductor, según el listado maestro. */
+export interface MovilVinculado {
+  internalNumber: string | null;
+  plate: string;
+  brand: string | null;
+  modelYear: number | null;
+  role: 'conductor' | 'relevador';
+  active: boolean;
+}
+
 export interface DriverWithPosition {
   id: string;
   code: string;
   name: string;
-  phone: string;
+  phone: string | null;
+  licenseExpiresOn: string | null;
+  licenseRestriction: string | null;
+  moviles: MovilVinculado[];
   status: string;
   active: boolean;
   esPrueba: boolean;
@@ -453,6 +466,8 @@ export class FleetService {
         code: drivers.code,
         name: drivers.name,
         phone: drivers.phone,
+        licenseExpiresOn: drivers.licenseExpiresOn,
+        licenseRestriction: drivers.licenseRestriction,
         status: drivers.status,
         active: drivers.active,
         esPrueba: drivers.esPrueba,
@@ -493,6 +508,26 @@ export class FleetService {
       .where(and(inArray(driverDevices.driverId, ids), isNull(driverDevices.revokedAt)));
     const registrados = new Set(conDispositivo.map((row) => row.driverId));
 
+    // Los móviles de cada uno, del listado maestro: una consulta para todos.
+    const vinculos = await this.db
+      .select({
+        driverId: vehicleDrivers.driverId,
+        role: vehicleDrivers.role,
+        internalNumber: vehicles.internalNumber,
+        plate: vehicles.plate,
+        brand: vehicles.brand,
+        modelYear: vehicles.modelYear,
+        active: vehicles.active,
+      })
+      .from(vehicleDrivers)
+      .innerJoin(vehicles, eq(vehicles.id, vehicleDrivers.vehicleId))
+      .where(inArray(vehicleDrivers.driverId, ids))
+      .orderBy(vehicles.internalNumber);
+    const movilesDe = new Map<string, MovilVinculado[]>();
+    for (const { driverId, ...movil } of vinculos) {
+      movilesDe.set(driverId, [...(movilesDe.get(driverId) ?? []), movil]);
+    }
+
     const now = Date.now();
 
     return rows.map((row, index) => {
@@ -501,6 +536,7 @@ export class FleetService {
 
       return {
         ...row,
+        moviles: movilesDe.get(row.id) ?? [],
         deviceRegistered: registrados.has(row.id),
         position:
           position && position[0] && position[1]

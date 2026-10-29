@@ -161,6 +161,14 @@ El panel no inventa acciones: cada botón sale de la tabla de transiciones.
   («frente a la terminal») primero el catálogo, y queda con `pickup_source =
   'catalogo'`. Las oleadas de cada zona ya se guardan de verdad. Prueba:
   `src/test/e2e-catalogo.ts`.
+- **Listado maestro**: `cli/importar-listado-maestro.ts` carga el Excel de la
+  empresa (hoja «Taxis»): móviles con su número interno, ficha y propietario
+  (cédula cifrada), conductores y relevadores con licencia y restricción, y
+  quién maneja cada uno (`vehicle_drivers`). Simula por defecto; con
+  `--aplicar` guarda y reparte PIN. Se repite cada mes sin duplicar: a la
+  persona se la reconoce por `document_hash`, un HMAC de la cédula. Cómo
+  correrlo en el servidor: DESPLIEGUE §4.4. Pruebas: `listado-maestro.spec.ts`
+  y `e2e-listado-maestro.ts`, con un Excel de mentira.
 - **Outbox**: estados de entrega, reintentos y cola muerta. Ya no se ven en el
   panel —la empresa dejó *Sistema* con solo Usuarios y Auditoría—, pero
   la API reintenta igual, `/status` cuenta la cola muerta y

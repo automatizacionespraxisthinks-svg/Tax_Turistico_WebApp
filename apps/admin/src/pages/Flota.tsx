@@ -2,7 +2,7 @@ import { useMemo, useState } from 'react';
 import type { ReactNode } from 'react';
 import { AnimatePresence, motion } from 'motion/react';
 import { Car, Search, ShieldAlert, SignalLow } from 'lucide-react';
-import type { Driver } from '@tax/shared';
+import type { Driver, MovilVinculado } from '@tax/shared';
 import {
   DRIVER_STATUS_LABEL,
   DRIVER_STATUS_TONE,
@@ -43,6 +43,7 @@ const FILTERS: { value: Filter; label: string; match: (d: Driver) => boolean }[]
     match: (d) =>
       !d.deviceRegistered ||
       !d.vehicle.active ||
+      Boolean(estadoLicencia(d.licenciaVence).alerta) ||
       (d.status !== 'OFF_SHIFT' && (d.positionAgeSeconds ?? 0) > 60),
   },
   { value: 'todos', label: 'Todos', match: () => true },
@@ -80,7 +81,8 @@ export function Flota() {
           !needle ||
           d.name.toLowerCase().includes(needle) ||
           d.code.includes(needle) ||
-          d.vehicle.plate.toLowerCase().includes(needle),
+          d.vehicle.plate.toLowerCase().includes(needle) ||
+          (d.moviles ?? []).some((m) => m.placa.toLowerCase().includes(needle) || m.interno?.includes(needle)),
       )
       .sort((a, b) => Number(b.status !== 'OFF_SHIFT') - Number(a.status !== 'OFF_SHIFT'));
   }, [drivers, active, query]);
@@ -155,7 +157,7 @@ export function Flota() {
         open={selected !== null}
         onClose={() => setSelectedId(null)}
         title={selected?.name ?? ''}
-        subtitle={selected ? `Código ${selected.code} · ${selected.vehicle.plate}` : undefined}
+        subtitle={selected ? `Código ${selected.code} · ${vehiculoDe(selected)}` : undefined}
       >
         {selected ? (
           <div className="space-y-5">
@@ -170,6 +172,7 @@ export function Flota() {
 
 function DriverCard({ driver, onClick }: { driver: Driver; onClick: () => void }) {
   const stale = driver.status !== 'OFF_SHIFT' && (driver.positionAgeSeconds ?? 0) > 60;
+  const licencia = estadoLicencia(driver.licenciaVence);
 
   return (
     <motion.button
@@ -189,7 +192,7 @@ function DriverCard({ driver, onClick }: { driver: Driver; onClick: () => void }
         <div className="min-w-0">
           <p className="truncate text-base font-medium text-ink">{driver.name}</p>
           <p className="text-micro text-ink-muted">
-            Código {driver.code} · {driver.vehicle.plate} · {driver.vehicle.type}
+            Código {driver.code} · {vehiculoDe(driver)}
           </p>
         </div>
         <StatusPill
@@ -208,11 +211,12 @@ function DriverCard({ driver, onClick }: { driver: Driver; onClick: () => void }
         ) : null}
       </div>
 
-      {(stale || !driver.deviceRegistered || !driver.vehicle.active) && (
+      {(stale || !driver.deviceRegistered || !driver.vehicle.active || licencia.alerta) && (
         <div className="mt-2.5 flex flex-wrap gap-1.5">
           {stale ? <Alert>Sin GPS reciente</Alert> : null}
           {!driver.deviceRegistered ? <Alert>Dispositivo sin registrar</Alert> : null}
           {!driver.vehicle.active ? <Alert>Vehículo inactivo</Alert> : null}
+          {licencia.alerta ? <Alert>{licencia.alerta}</Alert> : null}
         </div>
       )}
     </motion.button>
@@ -249,7 +253,7 @@ function DriverDetail({ driver, rideCode }: { driver: Driver; rideCode?: string 
 
       <div className="grid grid-cols-2 gap-4">
         <Meta label="Teléfono" mono>
-          {maskPhone(driver.phone)}
+          {driver.phone ? maskPhone(driver.phone) : 'Sin celular registrado'}
         </Meta>
         <Meta label="Placa" mono>
           {driver.vehicle.plate}
@@ -284,6 +288,8 @@ function DriverDetail({ driver, rideCode }: { driver: Driver; rideCode?: string 
         </div>
       </div>
 
+      <Vinculacion driver={driver} />
+
       <div>
         <SectionLabel>Seguridad</SectionLabel>
         <div className="mt-2 space-y-1.5 rounded-md border border-line p-3 text-base">
@@ -300,6 +306,59 @@ function Row({ label, children }: { label: string; children: ReactNode }) {
     <div className="flex items-baseline justify-between gap-3">
       <span className="text-caption text-ink-muted">{label}</span>
       <span className="text-ink">{children}</span>
+    </div>
+  );
+}
+
+/* ------------------------------------------------------- listado maestro --- */
+
+/** En turno, el taxi con que salió; si no, su móvil del listado maestro. */
+function vehiculoDe(driver: Driver): string {
+  if (driver.status !== 'OFF_SHIFT' && driver.vehicle.plate !== '—') return `${driver.vehicle.plate} · ${driver.vehicle.type}`;
+  const movil = driver.moviles?.find((m) => m.rol === 'conductor') ?? driver.moviles?.[0];
+  return movil ? `${movil.interno ? `Móvil ${movil.interno} · ` : ''}${movil.placa}` : 'Sin móvil vinculado';
+}
+
+const fechaCorta = (dia: string) =>
+  new Date(`${dia}T12:00:00Z`).toLocaleDateString('es-CO', { day: 'numeric', month: 'short', year: 'numeric', timeZone: 'UTC' });
+
+/**
+ * La licencia, como la mira la oficina: vencida, por vencer en el mes, o al
+ * día. Solo avisa; no impide trabajar, que eso lo decide la empresa.
+ */
+function estadoLicencia(vence?: string): { texto: string; alerta?: string } {
+  if (!vence) return { texto: 'Sin dato en el listado' };
+  const dias = Math.floor((Date.parse(`${vence}T23:59:59-05:00`) - Date.now()) / 86_400_000);
+  if (dias < 0) return { texto: `Vencida desde el ${fechaCorta(vence)}`, alerta: 'Licencia vencida' };
+  if (dias <= 30) {
+    return { texto: `Vence el ${fechaCorta(vence)}`, alerta: dias === 0 ? 'Licencia vence hoy' : `Licencia vence en ${dias} días` };
+  }
+  return { texto: `Al día, vence el ${fechaCorta(vence)}` };
+}
+
+function Vinculacion({ driver }: { driver: Driver }) {
+  const licencia = estadoLicencia(driver.licenciaVence);
+  const moviles: MovilVinculado[] = driver.moviles ?? [];
+  return (
+    <div>
+      <SectionLabel>Vinculación con la empresa</SectionLabel>
+      <div className="mt-2 space-y-1.5 rounded-md border border-line p-3 text-base">
+        {moviles.length ? (
+          moviles.map((m) => (
+            <Row key={m.placa} label={m.rol === 'conductor' ? 'Conductor del móvil' : 'Relevador del móvil'}>
+              <span className="font-mono">{m.interno ?? '—'}</span> · <span className="font-mono">{m.placa}</span>
+              {m.marca ? ` · ${m.marca}${m.modelo ? ` ${m.modelo}` : ''}` : ''}
+              {!m.activo ? ' · inactivo' : ''}
+            </Row>
+          ))
+        ) : (
+          <p className="text-ink-muted">Sin móvil en el listado maestro.</p>
+        )}
+        <Row label="Licencia">
+          <span className={licencia.alerta ? 'text-[var(--t-warning-ink)]' : undefined}>{licencia.texto}</span>
+        </Row>
+        {driver.licenciaRestriccion ? <Row label="Restricción">{driver.licenciaRestriccion}</Row> : null}
+      </div>
     </div>
   );
 }

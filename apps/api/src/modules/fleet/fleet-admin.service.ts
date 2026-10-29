@@ -135,7 +135,7 @@ export class FleetAdminService {
   /** Cambia nombre, teléfono, si sigue trabajando o si es una cuenta de prueba. */
   async updateDriver(
     driverId: string,
-    cambios: { name?: string; phone?: string; active?: boolean; esPrueba?: boolean },
+    cambios: { name?: string; phone?: string | null; active?: boolean; esPrueba?: boolean },
     actor: AdminActor,
   ): Promise<void> {
     const [antes] = await this.db

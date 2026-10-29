@@ -465,7 +465,13 @@ export class DispatchService {
          * la asignación) y la que explica quién tomó la carrera.
          */
         const driver = await tx
-          .select({ name: drivers.name, code: drivers.code, plate: vehicles.plate, vehicleType: vehicles.type })
+          .select({
+            name: drivers.name,
+            code: drivers.code,
+            plate: vehicles.plate,
+            vehicleType: vehicles.type,
+            movil: vehicles.internalNumber,
+          })
           .from(drivers)
           .leftJoin(rides, eq(rides.id, rideId))
           .leftJoin(vehicles, eq(vehicles.id, rides.vehicleId))
@@ -540,6 +546,8 @@ export class DispatchService {
                 name: driver[0]?.name ?? null,
                 plate: driver[0]?.plate ?? null,
                 vehicleType: driver[0]?.vehicleType ?? null,
+                // El número del móvil en la empresa («002»), si el taxi lo tiene.
+                movil: driver[0]?.movil ?? null,
               },
             },
           }),

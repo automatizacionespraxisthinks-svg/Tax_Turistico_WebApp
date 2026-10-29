@@ -513,6 +513,49 @@ a todo lo demás hasta que el alta esté hecha.
 Sin esto nadie puede entrar a la PWA: el sembrado de producción no crea
 conductores a propósito.
 
+**Todos de una vez, desde el listado maestro** (el Excel «Listado Maestro»
+de la empresa, hoja «Taxis»). El script crea los móviles con su ficha y su
+propietario, los conductores y relevadores con su licencia, y quién maneja
+cada móvil. Por defecto **simula**: hace todo, lo deshace e informa.
+
+Desde tu computador, sube el Excel al VPS y pásaselo al contenedor por la
+entrada estándar (el `-`), sin copiarlo dentro:
+
+```bash
+scp "Listado Maestro.xlsx" root@tu-vps:/root/listado.xlsx
+ssh root@tu-vps
+API=$(docker ps --filter name=tax-api -q | head -1)
+docker exec -i "$API" node dist/cli/importar-listado-maestro.js - < /root/listado.xlsx
+```
+
+Lee el informe: cuántos móviles y conductores crearía, quién queda sin
+celular, los avisos del Excel. Si está bien, repítelo con `--aplicar`; los
+PIN de los nuevos salen en pantalla **una sola vez**, y con `--pines` además
+en un CSV dentro del contenedor, que sacas y borras:
+
+```bash
+docker exec -i "$API" node dist/cli/importar-listado-maestro.js - --aplicar --pines=/tmp/pines.csv < /root/listado.xlsx
+docker cp "$API":/tmp/pines.csv ./pines.csv && docker exec "$API" rm /tmp/pines.csv
+rm /root/listado.xlsx   # lleva cédulas: no lo dejes en el servidor
+```
+
+- Los códigos son consecutivos desde **101** (`--desde=` cambia el inicio) y
+  se saltan los ya usados. Son de la persona, no del taxi: si cambia de
+  móvil, conserva el suyo. El número interno del móvil va aparte y llega a
+  n8n en `ride.assigned` como `data.driver.movil`.
+- **Se puede repetir con el Excel de cada mes.** Al móvil se le reconoce por
+  su número interno y a la persona por la huella de su cédula: lo que ya
+  está se actualiza (celular, licencia, propietario, quién maneja qué), y
+  nadie pierde su código ni su PIN.
+- Lo que está en la base y ya no en el Excel solo se informa. Con
+  `--desactivar-ausentes` se desactiva: hazlo cuando estés seguro de que no
+  falta una fila por error.
+- Un número interno o una placa repetidos en el Excel detienen la carga.
+- Las cédulas se guardan cifradas; la bitácora registra la carga con códigos
+  y números internos, nunca cédulas ni PIN.
+
+**Uno por uno**, para un conductor que entra a mitad de mes:
+
 ```bash
 node dist/cli/crear-conductor.js 101 "Jairo Pérez" +573118889900 UBP472 sedan
 ```
@@ -527,7 +570,10 @@ código circula entre compañeros y la placa es pública, así que el PIN es lo
 bloqueo a los cinco intentos fallidos.
 
 La relación conductor-vehículo es por turno, no fija (§6): puede abrir turno
-con cualquier placa dada de alta, no solo con la suya.
+con cualquier placa dada de alta, no solo con la suya. El vínculo del listado
+maestro (conductor o relevador de un móvil) es lo que ve la oficina en
+*Flota*; no restringe con qué taxi se abre turno, salvo que el móvil esté
+inactivo.
 
 ### 4.5 Emite la clave de API para n8n
 

@@ -85,10 +85,21 @@ export interface ApiDriver {
   id: string;
   code: string;
   name: string;
-  phone: string;
+  /** Nulo si el listado maestro no lo trae. */
+  phone: string | null;
   status: DriverStatus;
   active: boolean;
   esPrueba?: boolean;
+  licenseExpiresOn?: string | null;
+  licenseRestriction?: string | null;
+  moviles?: {
+    internalNumber: string | null;
+    plate: string;
+    brand: string | null;
+    modelYear: number | null;
+    role: 'conductor' | 'relevador';
+    active: boolean;
+  }[];
   deviceRegistered: boolean;
   shiftStartedAt: string | null;
   plate: string | null;
@@ -211,15 +222,25 @@ export function toDriver(row: ApiDriver): Driver {
     id: row.id,
     code: row.code,
     name: row.name,
-    phone: row.phone,
+    phone: row.phone ?? '',
     status: row.status,
     active: row.active,
     esPrueba: row.esPrueba ?? false,
+    licenciaVence: row.licenseExpiresOn ?? undefined,
+    licenciaRestriccion: row.licenseRestriction ?? undefined,
+    moviles: (row.moviles ?? []).map((m) => ({
+      interno: m.internalNumber ?? undefined,
+      placa: m.plate,
+      marca: m.brand ?? undefined,
+      modelo: m.modelYear ?? undefined,
+      rol: m.role,
+      activo: m.active,
+    })),
     vehicle: {
       plate: row.plate ?? '—',
       type: row.vehicleType ?? 'sedan',
       capacity: row.capacity ?? 4,
-      active: row.vehicleActive ?? false,
+      active: row.vehicleActive ?? true,
     },
     position: row.position,
     positionAgeSeconds: row.positionAgeSeconds,

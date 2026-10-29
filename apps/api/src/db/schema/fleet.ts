@@ -1,6 +1,7 @@
 import { relations, sql } from 'drizzle-orm';
 import {
   boolean,
+  date,
   doublePrecision,
   index,
   integer,
@@ -24,7 +25,19 @@ export const drivers = pgTable(
     /** Documento cifrado a nivel de aplicación: el disco del VPS no se
         puede cifrar en Hetzner Cloud (§8.2). */
     documentEncrypted: text('document_encrypted'),
-    phone: text('phone').notNull(),
+    /**
+     * HMAC del documento, para reconocer a la misma persona sin descifrar
+     * nada: el cifrado da otro texto cada vez, así que no sirve para buscar.
+     * Con él la carga del listado maestro actualiza en vez de duplicar.
+     */
+    documentHash: text('document_hash'),
+    /** Puede faltar: hay conductores vinculados sin celular conocido, y para
+        entrar a la PWA no hace falta. */
+    phone: text('phone'),
+    /** Vencimiento de la licencia de conducción, del listado maestro. */
+    licenseExpiresOn: date('license_expires_on', { mode: 'string' }),
+    /** Restricción de la licencia («Conducir con lentes»); nula si no tiene. */
+    licenseRestriction: text('license_restriction'),
     pinHash: text('pin_hash').notNull(),
     status: driverStatus('status').notNull().default('OFF_SHIFT'),
     active: boolean('active').notNull().default(true),
@@ -42,6 +55,7 @@ export const drivers = pgTable(
   },
   (table) => [
     uniqueIndex('drivers_code_key').on(table.code),
+    uniqueIndex('drivers_document_hash_key').on(table.documentHash),
     index('drivers_status_idx').on(table.status),
   ],
 );
@@ -51,12 +65,59 @@ export const vehicles = pgTable(
   {
     id: uuid('id').primaryKey(),
     plate: text('plate').notNull(),
+    /** El número del móvil en la empresa («002»): así lo conocen conductores y clientes. */
+    internalNumber: text('internal_number'),
     type: vehicleType('type').notNull().default('sedan'),
+    /** Pasajeros, sin contar al conductor. */
     capacity: integer('capacity').notNull().default(4),
     active: boolean('active').notNull().default(true),
+    /* La ficha del vehículo, tal como la trae el listado maestro. */
+    brand: text('brand'),
+    /** Año del modelo. */
+    modelYear: integer('model_year'),
+    fuel: text('fuel'),
+    engineNumber: text('engine_number'),
+    chassisNumber: text('chassis_number'),
+    weightKg: integer('weight_kg'),
+    registeredOn: date('registered_on', { mode: 'string' }),
+    /** El propietario: a quién se llama por el taxi. La cédula va cifrada (§8.2). */
+    ownerName: text('owner_name'),
+    ownerDocumentEncrypted: text('owner_document_encrypted'),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    uniqueIndex('vehicles_plate_key').on(table.plate),
+    uniqueIndex('vehicles_internal_number_key').on(table.internalNumber),
+  ],
+);
+
+/**
+ * Quién maneja cada móvil según el listado maestro: su conductor y sus
+ * relevadores.
+ *
+ * Es el vínculo con la empresa, no el turno: el turno sigue diciendo con qué
+ * taxi salió alguien hoy (§6), y un conductor puede abrirlo con otro taxi si
+ * hace falta. Esto es lo que la oficina consulta para saber de quién es cada
+ * móvil.
+ */
+export const vehicleDrivers = pgTable(
+  'vehicle_drivers',
+  {
+    id: uuid('id').primaryKey(),
+    vehicleId: uuid('vehicle_id')
+      .notNull()
+      .references(() => vehicles.id, { onDelete: 'cascade' }),
+    driverId: uuid('driver_id')
+      .notNull()
+      .references(() => drivers.id, { onDelete: 'cascade' }),
+    role: text('role').$type<'conductor' | 'relevador'>().notNull(),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   },
-  (table) => [uniqueIndex('vehicles_plate_key').on(table.plate)],
+  (table) => [
+    uniqueIndex('vehicle_drivers_key').on(table.vehicleId, table.driverId),
+    index('vehicle_drivers_driver_idx').on(table.driverId),
+  ],
 );
 
 /**

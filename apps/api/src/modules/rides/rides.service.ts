@@ -563,7 +563,13 @@ export class RidesService {
      */
     const [driver] = row.ride.driverId
       ? await this.db
-          .select({ id: drivers.id, code: drivers.code, name: drivers.name, plate: vehicles.plate })
+          .select({
+            id: drivers.id,
+            code: drivers.code,
+            name: drivers.name,
+            plate: vehicles.plate,
+            movil: vehicles.internalNumber,
+          })
           .from(drivers)
           .leftJoin(vehicles, eq(vehicles.id, sql`${row.ride.vehicleId}::uuid`))
           .where(eq(drivers.id, row.ride.driverId))
