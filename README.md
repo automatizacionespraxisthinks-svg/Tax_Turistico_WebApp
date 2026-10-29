@@ -168,7 +168,11 @@ El panel no inventa acciones: cada botón sale de la tabla de transiciones.
   `--aplicar` guarda y reparte PIN. Se repite cada mes sin duplicar: a la
   persona se la reconoce por `document_hash`, un HMAC de la cédula. Cómo
   correrlo en el servidor: DESPLIEGUE §4.4. Pruebas: `listado-maestro.spec.ts`
-  y `e2e-listado-maestro.ts`, con un Excel de mentira.
+  y `e2e-listado-maestro.ts`, con un Excel de mentira. Para cargarlo desde un
+  cliente de PostgreSQL, `cli/generar-sql-listado-maestro.ts` convierte el
+  Excel en un `.sql` equivalente: huella HMAC calculada en Postgres con la
+  clave que pega quien lo ejecuta, PIN ya hasheados con Argon2 y la entrada
+  de la bitácora encadenada igual que la API.
 - **Outbox**: estados de entrega, reintentos y cola muerta. Ya no se ven en el
   panel —la empresa dejó *Sistema* con solo Usuarios y Auditoría—, pero
   la API reintenta igual, `/status` cuenta la cola muerta y

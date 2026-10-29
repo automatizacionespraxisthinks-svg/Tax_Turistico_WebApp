@@ -239,6 +239,7 @@ export class ImportacionService {
         name: drivers.name,
         phone: drivers.phone,
         documentHash: drivers.documentHash,
+        documentEncrypted: drivers.documentEncrypted,
         licenseExpiresOn: drivers.licenseExpiresOn,
         licenseRestriction: drivers.licenseRestriction,
         active: drivers.active,
@@ -301,7 +302,11 @@ export class ImportacionService {
       if (datos.celular && actual.phone !== datos.celular) campos.push('celular');
       if (!igual(actual.licenseExpiresOn, datos.licenciaVence)) campos.push('vencimiento de licencia');
       if (!igual(actual.licenseRestriction, datos.restriccion)) campos.push('restricción');
+      // Cargados con el script SQL: tienen huella pero no la cédula cifrada,
+      // porque Postgres no cifra con AES-GCM. Aquí se completa.
+      const sinCedula = !adoptado && !actual.documentEncrypted;
       if (adoptado) campos.push('cédula');
+      if (sinCedula) campos.push('cédula cifrada');
 
       if (campos.length) {
         await tx
@@ -311,7 +316,7 @@ export class ImportacionService {
             ...(datos.celular ? { phone: datos.celular } : {}),
             licenseExpiresOn: datos.licenciaVence,
             licenseRestriction: datos.restriccion,
-            ...(adoptado ? { documentEncrypted: encryptColumn(clave, cedula), documentHash: huella } : {}),
+            ...(adoptado || sinCedula ? { documentEncrypted: encryptColumn(clave, cedula), documentHash: huella } : {}),
             updatedAt: new Date(),
           })
           .where(eq(drivers.id, actual.id));

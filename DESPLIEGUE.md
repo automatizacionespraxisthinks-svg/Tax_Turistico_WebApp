@@ -524,9 +524,17 @@ entrada estándar (el `-`), sin copiarlo dentro:
 ```bash
 scp "Listado Maestro.xlsx" root@tu-vps:/root/listado.xlsx
 ssh root@tu-vps
-API=$(docker ps --filter name=tax-api -q | head -1)
+# Dokploy llama al contenedor «tax-turistico-api-…» y le cambia el sufijo en
+# cada despliegue: se busca por nombre en vez de copiarlo.
+API=$(docker ps --filter name=tax-turistico-api -q | head -1)
 docker exec -i "$API" node dist/cli/importar-listado-maestro.js - < /root/listado.xlsx
 ```
+
+Se ejecuta **en el VPS, no dentro del contenedor**: el `<` lo resuelve la
+consola donde se escribe, y el Excel está en el VPS. Desde la consola del
+contenedor (`docker exec -it … sh`) sale «Permission denied», porque allí
+`/root` es otra carpeta y el usuario de la app no puede leerla. Va con `-i` y
+sin `-t`: con `-t` el archivo llega estropeado.
 
 Lee el informe: cuántos móviles y conductores crearía, quién queda sin
 celular, los avisos del Excel. Si está bien, repítelo con `--aplicar`; los
@@ -553,6 +561,31 @@ rm /root/listado.xlsx   # lleva cédulas: no lo dejes en el servidor
 - Un número interno o una placa repetidos en el Excel detienen la carga.
 - Las cédulas se guardan cifradas; la bitácora registra la carga con códigos
   y números internos, nunca cédulas ni PIN.
+
+**O con un script SQL, desde un cliente de PostgreSQL** (DBeaver, pgAdmin,
+psql), sin entrar al contenedor. Se genera en tu computador a partir del
+Excel:
+
+```bash
+node dist/cli/generar-sql-listado-maestro.js "Listado Maestro.xlsx" carga.sql
+```
+
+El `.sql` hace lo mismo que el comando de arriba, en una sola transacción:
+en la línea marcada con `>>>` se pega la `ENCRYPTION_KEY` de tax-api (con ella
+Postgres calcula la huella de cada cédula), se ejecuta entero contra la base
+`tax`, y al final muestra el resumen, los PIN de los nuevos y lo que está en
+la base pero no en el Excel. Para probar, se cambia el `commit;` final por
+`rollback;`. Diferencias con el comando:
+
+- Los PIN se sortean y se pasan por Argon2 al generar el archivo, porque
+  Postgres no tiene Argon2: **el `.sql` trae los PIN**, y se borra al
+  entregarlos.
+- La cédula cifrada queda vacía, porque Postgres no cifra con AES-GCM como la
+  app. La huella basta para reconocer a cada persona; si luego se corre una
+  vez el comando `importar-listado-maestro --aplicar`, completa las cédulas
+  cifradas de los conductores y de los propietarios.
+- La entrada de la bitácora la escribe el propio script, con el mismo
+  encadenado de hashes que la API.
 
 **Uno por uno**, para un conductor que entra a mitad de mes:
 
