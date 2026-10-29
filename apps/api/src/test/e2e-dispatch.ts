@@ -10,7 +10,8 @@ import { Pool } from 'pg';
  * demás reciben «carrera ya tomada».
  *
  * Para finalizar adelanta en la base la hora de abordaje: no se puede cerrar
- * una carrera antes de diez minutos a bordo, y la prueba no los espera.
+ * una carrera antes del mínimo a bordo (`MIN_DURACION_CARRERA_MIN`), y la
+ * prueba no se queda esperándolo.
  *
  *   pnpm --filter @tax/api exec tsx src/test/e2e-dispatch.ts <clave-de-api>
  */
@@ -202,8 +203,14 @@ async function main(): Promise<void> {
     ['finish', 'finalizó la carrera'],
   ] as const) {
     if (step === 'finish') {
+      // Un minuto más que el mínimo que exige la API, leído del mismo entorno:
+      // con la regla en otro número, los once fijos de antes no bastaban.
+      const minABordo = Number(process.env.MIN_DURACION_CARRERA_MIN ?? 10);
       const pool = new Pool({ connectionString: process.env.DATABASE_URL, max: 1 });
-      await pool.query(`update rides set started_at = now() - interval '11 minutes' where id = $1`, [ride.id]);
+      await pool.query(`update rides set started_at = now() - ($2::int * interval '1 minute') where id = $1`, [
+        ride.id,
+        minABordo + 1,
+      ]);
       await pool.end();
     }
     const response = await call(`/v1/driver/rides/${ride.id}/${step}`, {

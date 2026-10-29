@@ -18,8 +18,9 @@ import { haversineKm } from '@tax/shared';
  *  - que un GPS sin senal o con una lectura absurda deje al conductor sin
  *    poder cerrar la carrera, con el cliente ya bajandose del carro.
  *
- * Como no se puede finalizar antes de diez minutos a bordo, la prueba
- * adelanta en la base la hora de abordaje en vez de esperarlos.
+ * Como no se puede finalizar antes del mínimo a bordo que fija
+ * `MIN_DURACION_CARRERA_MIN`, la prueba adelanta en la base la hora de
+ * abordaje en vez de esperarlo.
  *
  *   pnpm --filter @tax/api exec tsx src/test/e2e-destino.ts <clave-de-api>
  */
@@ -36,9 +37,20 @@ const PIN = '4821';
 
 const pool = new Pool({ connectionString: process.env.DATABASE_URL, max: 1 });
 
-/** Como si el pasajero llevara once minutos a bordo: el mínimo para finalizar son diez. */
+/**
+ * El mínimo para finalizar lo fija `MIN_DURACION_CARRERA_MIN` en la API, así
+ * que la prueba lo lee del mismo entorno en vez de dar los diez por hechos:
+ * con la regla en otro número, retrasar once minutos no bastaba y la prueba
+ * fallaba sin que nada estuviera roto.
+ */
+const MIN_A_BORDO = Number(process.env.MIN_DURACION_CARRERA_MIN ?? 10);
+
+/** Como si el pasajero llevara un minuto más del mínimo a bordo. */
 async function pasarTiempoABordo(rideId: string): Promise<void> {
-  await pool.query(`update rides set started_at = now() - interval '11 minutes' where id = $1`, [rideId]);
+  await pool.query(`update rides set started_at = now() - ($2::int * interval '1 minute') where id = $1`, [
+    rideId,
+    MIN_A_BORDO + 1,
+  ]);
 }
 
 const CENTRO = { lat: 5.7803, lng: -73.1142 };

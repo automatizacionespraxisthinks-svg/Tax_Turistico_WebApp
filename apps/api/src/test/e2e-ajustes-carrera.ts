@@ -17,8 +17,8 @@ import { hashSecret, randomHex, randomToken } from '../common/crypto';
  *  3. La foto del lugar: llega con la carrera (un enlace que la API baja) o
  *     después (el archivo tal cual), y solo la ve el conductor que la lleva,
  *     y solo mientras va a recoger al cliente.
- *  4. No se puede finalizar antes de diez minutos con el pasajero a bordo, y
- *     el mensaje dice cuánto falta.
+ *  4. No se puede finalizar antes del mínimo con el pasajero a bordo
+ *     (`MIN_DURACION_CARRERA_MIN`), y el mensaje dice cuánto falta.
  *
  *   pnpm --filter @tax/api exec tsx src/test/e2e-ajustes-carrera.ts
  */
@@ -39,6 +39,20 @@ const JPEG = Buffer.from(
 const PNG = readFileSync(join(__dirname, '../../../driver/public/icon-192.png'));
 
 const pool = new Pool({ connectionString: process.env.DATABASE_URL, max: 2 });
+
+/**
+ * El mínimo a bordo lo fija `MIN_DURACION_CARRERA_MIN` en la API, así que la
+ * prueba lo lee del mismo entorno en vez de dar los diez por hechos: con la
+ * regla en otro número, los tres cortes de abajo seguían midiendo contra diez
+ * y fallaban sin que nada estuviera roto.
+ */
+const MIN_A_BORDO = Number(process.env.MIN_DURACION_CARRERA_MIN ?? 10);
+/** El mismo texto que arma la API cuando faltan `n` minutos. */
+const faltanTexto = (n: number) => (n === 1 ? 'falta 1 minuto' : `faltan ${n} minutos`);
+/** Mueve «Pasajero a bordo» hacia atrás los segundos que haga falta. */
+const aBordoDesde = (rideId: string, segundos: number) =>
+  pool.query(`update rides set started_at = now() - ($2::int * interval '1 second') where id = $1`, [rideId, segundos]);
+
 let apiKey = '';
 let apiKeyId = '';
 
@@ -211,7 +225,7 @@ async function main(): Promise<void> {
     assert(gif.status === 415, `un tipo que no se acepta ni se lee (HTTP ${gif.status})`);
 
     /* ---------------------------------------------------------------- 4 */
-    console.log('\n5. Diez minutos a bordo antes de poder finalizar');
+    console.log(`\n5. ${MIN_A_BORDO} minutos a bordo antes de poder finalizar`);
     await call(`/v1/driver/rides/${rideId}/arrived`, { token, body: { at: CENTRO } });
     const sube = await call(`/v1/driver/rides/${rideId}/board`, { token, body: { at: CENTRO } });
     assert(sube.status < 400, 'el pasajero sube', sube.body);
@@ -225,18 +239,22 @@ async function main(): Promise<void> {
       'finalizar en el acto se rechaza',
       enseguida.body,
     );
-    assert(/faltan 10 minutos/.test(String((enseguida.body as { detail?: string }).detail)), `y dice cuánto falta: «${(enseguida.body as { detail?: string }).detail}»`);
+    assert(
+      String((enseguida.body as { detail?: string }).detail).includes(faltanTexto(MIN_A_BORDO)),
+      `y dice cuánto falta: «${(enseguida.body as { detail?: string }).detail}»`,
+    );
 
-    await pool.query(`update rides set started_at = now() - interval '9 minutes 30 seconds' where id = $1`, [rideId]);
+    // Medio minuto antes del mínimo: el mensaje redondea hacia arriba.
+    await aBordoDesde(rideId, MIN_A_BORDO * 60 - 30);
     const casi = await call(`/v1/driver/rides/${rideId}/finish`, { token, body: { at: CENTRO } });
     assert(
       casi.status === 409 && /falta 1 minuto/.test(String((casi.body as { detail?: string }).detail)),
-      `a los nueve minutos y medio tampoco: «${(casi.body as { detail?: string }).detail}»`,
+      `a medio minuto del mínimo tampoco: «${(casi.body as { detail?: string }).detail}»`,
     );
 
-    await pool.query(`update rides set started_at = now() - interval '10 minutes 5 seconds' where id = $1`, [rideId]);
+    await aBordoDesde(rideId, MIN_A_BORDO * 60 + 5);
     const ahora = await call(`/v1/driver/rides/${rideId}/finish`, { token, body: { at: CENTRO } });
-    assert(ahora.status < 400, 'pasados los diez minutos, sí', ahora.body);
+    assert(ahora.status < 400, 'pasado el mínimo a bordo, sí', ahora.body);
 
     const cierre = await evento(rideId, 'ride.completed');
     assert(cierre !== undefined && !('fareFinal' in cierre), 'el cierre tampoco lleva precio', cierre);

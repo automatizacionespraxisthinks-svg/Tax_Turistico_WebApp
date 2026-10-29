@@ -133,9 +133,12 @@ El panel no inventa acciones: cada botón sale de la tabla de transiciones.
   ni el panel, ni los informes muestran dinero; la API no calcula ninguno y
   `POST /v1/quotes` ya no existe. La tabla `fare_rules` se conserva solo como
   histórico de las carreras viejas.
-- **Diez minutos a bordo** (`MIN_DURACION_CARRERA_MIN`): «Finalizar» queda
-  bloqueado en la PWA con una cuenta atrás, y la API lo rechaza con
-  `RIDE_TOO_SHORT` si alguien se lo salta. La oficina sí puede cerrar antes.
+- **Mínimo a bordo** (`MIN_DURACION_CARRERA_MIN`, diez minutos por defecto):
+  «Finalizar» queda bloqueado en la PWA con una cuenta atrás, y la API lo
+  rechaza con `RIDE_TOO_SHORT` si alguien se lo salta. El número vive solo en
+  el entorno de la API: la PWA lo pide al abrir, así que cambiarlo no obliga a
+  recompilarla, y con `0` la restricción queda desactivada. La oficina sí
+  puede cerrar antes.
 - **Foto del lugar**: el cliente la manda por WhatsApp y n8n la entrega con la
   carrera (`pickupPhotoUrl`) o después (`POST /v1/rides/:id/photo`, el archivo
   o un enlace). El conductor la ve mientras va a recogerlo, la oficina en la

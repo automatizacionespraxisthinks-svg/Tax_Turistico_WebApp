@@ -55,7 +55,7 @@ export function Carrera({
   offer: OfferedRide;
   status: ActiveStatus;
   metersToPickup: number | null;
-  minRideMinutes: number;
+  minRideMinutes: number | null;
   onArrived: () => void;
   onBoard: () => void;
   onFinish: () => void;
@@ -183,7 +183,7 @@ export function Carrera({
         ) : null}
 
         {status === 'IN_PROGRESS' ? (
-          faltan > 0 ? (
+          minRideMinutes !== null && faltan > 0 ? (
             <BotonDeEtapa
               tone={tone}
               icon={<Lock className="size-6" />}
@@ -205,7 +205,7 @@ export function Carrera({
           </p>
         ) : null}
 
-        {status === 'IN_PROGRESS' && faltan > 0 ? (
+        {status === 'IN_PROGRESS' && minRideMinutes !== null && faltan > 0 ? (
           <p className="text-center text-base text-ink-muted">
             Una carrera dura al menos {minRideMinutes} minutos desde que sube el pasajero.
           </p>
@@ -215,9 +215,19 @@ export function Carrera({
   );
 }
 
-/** Milisegundos que faltan para poder finalizar; 0 si ya se puede. */
-function useFaltaParaFinalizar(startedAt: number | undefined, minutos: number): number {
-  const calcular = () => (startedAt === undefined ? 0 : Math.max(0, startedAt + minutos * 60_000 - Date.now()));
+/**
+ * Milisegundos que faltan para poder finalizar; 0 si ya se puede.
+ *
+ * Con `minutos` nulo —la API todavía no ha dicho la regla— no se cuenta
+ * nada: el botón queda libre y es el servidor el que rechaza diciendo cuánto
+ * falta. Suponer diez aquí era peor que no saber: con la regla en otro
+ * número, la cuenta atrás terminaba y «Finalizar» fallaba igual.
+ */
+function useFaltaParaFinalizar(startedAt: number | undefined, minutos: number | null): number {
+  const calcular = () =>
+    startedAt === undefined || minutos === null
+      ? 0
+      : Math.max(0, startedAt + minutos * 60_000 - Date.now());
   const [faltan, setFaltan] = useState(calcular);
 
   // Al subir el pasajero, la cuenta se pone al día en este mismo render. En
@@ -230,7 +240,7 @@ function useFaltaParaFinalizar(startedAt: number | undefined, minutos: number): 
   }
 
   useEffect(() => {
-    if (startedAt === undefined) return;
+    if (startedAt === undefined || minutos === null) return;
     const id = window.setInterval(() => {
       const siguiente = calcular();
       setFaltan(siguiente);

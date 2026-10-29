@@ -77,8 +77,14 @@ export interface SessionState {
   queued: number;
   shiftStartedAt: number | null;
   ridesToday: number;
-  /** Minutos a bordo antes de poder finalizar; los dice la API al abrir. */
-  minRideMinutes: number;
+  /**
+   * Minutos a bordo antes de poder finalizar. Los dice la API al abrir
+   * (`rules.minRideMinutes`, que sale de `MIN_DURACION_CARRERA_MIN`): la PWA
+   * no lleva número propio, porque uno escrito aquí contaría una cosa y el
+   * servidor exigiría otra en cuanto la oficina cambiara la regla. Nulo
+   * mientras la API no lo haya dicho.
+   */
+  minRideMinutes: number | null;
   /**
    * Distancia al punto de recogida, medida con cada lectura del GPS; bajo
    * 150 m se habilita "Llegué" (§5.3). Nula mientras no se sabe.
@@ -96,7 +102,7 @@ export const initialSession: SessionState = {
   queued: 0,
   shiftStartedAt: null,
   ridesToday: 0,
-  minRideMinutes: 10,
+  minRideMinutes: null,
   metersToPickup: null,
 };
 

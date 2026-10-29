@@ -97,6 +97,10 @@ const envSchema = z.object({
    * Minutos que tienen que pasar desde «Pasajero a bordo» para poder
    * finalizar. Una carrera de dos minutos en Paipa no existe: si aparece, es
    * un conductor cerrando carreras que no hizo.
+   *
+   * Es el único sitio donde vive el número: la PWA lo recibe en `/me` y pinta
+   * la cuenta atrás con él, así que cambiarlo aquí no obliga a recompilarla
+   * ni a tocar nada más. Con `0` la restricción queda desactivada.
    */
   MIN_DURACION_CARRERA_MIN: z.coerce.number().int().min(0).max(120).default(10),
 

@@ -240,7 +240,9 @@ PUBLIC_ORIGINS=https://panel.TUDOMINIO,https://conductor.TUDOMINIO
 # Operadores activos a la vez; los administradores no cuentan.
 MAX_OPERADORES=5
 
-# Minutos a bordo antes de poder finalizar, y días que se guarda la foto del lugar.
+# Minutos a bordo antes de poder finalizar (0 lo desactiva, 120 es el máximo;
+# la PWA lo recibe al abrir, sin recompilarla), y días que se guarda la foto
+# del lugar.
 MIN_DURACION_CARRERA_MIN=10
 PHOTO_RETENTION_DAYS=30
 
