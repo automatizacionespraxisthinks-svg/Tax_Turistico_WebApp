@@ -23,17 +23,28 @@ import { DispatchService } from '../dispatch/dispatch.service';
 import { RealtimeGateway } from '../../realtime/realtime.gateway';
 import { FotosService } from './fotos.service';
 
-const addressSchema = z.object({
-  text: z.string().min(3),
-  reference: z.string().optional(),
-  point: pointSchema.optional(),
-});
+/*
+ * También acepta el cuerpo envuelto en `pickup`, como lo mandaba la
+ * herramienta `actualizar_direccion` del flujo de n8n: sin esto, cada
+ * corrección del punto respondía VALIDATION_FAILED y el agente le decía al
+ * cliente que no se pudo.
+ */
+const addressSchema = z.preprocess(
+  (v) => (v && typeof v === 'object' && 'pickup' in v && !('text' in v) ? (v as { pickup: unknown }).pickup : v),
+  z.object({
+    text: z.string().min(3),
+    reference: z.string().optional(),
+    point: pointSchema.optional(),
+    /** El enlace de ubicación que mandó el cliente; ver `rideAddressSchema.link`. */
+    link: z.string().max(2000).optional(),
+  }),
+);
 
 const cancelSchema = z.object({
   reason: z.string().min(3, 'El motivo es obligatorio'),
 });
 
-const pagoSchema = z.object({ pagoElectronico: z.boolean() });
+const pagoSchema = z.object({ pagoElectronico: z.boolean(), relanzar: z.boolean().optional() });
 
 /**
  * Lo que identifica un pedido de taxi: quién lo pide y, si compartió su
@@ -122,16 +133,24 @@ export class RidesController {
   /**
    * El cliente cambia cómo va a pagar. Solo con la carrera sin asignar: es
    * la salida cuando nadie con pago electrónico la tomó y el cliente acepta
-   * pagar en efectivo. Después hay que relanzarla.
+   * pagar en efectivo.
+   *
+   * Con `relanzar: true` además vuelve a buscar taxi, en la misma llamada:
+   * así el agente de n8n lo resuelve con una sola herramienta y no puede
+   * quedarse a medias (cambiada pero sin relanzar).
    */
   @Patch(':rideId/payment')
   @Scopes('rides:write')
-  cambiarMedioDePago(
+  async cambiarMedioDePago(
     @Req() request: FastifyRequest,
     @Param('rideId', ParseUUIDPipe) rideId: string,
     @Body(zodBody(pagoSchema)) body: z.infer<typeof pagoSchema>,
   ) {
-    return this.rides.cambiarMedioDePago(rideId, body.pagoElectronico, actorFrom(request, 'customer'));
+    const ride = await this.rides.cambiarMedioDePago(rideId, body.pagoElectronico, actorFrom(request, 'customer'));
+    if (!body.relanzar) return ride;
+    // Relanzar es un acto de operador (§5.3), como en `/redispatch`.
+    await this.dispatch.redispatch(rideId, actorFrom(request, 'operator'));
+    return { ...(await this.rides.byId(rideId)), relanzada: true };
   }
 
   @Post(':rideId/cancel')

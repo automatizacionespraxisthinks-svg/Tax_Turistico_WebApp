@@ -84,6 +84,12 @@ export const rides = pgTable(
      * («frente a la terminal»): el punto es el del lugar, no el de la puerta.
      */
     pickupSource: text('pickup_source').$type<'compartida' | 'catalogo' | 'geocodificada' | 'sin_ubicar'>(),
+    /**
+     * El enlace de ubicación que mandó el cliente, tal cual. El botón «Ir con
+     * Maps» de la PWA abre este mismo enlace. Solo se guarda si es de un
+     * servicio de mapas; nulo si el cliente no compartió ubicación.
+     */
+    pickupLink: text('pickup_link'),
     dropoffText: text('dropoff_text'),
     dropoffLat: doublePrecision('dropoff_lat'),
     dropoffLng: doublePrecision('dropoff_lng'),

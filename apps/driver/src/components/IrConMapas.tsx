@@ -1,6 +1,7 @@
 import type { ReactNode } from 'react';
 import { MapPinOff, MapPinned, Navigation2, TriangleAlert } from 'lucide-react';
 import type { Point } from '@tax/shared';
+import { enlaceDeMapaValido } from '@tax/shared';
 import { TONE_CLASS, cn } from '@tax/ui';
 import type { OrigenDelPunto } from '../state/session';
 
@@ -16,11 +17,16 @@ const CONTEXTO = 'Paipa, Boyacá, Colombia';
  * centro de Paipa, y mandar al conductor a la plaza es peor que mandarlo a
  * buscar la dirección.
  *
+ * Si el cliente compartió su ubicación, «Ir con Maps» abre el mismo enlace
+ * que él mandó, con su pin y el nombre del sitio si eligió uno; «Ir con
+ * Waze» va al mismo punto, leído de ese enlace (Waze no abre enlaces de
+ * Google).
+ *
  * Los enlaces abren la aplicación si está instalada y, si no, el navegador.
  * Van en pestaña aparte para que la PWA siga viva detrás con su GPS.
  */
-export function IrConMapas({ point, text }: { point?: Point; text?: string }) {
-  const enlaces = enlacesDeMapa(point, text);
+export function IrConMapas({ point, text, enlace }: { point?: Point; text?: string; enlace?: string }) {
+  const enlaces = enlacesDeMapa(point, text, enlace);
   if (!enlaces) return null;
 
   return (
@@ -35,11 +41,16 @@ export function IrConMapas({ point, text }: { point?: Point; text?: string }) {
   );
 }
 
-export function enlacesDeMapa(point?: Point, text?: string): { maps: string; waze: string } | null {
+export function enlacesDeMapa(
+  point?: Point,
+  text?: string,
+  enlace?: string,
+): { maps: string; waze: string } | null {
   if (point) {
     const ll = `${point.lat},${point.lng}`;
     return {
-      maps: `https://www.google.com/maps/dir/?api=1&destination=${ll}&travelmode=driving`,
+      // La API ya lo filtró; se vuelve a mirar porque es lo que se abre.
+      maps: enlaceDeMapaValido(enlace) ?? `https://www.google.com/maps/dir/?api=1&destination=${ll}&travelmode=driving`,
       waze: `https://waze.com/ul?ll=${ll}&navigate=yes`,
     };
   }

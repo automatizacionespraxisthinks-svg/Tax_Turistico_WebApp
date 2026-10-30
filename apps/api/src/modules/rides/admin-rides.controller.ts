@@ -37,6 +37,7 @@ const addressSchema = z.object({
   text: z.string().min(3),
   reference: z.string().optional(),
   point: pointSchema.optional(),
+  link: z.string().max(2000).optional(),
 });
 
 const cancelSchema = z.object({ reason: z.string().min(3, 'El motivo es obligatorio') });

@@ -79,7 +79,7 @@ export function Carrera({
               reference={offer.pickupReference}
             />
             <AvisoDeUbicacion origen={offer.pickupSource} />
-            <IrConMapas point={offer.pickupPoint} text={offer.pickupText} />
+            <IrConMapas point={offer.pickupPoint} text={offer.pickupText} enlace={offer.pickupLink} />
           </div>
         ) : (
           // Con el pasajero a bordo lo que importa es cómo va a pagar.

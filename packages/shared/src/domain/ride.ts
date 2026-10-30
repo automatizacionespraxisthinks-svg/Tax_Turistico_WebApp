@@ -173,6 +173,13 @@ export const rideAddressSchema = z.object({
   reference: z.string().optional(),
   point: pointSchema.optional(),
   placeId: z.string().optional(),
+  /**
+   * El enlace de ubicación tal como lo mandó el cliente por WhatsApp. El
+   * botón «Ir con Maps» del conductor abre este mismo enlace, y si no viene
+   * `point`, el punto se lee de él. Solo cuenta si es de un servicio de mapas
+   * (`enlaceDeMapaValido`); otro cualquiera se ignora.
+   */
+  link: z.string().max(2000).optional(),
 });
 export type RideAddress = z.infer<typeof rideAddressSchema>;
 
@@ -292,6 +299,8 @@ export interface Ride {
   dropoffSource?: 'cliente' | 'conductor';
   /** Cuándo llegó la foto del lugar que mandó el cliente; ausente si no hay. */
   pickupPhotoAt?: string;
+  /** El enlace de ubicación que mandó el cliente, si compartió ubicación. */
+  pickupLink?: string;
   driverId?: string;
   line: string;
   chatwootConversationId?: number;

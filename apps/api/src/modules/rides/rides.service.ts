@@ -2,7 +2,15 @@ import { Inject, Injectable, Logger, forwardRef } from '@nestjs/common';
 import { and, desc, eq, gt, inArray, isNull, sql } from 'drizzle-orm';
 import { uuidv7 } from 'uuidv7';
 import type { CreateRideInput, Point, RideStatus, TransitionActor } from '@tax/shared';
-import { canTransition, formatRideCode, haversineKm, tieneNomenclatura } from '@tax/shared';
+import {
+  canTransition,
+  enlaceDeMapaValido,
+  formatRideCode,
+  haversineKm,
+  normalizarParaBuscar,
+  puntoDeEnlace,
+  tieneNomenclatura,
+} from '@tax/shared';
 import { DB, type Database, type Tx } from '../../db/db.module';
 import {
   customers,
@@ -90,9 +98,13 @@ export class RidesService {
      * un digito sin que se note— y lo que devuelve ya viene comprobado
      * contra las zonas con servicio.
      */
-    let point = input.pickup.point;
+    // El enlace de ubicación del cliente cuenta como compartida: si n8n no
+    // mandó el punto aparte, se lee del propio enlace.
+    const pickupLink = enlaceDeMapaValido(input.pickup.link);
+    let point = input.pickup.point ?? puntoDeEnlace(pickupLink) ?? undefined;
     let pickupSource: 'compartida' | 'catalogo' | 'geocodificada' | 'sin_ubicar' = 'compartida';
     let direccionResuelta: string | undefined;
+    let pickupText = input.pickup.text;
 
     /*
      * Sin ubicación compartida hay dos ayudas, y el orden depende de cómo lo
@@ -153,6 +165,19 @@ export class RidesService {
       throw new AppError('MISSING_LOCATION', 'No hay zonas configuradas para despachar');
     }
 
+    /*
+     * Una ubicación compartida que cae en un lugar del catálogo lleva su
+     * nombre delante: «Terminal de Transportes. Cra. 21 #24-18» se reconoce
+     * de un vistazo, y es como la oficina y los clientes llaman ese sitio.
+     */
+    if (pickupSource === 'compartida') {
+      const lugar = await this.catalogo.cercano(point);
+      if (lugar && !normalizarParaBuscar(pickupText).includes(normalizarParaBuscar(lugar.name))) {
+        pickupText = `${lugar.name}. ${pickupText}`;
+        direccionResuelta = lugar.name;
+      }
+    }
+
     const trayecto = this.trayectos.medir(point, input.dropoff?.point);
     const rideId = uuidv7();
     const pendingEvents: string[] = [];
@@ -180,11 +205,14 @@ export class RidesService {
             status: 'PENDING',
             version: 1,
             customerId,
-            pickupText: input.pickup.text,
+            pickupText,
             pickupReference: input.pickup.reference,
             pickupLat: point.lat,
             pickupLng: point.lng,
             pickupSource,
+            // Solo con ubicación compartida: un enlace que no llevó al punto
+            // no tiene por qué abrirse en el teléfono del conductor.
+            pickupLink: pickupSource === 'compartida' ? pickupLink : null,
             dropoffText: input.dropoff?.text,
             dropoffLat: input.dropoff?.point?.lat,
             dropoffLng: input.dropoff?.point?.lng,
@@ -218,7 +246,7 @@ export class RidesService {
             rideVersion: 1,
             payload: {
               code,
-              pickup: { ...input.pickup, point },
+              pickup: { ...input.pickup, text: pickupText, point },
               pickupSource,
               pagoElectronico: input.pagoElectronico,
               // Para que el agente pueda confirmarle al cliente lo que se
@@ -647,7 +675,7 @@ export class RidesService {
    */
   async updateAddress(
     rideId: string,
-    update: { text: string; reference?: string; point?: Point },
+    update: { text: string; reference?: string; point?: Point; link?: string },
     actor: Actor,
   ) {
     const ride = await this.byId(rideId);
@@ -656,7 +684,19 @@ export class RidesService {
       throw new AppError('INVALID_TRANSITION', 'La carrera ya terminó');
     }
 
-    const point = update.point ?? { lat: ride.pickupLat!, lng: ride.pickupLng! };
+    /*
+     * Una ubicación nueva (punto o enlace) reemplaza la anterior entera: el
+     * enlace viejo apuntaría al sitio de antes. Sin ubicación nueva —solo se
+     * agregó una referencia— se conservan el punto, su origen y el enlace.
+     * Y una ubicación compartida después de crear la carrera la deja como
+     * `compartida`: si seguía `sin_ubicar`, la PWA no mostraba el punto.
+     */
+    const link = enlaceDeMapaValido(update.link);
+    const puntoNuevo = update.point ?? puntoDeEnlace(link) ?? undefined;
+    const point = puntoNuevo ?? { lat: ride.pickupLat!, lng: ride.pickupLng! };
+    const ubicacion = puntoNuevo
+      ? { pickupSource: 'compartida' as const, pickupLink: link }
+      : {};
     const trayecto = this.trayectos.medir(
       point,
       ride.dropoffLat && ride.dropoffLng ? { lat: ride.dropoffLat, lng: ride.dropoffLng } : undefined,
@@ -672,6 +712,7 @@ export class RidesService {
           pickupReference: update.reference,
           pickupLat: point.lat,
           pickupLng: point.lng,
+          ...ubicacion,
           zoneId: trayecto.originZoneId,
           etaMinutes: trayecto.etaMinutes,
           version: ride.version + 1,

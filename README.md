@@ -235,28 +235,34 @@ El panel no inventa acciones: cada botón sale de la tabla de transiciones.
   recibe lo abre igual: el turno anterior se cierra solo (relevo) y a ese
   teléfono le llega el aviso, salvo que el carro esté en plena carrera.
 
-## Cambios para los flujos de n8n: pago electrónico
+## Contrato con n8n: pago electrónico y ubicación
 
-Los flujos no viven en este repositorio; esto es lo que tienen que cambiar.
+Los flujos no viven en este repositorio. Su versión integrada con esto está
+en `Flujos/Principales/Actualizados 2026-10-30` (carpeta de la empresa). Lo
+que usan de la API:
 
-1. **Preguntar el medio de pago.** El agente pregunta «¿Va a pagar en
-   efectivo o con pago electrónico (Nequi, transferencia, datáfono)?» y lo
-   manda al crear la carrera: `POST /v1/rides` con `"pagoElectronico": true`
-   o `false`, booleano (no `"true"` en texto). Sin el campo se toma efectivo,
-   así que los flujos de hoy siguen funcionando sin cambios.
-2. **`ride.created`** trae `pagoElectronico`, para confirmarle al cliente lo
-   que se entendió.
-3. **`ride.no_driver`** trae `pagoElectronico`. Si es `true`, el mensaje no es
-   «no hay taxis» sino «no hay taxis con pago electrónico cerca; ¿puede pagar
-   en efectivo?». Si el cliente acepta:
-   `PATCH /v1/rides/:id/payment` con `{ "pagoElectronico": false }` y después
-   `POST /v1/rides/:id/redispatch`. El cambio solo se acepta con la carrera
-   sin asignar (`INVALID_TRANSITION` si no).
-4. **`ride.assigned`** trae `pagoElectronico`, por si el aviso de «ya va en
-   camino» quiere recordarlo.
-5. **Asignación manual** (`POST /v1/rides/:id/assign`) responde
+1. **Medio de pago.** `POST /v1/rides` con `"pagoElectronico": true` o
+   `false`, booleano. Sin el campo se toma efectivo, así que un flujo viejo
+   sigue funcionando. Viene en `ride.created`, `ride.assigned` y
+   `ride.no_driver`.
+2. **Enlace de ubicación.** `pickup.link` (en `POST /v1/rides` y en
+   `PATCH …/address`) es el enlace tal como lo mandó el cliente. La carrera
+   lo guarda (`pickup_link`) y «Ir con Maps» del conductor lo abre; «Ir con
+   Waze» va al mismo punto. Si no viene `pickup.point`, el punto se lee del
+   enlace. Solo cuentan enlaces de mapas (Google, `maps.app.goo.gl`, Waze,
+   Apple, OpenStreetMap): otro se ignora. Si la ubicación cae a menos de 60 m
+   de un lugar del catálogo, su nombre va delante de la dirección.
+3. **Sin taxis con pago electrónico.** `ride.no_driver` con
+   `pagoElectronico: true`: se le pregunta al cliente si puede pagar en
+   efectivo y, si acepta, `PATCH /v1/rides/:id/payment` con
+   `{ "pagoElectronico": false, "relanzar": true }` cambia y relanza en una
+   llamada. Solo con la carrera sin asignar (`INVALID_TRANSITION` si no).
+4. **Asignación manual** (`POST /v1/rides/:id/assign`) responde
    `DRIVER_NO_ELECTRONIC_PAYMENT` o `DRIVER_SUSPENDED` si el conductor no
    cumple la regla.
+5. **`PATCH …/address`** acepta también el cuerpo envuelto en `pickup`, como
+   lo mandaba el flujo hasta octubre de 2026 (antes respondía
+   `VALIDATION_FAILED`). Prueba: `src/test/e2e-enlace-de-ubicacion.ts`.
 
 ## Cómo se mantienen al día las pantallas
 

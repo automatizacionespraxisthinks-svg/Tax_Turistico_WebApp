@@ -120,6 +120,13 @@
       "when": 1793329895945,
       "tag": "0016_pago_electronico_y_suspension",
       "breakpoints": true
+    },
+    {
+      "idx": 17,
+      "version": "7",
+      "when": 1793363848832,
+      "tag": "0017_enlace_de_ubicacion",
+      "breakpoints": true
     }
   ]
 }

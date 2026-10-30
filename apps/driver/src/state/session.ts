@@ -40,6 +40,8 @@ export interface OfferedRide {
    */
   pickupPoint?: Point;
   pickupSource?: OrigenDelPunto;
+  /** El enlace de ubicación que mandó el cliente: «Ir con Maps» abre este. */
+  pickupLink?: string;
   /**
    * Si el cliente paga con pago electrónico (Nequi, transferencia,
    * datáfono). Solo se las ofrecen a quien lo acepta, y el conductor lo ve
@@ -253,6 +255,7 @@ interface ApiRide {
   pickupLat: number | null;
   pickupLng: number | null;
   pickupSource?: OrigenDelPunto | null;
+  pickupLink?: string | null;
   /** Ausente si la API todavía no se ha actualizado: efectivo. */
   pagoElectronico?: boolean;
   passengers: number;
@@ -307,6 +310,7 @@ export function offerFromRide(ride: ApiRide): OfferedRide {
         ? { lat: ride.pickupLat, lng: ride.pickupLng }
         : undefined,
     pickupSource: ride.pickupSource ?? undefined,
+    pickupLink: ride.pickupLink ?? undefined,
     pagoElectronico: ride.pagoElectronico ?? false,
     distanceKm: 0,
     etaMinutes: ride.etaMinutes ?? 0,

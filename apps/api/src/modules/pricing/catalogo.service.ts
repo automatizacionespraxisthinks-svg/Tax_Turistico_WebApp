@@ -5,6 +5,7 @@ import type { CambiosLugar, CambiosZona, NuevaZona, NuevoLugar, Point } from '@t
 import {
   ZONA_POR_DEFECTO,
   buscarLugar,
+  haversineKm,
   normalizarParaBuscar,
   poligonoCircular,
   poligonosSeTocan,
@@ -251,6 +252,29 @@ export class CatalogoService {
       point: { lat: hallado.lugar.lat, lng: hallado.lugar.lng },
       palabra: hallado.palabra,
     };
+  }
+
+  /**
+   * El lugar del catálogo donde cae una ubicación compartida, si cae en
+   * alguno: el más cercano a menos de `metros`. Con él el conductor lee
+   * «Terminal de Transportes» además de la nomenclatura, que es como la
+   * oficina y los clientes nombran ese sitio. No cuenta un uso: aquí el
+   * lugar no resolvió nada, el punto ya venía exacto.
+   */
+  async cercano(point: Point, metros = 60): Promise<{ id: string; name: string } | null> {
+    const activos = await this.db
+      .select({ id: places.id, name: places.name, lat: places.lat, lng: places.lng })
+      .from(places)
+      .where(eq(places.active, true));
+
+    let mejor: { id: string; name: string; distancia: number } | null = null;
+    for (const lugar of activos) {
+      const distancia = haversineKm(point, { lat: lugar.lat, lng: lugar.lng }) * 1000;
+      if (distancia <= metros && (!mejor || distancia < mejor.distancia)) {
+        mejor = { id: lugar.id, name: lugar.name, distancia };
+      }
+    }
+    return mejor ? { id: mejor.id, name: mejor.name } : null;
   }
 
   /* ------------------------------------------------------------- apoyo --- */

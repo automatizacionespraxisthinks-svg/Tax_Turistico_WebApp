@@ -50,6 +50,8 @@ export interface ApiRide {
   distanceKm: number | null;
   dropoffSource: 'cliente' | 'conductor' | null;
   pickupPhotoAt: string | null;
+  /** Ausente si la API todavía no se ha actualizado. */
+  pickupLink?: string | null;
   driverId: string | null;
   line: string | null;
   chatwootConversationId: number | null;
@@ -185,6 +187,7 @@ export function toRide(row: ApiRide): Ride {
     distanceKm: row.distanceKm ?? undefined,
     dropoffSource: row.dropoffSource ?? undefined,
     pickupPhotoAt: row.pickupPhotoAt ?? undefined,
+    pickupLink: row.pickupLink ?? undefined,
     driverId: row.driverId ?? undefined,
     line: row.line ?? '—',
     chatwootConversationId: row.chatwootConversationId ?? undefined,

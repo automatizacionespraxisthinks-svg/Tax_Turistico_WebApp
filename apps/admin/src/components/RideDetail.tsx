@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { AnimatePresence, motion } from 'motion/react';
-import { Ban, Banknote, Camera, Car, CreditCard, MessageSquare, RefreshCw } from 'lucide-react';
+import { Ban, Banknote, Camera, Car, CreditCard, ExternalLink, MessageSquare, RefreshCw } from 'lucide-react';
 import type { Driver, Ride, RideOffer, WaveLogEntry } from '@tax/shared';
 import {
   ACTOR_LABEL,
@@ -12,6 +12,7 @@ import {
   haversineKm,
   maskPhone,
   OLEADA_A_TODOS,
+  enlaceDeMapaValido,
   transitionsFrom,
 } from '@tax/shared';
 import {
@@ -159,6 +160,19 @@ function Resumen({ ride, driver }: { ride: Ride; driver?: Driver }) {
           />
         ) : null}
       </div>
+
+      {enlaceDeMapaValido(ride.pickupLink) ? (
+        // El mismo enlace que abre el conductor con «Ir con Maps».
+        <a
+          href={enlaceDeMapaValido(ride.pickupLink)!}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="inline-flex items-center gap-1.5 text-caption font-medium text-brand hover:underline"
+        >
+          <ExternalLink className="size-3.5" />
+          Ver la ubicación que envió el cliente
+        </a>
+      ) : null}
 
       {ride.notes ? (
         <div className="flex gap-2 rounded-md border border-line bg-surface-sunk p-2.5">
