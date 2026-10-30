@@ -20,6 +20,7 @@ export interface FilaCarrera {
   referencia: string | null;
   destino: string | null;
   pasajeros: number;
+  pagoElectronico: boolean;
   vehiculo: string;
   cliente: string | null;
   telefono: string;
@@ -135,6 +136,7 @@ export async function leerPeriodo(db: Database, params: ExportParams): Promise<P
     referencia: string | null;
     destino: string | null;
     pasajeros: number;
+    pago_electronico: boolean;
     vehiculo: string;
     cliente: string | null;
     telefono: string;
@@ -161,6 +163,7 @@ export async function leerPeriodo(db: Database, params: ExportParams): Promise<P
            r.pickup_reference as referencia,
            r.dropoff_text as destino,
            r.passengers as pasajeros,
+           r.pago_electronico,
            r.vehicle_type::text as vehiculo,
            c.name as cliente,
            c.phone as telefono,
@@ -210,6 +213,7 @@ export async function leerPeriodo(db: Database, params: ExportParams): Promise<P
       referencia: f.referencia,
       destino: f.destino,
       pasajeros: f.pasajeros,
+      pagoElectronico: f.pago_electronico,
       vehiculo: f.vehiculo,
       cliente: f.cliente,
       telefono: f.telefono,

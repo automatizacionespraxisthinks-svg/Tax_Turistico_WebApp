@@ -194,6 +194,7 @@ export class RidesService {
             zoneId: trayecto.originZoneId,
             vehicleType: input.vehicleType,
             passengers: input.passengers,
+            pagoElectronico: input.pagoElectronico,
             etaMinutes: trayecto.etaMinutes,
             notes: input.notes,
           })
@@ -219,6 +220,7 @@ export class RidesService {
               code,
               pickup: { ...input.pickup, point },
               pickupSource,
+              pagoElectronico: input.pagoElectronico,
               // Para que el agente pueda confirmarle al cliente lo que se
               // entendio, sin tener que geocodificar el por su cuenta.
               direccionResuelta,
@@ -721,6 +723,57 @@ export class RidesService {
     });
 
     await this.outbox.notify(eventIds);
+    this.realtime.rideChanged(updated);
+    return updated;
+  }
+
+  /* ------------------------------------------------- medio de pago */
+
+  /**
+   * Cambia el medio de pago de una carrera sin asignar.
+   *
+   * El caso que lo pide: nadie con pago electrónico la tomó, se le pregunta
+   * al cliente si puede pagar en efectivo, y si dice que sí se cambia y se
+   * relanza. Solo sin asignar a propósito: con ofertas ya repartidas, o con
+   * conductor, cambiarlo dejaría la carrera en manos de alguien que no se
+   * eligió con esta regla.
+   */
+  async cambiarMedioDePago(rideId: string, pagoElectronico: boolean, actor: Actor) {
+    const ride = await this.byId(rideId);
+
+    if (ride.status !== 'UNASSIGNED') {
+      throw new AppError(
+        'INVALID_TRANSITION',
+        `El medio de pago solo se cambia con la carrera sin asignar; esta está en ${ride.status}`,
+      );
+    }
+    if (ride.pagoElectronico === pagoElectronico) return ride;
+
+    const updated = await this.db.transaction(async (tx) => {
+      const [next] = await tx
+        .update(rides)
+        .set({ pagoElectronico, version: ride.version + 1, updatedAt: new Date() })
+        .where(eq(rides.id, rideId))
+        .returning();
+
+      await this.audit.record(
+        {
+          actorId: actor.id,
+          actorName: actor.name,
+          role: actor.role ?? actor.kind,
+          action: 'Cambió el medio de pago',
+          entity: 'rides',
+          entityId: ride.code,
+          before: { pagoElectronico: ride.pagoElectronico },
+          after: { pagoElectronico },
+          ip: actor.ip,
+        },
+        tx as unknown as Database,
+      );
+
+      return next!;
+    });
+
     this.realtime.rideChanged(updated);
     return updated;
   }

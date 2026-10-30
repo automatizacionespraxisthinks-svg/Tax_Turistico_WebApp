@@ -15,7 +15,7 @@ import { RidesService, type Actor } from '../rides/rides.service';
 import { RealtimeGateway } from '../../realtime/realtime.gateway';
 import { PushService } from '../push/push.service';
 import { loadEnv } from '../../config/env';
-import { OLEADA_A_TODOS, type Oleada, type WaveLogEntry } from '@tax/shared';
+import { OLEADA_A_TODOS, finDeSuspension, sigueSuspendido, type Oleada, type WaveLogEntry } from '@tax/shared';
 
 export const DISPATCH_QUEUE = 'dispatch';
 export const WAVE_TIMEOUT_JOB = 'wave-timeout';
@@ -125,6 +125,7 @@ export class DispatchService {
       const todos = await this.fleet.findAllAvailable(
         pickup,
         rechazaron.map((row) => row.driverId),
+        ride.pagoElectronico,
       );
       candidates = todos.candidates;
       sinGps = todos.sinGps;
@@ -153,6 +154,9 @@ export class DispatchService {
         ride.vehicleType,
         config.candidates,
         alreadyOffered.map((row) => row.driverId),
+        // Coexiste con las zonas: el radio y el tiempo de cada oleada son los
+        // de siempre, solo que entre los que reciben pagos electrónicos.
+        ride.pagoElectronico,
       );
     }
 
@@ -242,7 +246,7 @@ export class DispatchService {
         code: ride.code,
         pickupText: ride.pickupText,
         pickupReference: ride.pickupReference,
-        dropoffText: ride.dropoffText,
+        pagoElectronico: ride.pagoElectronico,
         passengers: ride.passengers,
         distanceKm: candidate.distanceKm,
         etaMinutes: candidate.etaMinutes,
@@ -376,9 +380,22 @@ export class DispatchService {
       .where(and(eq(rideOffers.rideId, rideId), eq(rideOffers.intento, ride.intentoDespacho)));
     const nadieLaVio = ride.status === 'PENDING' || (ofertas?.n ?? 0) === 0;
 
+    /*
+     * Con pago electrónico se dice: la carrera no se abre a los demás, así
+     * que la salida casi siempre es preguntarle al cliente si puede pagar en
+     * efectivo, cambiarla y relanzar. La oficina y n8n tienen que saberlo
+     * para no buscar el problema donde no está.
+     */
+    const electronico = ride.pagoElectronico;
+    const conQuien = electronico ? 'conductores con pago electrónico' : 'conductores';
+
     await this.ridesService.transition(rideId, 'UNASSIGNED', SYSTEM, {
-      note: nadieLaVio ? 'Ninguna oleada encontró conductores' : 'Nadie aceptó la carrera',
-      event: { type: 'ride.no_driver' },
+      note: nadieLaVio
+        ? `Ninguna oleada encontró ${conQuien}`
+        : electronico
+          ? 'Nadie con pago electrónico aceptó la carrera'
+          : 'Nadie aceptó la carrera',
+      event: { type: 'ride.no_driver', payload: { pagoElectronico: electronico } },
     });
 
     this.realtime.alertOffice({
@@ -386,8 +403,10 @@ export class DispatchService {
       rideId,
       code: ride.code,
       message: nadieLaVio
-        ? `${ride.code}: no hay conductores disponibles`
-        : `${ride.code}: nadie aceptó la carrera`,
+        ? `${ride.code}: no hay ${conQuien} disponibles`
+        : electronico
+          ? `${ride.code}: nadie con pago electrónico aceptó la carrera`
+          : `${ride.code}: nadie aceptó la carrera`,
     });
   }
 
@@ -407,7 +426,7 @@ export class DispatchService {
 
     await this.db
       .transaction(async (tx) => {
-        const result = await tx.execute<{ id: string; code: string; version: number }>(sql`
+        const result = await tx.execute<{ id: string; code: string; version: number; pago_electronico: boolean }>(sql`
           update rides
              set status = 'ASSIGNED',
                  driver_id = ${driverId},
@@ -431,7 +450,7 @@ export class DispatchService {
                   and o.revoked_at is null
                   and o.response = 'pending'
              )
-          returning id, code, version
+          returning id, code, version, pago_electronico
         `);
 
         const row = result.rows[0];
@@ -540,6 +559,7 @@ export class DispatchService {
             payload: {
               code: row.code,
               driverId,
+              pagoElectronico: row.pago_electronico,
               driver: {
                 id: driverId,
                 code: driver[0]?.code ?? null,
@@ -622,6 +642,32 @@ export class DispatchService {
   async assignManually(rideId: string, driverId: string, actor: Actor) {
     const expiresAt = new Date(Date.now() + 120_000);
 
+    /*
+     * La mano del operador no se salta las reglas del conductor: a un
+     * suspendido no se le asigna nada, y una carrera con pago electrónico
+     * solo a quien lo recibe. Si el cliente acepta pagar en efectivo, se
+     * cambia primero la carrera y después se asigna.
+     */
+    const [conductor] = await this.db
+      .select({ name: drivers.name, acepta: drivers.aceptaPagoElectronico, suspendidoHasta: drivers.suspendidoHasta })
+      .from(drivers)
+      .where(eq(drivers.id, driverId))
+      .limit(1);
+    if (!conductor) throw new AppError('NOT_FOUND', 'El conductor no existe');
+    if (sigueSuspendido(conductor.suspendidoHasta)) {
+      throw new AppError(
+        'DRIVER_SUSPENDED',
+        `${conductor.name} está suspendido hasta el ${finDeSuspension(conductor.suspendidoHasta!)}`,
+      );
+    }
+    const ride = await this.ridesService.byId(rideId);
+    if (ride.pagoElectronico && !conductor.acepta) {
+      throw new AppError(
+        'DRIVER_NO_ELECTRONIC_PAYMENT',
+        `${conductor.name} no recibe pagos electrónicos. Elige a otro, o cambia la carrera a efectivo si el cliente puede.`,
+      );
+    }
+
     // Se crea una oferta vigente para este conductor y se acepta con la misma
     // sentencia atómica: la asignación manual no se salta la exclusividad.
     await this.db.transaction(async (tx) => {
@@ -653,7 +699,16 @@ export class DispatchService {
     this.realtime.revokeOffer(rideId);
   }
 
+  /**
+   * El conductor queda libre al terminar o cancelarse su carrera. Si lo
+   * suspendieron mientras la hacía, en vez de volver a la espera se le
+   * cierra el turno: la suspensión le dejó terminar la carrera, no seguir.
+   */
   async releaseDriver(driverId: string): Promise<void> {
+    if (await this.fleet.suspensionDe(driverId)) {
+      await this.fleet.closeShift(driverId);
+      return;
+    }
     await this.fleet.setStatus(driverId, 'AVAILABLE');
   }
 }

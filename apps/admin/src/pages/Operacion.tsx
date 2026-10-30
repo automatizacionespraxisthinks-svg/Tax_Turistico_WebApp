@@ -4,6 +4,7 @@ import { Bot, CarFront, Check, Inbox, Timer, TriangleAlert } from 'lucide-react'
 import type { Ride, RideStatus } from '@tax/shared';
 import { RIDE_STATUS_LABEL, RIDE_STATUS_TONE, formatRelative } from '@tax/shared';
 import {
+  BANDA_DE_ESTADO,
   Button,
   Card,
   EmptyState,
@@ -22,14 +23,14 @@ import { actions, useLive } from '../live/store';
 
 /**
  * Columnas del tablero: el ciclo de vida leído de izquierda a derecha. Cada
- * una lleva una banda sólida con el color de su estado; la de oferta usa el
- * ámbar oscuro, que es el que deja leer el texto blanco.
+ * una lleva una banda sólida con el color de su estado, el mismo que llevan
+ * los botones de la PWA.
  */
 const COLUMNS: { status: RideStatus; title: string; band: string }[] = [
-  { status: 'NOTIFIED', title: 'Buscando taxi', band: 'bg-warning-band' },
-  { status: 'ASSIGNED', title: 'Taxi en camino', band: 'bg-brand' },
-  { status: 'DRIVER_ARRIVED', title: 'Taxi en el lugar', band: 'bg-danger-fill' },
-  { status: 'IN_PROGRESS', title: 'En curso', band: 'bg-success' },
+  { status: 'NOTIFIED', title: 'Buscando taxi', band: BANDA_DE_ESTADO.NOTIFIED },
+  { status: 'ASSIGNED', title: 'Taxi en camino', band: BANDA_DE_ESTADO.ASSIGNED },
+  { status: 'DRIVER_ARRIVED', title: 'Taxi en el lugar', band: BANDA_DE_ESTADO.DRIVER_ARRIVED },
+  { status: 'IN_PROGRESS', title: 'En curso', band: BANDA_DE_ESTADO.IN_PROGRESS },
 ];
 
 /*

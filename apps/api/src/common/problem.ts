@@ -61,6 +61,9 @@ export const ERROR_CODES = {
   OFFER_NOT_VALID: 'La oferta venció o fue revocada',
   DRIVER_BUSY: 'El conductor ya tiene una carrera activa',
   DRIVER_OFF_SHIFT: 'El conductor no tiene un turno abierto',
+  /* La PWA ramifica por este: muestra hasta cuándo, no «PIN incorrecto». */
+  DRIVER_SUSPENDED: 'El conductor está suspendido',
+  DRIVER_NO_ELECTRONIC_PAYMENT: 'El conductor no recibe pagos electrónicos',
   RIDE_TOO_SHORT: 'Todavía no ha pasado el tiempo mínimo para finalizar',
   NO_FARE_RULE: 'No hay regla tarifaria vigente para ese par de zonas',
 
@@ -101,6 +104,8 @@ const STATUS_BY_CODE: Record<ErrorCode, HttpStatus> = {
   OFFER_NOT_VALID: HttpStatus.GONE,
   DRIVER_BUSY: HttpStatus.CONFLICT,
   DRIVER_OFF_SHIFT: HttpStatus.CONFLICT,
+  DRIVER_SUSPENDED: HttpStatus.FORBIDDEN,
+  DRIVER_NO_ELECTRONIC_PAYMENT: HttpStatus.CONFLICT,
   RIDE_TOO_SHORT: HttpStatus.CONFLICT,
   NO_FARE_RULE: HttpStatus.UNPROCESSABLE_ENTITY,
 

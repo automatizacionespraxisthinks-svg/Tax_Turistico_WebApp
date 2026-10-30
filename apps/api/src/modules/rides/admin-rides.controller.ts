@@ -41,6 +41,7 @@ const addressSchema = z.object({
 
 const cancelSchema = z.object({ reason: z.string().min(3, 'El motivo es obligatorio') });
 const assignSchema = z.object({ driverId: z.string().uuid() });
+const pagoSchema = z.object({ pagoElectronico: z.boolean() });
 
 /**
  * Carreras vistas desde el panel de oficina.
@@ -85,6 +86,16 @@ export class AdminRidesController {
     @Body(zodBody(addressSchema)) body: z.infer<typeof addressSchema>,
   ) {
     return this.rides.updateAddress(rideId, body, operator(request));
+  }
+
+  /** Efectivo o pago electrónico, con la carrera sin asignar. */
+  @Patch(':rideId/payment')
+  cambiarMedioDePago(
+    @Req() request: FastifyRequest,
+    @Param('rideId', ParseUUIDPipe) rideId: string,
+    @Body(zodBody(pagoSchema)) body: z.infer<typeof pagoSchema>,
+  ) {
+    return this.rides.cambiarMedioDePago(rideId, body.pagoElectronico, operator(request));
   }
 
   @Post(':rideId/cancel')

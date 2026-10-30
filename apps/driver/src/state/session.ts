@@ -40,9 +40,12 @@ export interface OfferedRide {
    */
   pickupPoint?: Point;
   pickupSource?: OrigenDelPunto;
-  /** Ausente si el cliente no dijo a dónde va, que es lo más común. */
-  dropoffText?: string;
-  dropoffPoint?: Point;
+  /**
+   * Si el cliente paga con pago electrónico (Nequi, transferencia,
+   * datáfono). Solo se las ofrecen a quien lo acepta, y el conductor lo ve
+   * antes de aceptar para no llevarse la sorpresa al cobrar.
+   */
+  pagoElectronico: boolean;
   distanceKm: number;
   etaMinutes: number;
   passengers: number;
@@ -250,9 +253,8 @@ interface ApiRide {
   pickupLat: number | null;
   pickupLng: number | null;
   pickupSource?: OrigenDelPunto | null;
-  dropoffText: string | null;
-  dropoffLat?: number | null;
-  dropoffLng?: number | null;
+  /** Ausente si la API todavía no se ha actualizado: efectivo. */
+  pagoElectronico?: boolean;
   passengers: number;
   vehicleType: VehicleType;
   notes: string | null;
@@ -269,7 +271,7 @@ export interface ApiOffer {
   code: string;
   pickupText: string;
   pickupReference?: string | null;
-  dropoffText?: string | null;
+  pagoElectronico?: boolean;
   passengers: number;
   distanceKm: number;
   etaMinutes: number;
@@ -283,7 +285,7 @@ export function offerFromSocket(push: ApiOffer): OfferedRide {
     code: push.code,
     pickupText: push.pickupText,
     pickupReference: push.pickupReference ?? undefined,
-    dropoffText: push.dropoffText ?? undefined,
+    pagoElectronico: push.pagoElectronico ?? false,
     distanceKm: push.distanceKm,
     etaMinutes: push.etaMinutes,
     passengers: push.passengers,
@@ -305,11 +307,7 @@ export function offerFromRide(ride: ApiRide): OfferedRide {
         ? { lat: ride.pickupLat, lng: ride.pickupLng }
         : undefined,
     pickupSource: ride.pickupSource ?? undefined,
-    dropoffText: ride.dropoffText ?? undefined,
-    dropoffPoint:
-      ride.dropoffLat != null && ride.dropoffLng != null
-        ? { lat: ride.dropoffLat, lng: ride.dropoffLng }
-        : undefined,
+    pagoElectronico: ride.pagoElectronico ?? false,
     distanceKm: 0,
     etaMinutes: ride.etaMinutes ?? 0,
     passengers: ride.passengers,

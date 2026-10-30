@@ -225,6 +225,14 @@ export function App() {
       onRideChanged: () => {
         void restore();
       },
+
+      // Le cerraron el turno: otro tomó su móvil o la oficina lo suspendió.
+      // Se dice por qué y se vuelve a preguntar el estado, que lo lleva a
+      // «fuera de turno» o, si está suspendido, a la pantalla de acceso.
+      onShiftClosed: (motivo) => {
+        setNotice(motivo);
+        void restore();
+      },
     });
 
     return disconnect;
@@ -347,6 +355,11 @@ export function App() {
       } catch (error) {
         if (error instanceof ApiError && error.isOffline) {
           return 'Sin conexión con el servidor.';
+        }
+        // Con el PIN correcto la API dice hasta cuándo: «PIN incorrecto» lo
+        // mandaría a pedir otro a la oficina sin necesidad.
+        if (error instanceof ApiError && error.code === 'DRIVER_SUSPENDED') {
+          return error.message;
         }
         return 'Código, placa o PIN incorrectos.';
       }

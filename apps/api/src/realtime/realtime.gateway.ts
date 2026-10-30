@@ -15,7 +15,12 @@ export interface OfferPush {
   code: string;
   pickupText: string;
   pickupReference?: string | null;
-  dropoffText?: string | null;
+  /**
+   * Si el cliente paga con pago electrónico. El destino ya no va: la PWA no
+   * lo muestra, porque casi nunca se sabe al pedir y se confundía con la
+   * dirección de recogida.
+   */
+  pagoElectronico: boolean;
   passengers: number;
   distanceKm: number;
   etaMinutes: number;
@@ -142,6 +147,16 @@ export class RealtimeGateway implements OnGatewayConnection, OnGatewayDisconnect
    */
   rideWave(rideId: string, entrada: WaveLogEntry): void {
     this.server?.to('office').emit('ride:wave', { rideId, ...entrada });
+  }
+
+  /**
+   * Al conductor se le cerró el turno sin que él lo pidiera: otro tomó su
+   * móvil (relevo) o la oficina lo suspendió. La PWA vuelve a preguntar su
+   * estado y muestra el motivo, en vez de quedarse esperando carreras que
+   * ya no le van a llegar.
+   */
+  turnoCerrado(driverId: string, motivo: string): void {
+    this.server?.to(`driver:${driverId}`).emit('shift:closed', { motivo });
   }
 
   /** Posición de un conductor, para el mapa de la oficina. */

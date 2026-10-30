@@ -1,5 +1,5 @@
 import type { ReactNode } from 'react';
-import type { StatusTone } from '@tax/shared';
+import type { RideStatus, StatusTone } from '@tax/shared';
 import { cn } from '../lib/cn';
 
 export const TONE_CLASS: Record<StatusTone, string> = {
@@ -11,6 +11,21 @@ export const TONE_CLASS: Record<StatusTone, string> = {
   warning: 'tone-warning',
   critical: 'tone-critical',
 };
+
+/**
+ * El color sólido de cada estado vivo de una carrera: ámbar buscando taxi,
+ * azul en camino, rojo en el lugar y verde en curso.
+ *
+ * Es uno solo para las bandas del tablero del panel y los botones de la PWA,
+ * para que el conductor y la oficina vean la misma carrera del mismo color.
+ * Todos dejan leer texto blanco encima.
+ */
+export const BANDA_DE_ESTADO = {
+  NOTIFIED: 'bg-warning-band',
+  ASSIGNED: 'bg-brand',
+  DRIVER_ARRIVED: 'bg-danger-fill',
+  IN_PROGRESS: 'bg-success',
+} as const satisfies Partial<Record<RideStatus, string>>;
 
 export interface StatusPillProps {
   tone: StatusTone;

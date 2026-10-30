@@ -3,12 +3,15 @@ import { Inject, Injectable, Logger } from '@nestjs/common';
 import { and, desc, eq, isNull } from 'drizzle-orm';
 import { uuidv7 } from 'uuidv7';
 import type { VehicleType } from '@tax/shared';
+import { finDeSuspension, sigueSuspendido } from '@tax/shared';
 import { DB, type Database } from '../../db/db.module';
-import { driverDevices, drivers, driverShifts, vehicles } from '../../db/schema';
+import { driverDevices, drivers, driverShifts, vehicleDrivers, vehicles } from '../../db/schema';
 import { AppError } from '../../common/problem';
 import { isUniqueViolation } from '../../common/pg-errors';
 import { hashSecret } from '../../common/crypto';
+import { RealtimeGateway } from '../../realtime/realtime.gateway';
 import { AuditService } from '../audit/audit.service';
+import { FleetService } from './fleet.service';
 
 /**
  * Alta y mantenimiento de la flota desde la oficina (§6, §8.1).
@@ -55,6 +58,8 @@ export class FleetAdminService {
   constructor(
     @Inject(DB) private readonly db: Database,
     @Inject(AuditService) private readonly audit: AuditService,
+    @Inject(FleetService) private readonly fleet: FleetService,
+    @Inject(RealtimeGateway) private readonly realtime: RealtimeGateway,
   ) {}
 
   /* ------------------------------------------------------------- altas */
@@ -87,9 +92,10 @@ export class FleetAdminService {
           .where(eq(vehicles.plate, plate))
           .limit(1);
 
+        const vehicleId = vehiculo?.id ?? uuidv7();
         if (!vehiculo) {
           await tx.insert(vehicles).values({
-            id: uuidv7(),
+            id: vehicleId,
             plate,
             type: input.vehicleType,
             capacity: input.vehicleType === 'van' ? 8 : input.vehicleType === 'camioneta' ? 5 : 4,
@@ -102,6 +108,24 @@ export class FleetAdminService {
           name: input.name.trim(),
           phone: input.phone.trim(),
           pinHash: await hashSecret(pin),
+        });
+
+        /*
+         * Una placa repetida es lo normal: un carro lo manejan su conductor
+         * y sus relevadores. El primero que se da de alta con la placa queda
+         * de conductor y los siguientes de relevadores, igual que en el
+         * listado maestro; así la ficha del móvil muestra a todos.
+         */
+        const [titular] = await tx
+          .select({ id: vehicleDrivers.id })
+          .from(vehicleDrivers)
+          .where(and(eq(vehicleDrivers.vehicleId, vehicleId), eq(vehicleDrivers.role, 'conductor')))
+          .limit(1);
+        await tx.insert(vehicleDrivers).values({
+          id: uuidv7(),
+          vehicleId,
+          driverId: id,
+          role: titular ? 'relevador' : 'conductor',
         });
 
         await this.audit.record(
@@ -135,7 +159,13 @@ export class FleetAdminService {
   /** Cambia nombre, teléfono, si sigue trabajando o si es una cuenta de prueba. */
   async updateDriver(
     driverId: string,
-    cambios: { name?: string; phone?: string | null; active?: boolean; esPrueba?: boolean },
+    cambios: {
+      name?: string;
+      phone?: string | null;
+      active?: boolean;
+      esPrueba?: boolean;
+      aceptaPagoElectronico?: boolean;
+    },
     actor: AdminActor,
   ): Promise<void> {
     const [antes] = await this.db
@@ -145,6 +175,7 @@ export class FleetAdminService {
         phone: drivers.phone,
         active: drivers.active,
         esPrueba: drivers.esPrueba,
+        aceptaPagoElectronico: drivers.aceptaPagoElectronico,
       })
       .from(drivers)
       .where(eq(drivers.id, driverId))
@@ -157,6 +188,7 @@ export class FleetAdminService {
       phone: cambios.phone?.trim() ?? antes.phone,
       active: cambios.active ?? antes.active,
       esPrueba: cambios.esPrueba ?? antes.esPrueba,
+      aceptaPagoElectronico: cambios.aceptaPagoElectronico ?? antes.aceptaPagoElectronico,
     };
     const accion =
       despues.active === false && antes.active
@@ -165,7 +197,11 @@ export class FleetAdminService {
           ? despues.esPrueba
             ? 'Marcó un conductor como cuenta de prueba'
             : 'Quitó la marca de prueba a un conductor'
-          : 'Editó un conductor';
+          : despues.aceptaPagoElectronico !== antes.aceptaPagoElectronico
+            ? despues.aceptaPagoElectronico
+              ? 'Habilitó los pagos electrónicos a un conductor'
+              : 'Quitó los pagos electrónicos a un conductor'
+            : 'Editó un conductor';
 
     await this.db.transaction(async (tx) => {
       await tx
@@ -195,6 +231,99 @@ export class FleetAdminService {
      * desactiva. Lo que sí hace, de inmediato, es sacarlo de las oleadas,
      * porque `findCandidates` exige `active = true`.
      */
+  }
+
+  /* --------------------------------------------------------- suspensión */
+
+  /**
+   * Suspende a un conductor por `dias` días contados desde ahora, por una
+   * falla al reglamento interno.
+   *
+   * Es la desactivación con fecha de vuelta: sale de las oleadas al momento,
+   * no entra a la PWA ni abre turno, y al cumplirse vuelve solo. Si estaba
+   * en turno sin carrera, se le cierra y su teléfono se entera; si estaba
+   * haciendo una, la termina y el turno se le cierra al finalizarla. Una
+   * suspensión nueva reemplaza a la que hubiera: la oficina pone la fecha
+   * que vale, no se suman.
+   */
+  async suspender(
+    driverId: string,
+    { dias, motivo }: { dias: number; motivo: string },
+    actor: AdminActor,
+  ): Promise<{ hasta: Date }> {
+    const [antes] = await this.db
+      .select({ code: drivers.code, hasta: drivers.suspendidoHasta })
+      .from(drivers)
+      .where(eq(drivers.id, driverId))
+      .limit(1);
+    if (!antes) throw new AppError('NOT_FOUND', 'El conductor no existe');
+
+    const hasta = new Date(Date.now() + dias * 24 * 60 * 60 * 1000);
+
+    await this.db.transaction(async (tx) => {
+      await tx
+        .update(drivers)
+        .set({ suspendidoHasta: hasta, motivoSuspension: motivo.trim(), updatedAt: new Date() })
+        .where(eq(drivers.id, driverId));
+
+      await this.audit.record(
+        {
+          actorId: actor.id,
+          actorName: actor.name,
+          role: actor.role,
+          action: `Suspendió un conductor por ${dias} ${dias === 1 ? 'día' : 'días'}`,
+          entity: 'drivers',
+          entityId: antes.code,
+          before: sigueSuspendido(antes.hasta) ? { hasta: antes.hasta!.toISOString() } : undefined,
+          after: { hasta: hasta.toISOString(), motivo: motivo.trim() },
+          ip: actor.ip,
+        },
+        tx as unknown as Database,
+      );
+    });
+
+    if (!(await this.fleet.tieneCarreraActiva(driverId)) && (await this.hasOpenShift(driverId))) {
+      await this.fleet.closeShift(driverId);
+      this.realtime.turnoCerrado(
+        driverId,
+        `La oficina te suspendió hasta el ${finDeSuspension(hasta)}: tu turno quedó cerrado.`,
+      );
+    }
+
+    this.logger.log({ code: antes.code, dias, actor: actor.name }, 'Conductor suspendido');
+    return { hasta };
+  }
+
+  /** Levanta la suspensión antes de tiempo: vuelve a poder trabajar ya. */
+  async levantarSuspension(driverId: string, actor: AdminActor): Promise<void> {
+    const [antes] = await this.db
+      .select({ code: drivers.code, hasta: drivers.suspendidoHasta, motivo: drivers.motivoSuspension })
+      .from(drivers)
+      .where(eq(drivers.id, driverId))
+      .limit(1);
+    if (!antes) throw new AppError('NOT_FOUND', 'El conductor no existe');
+    if (!sigueSuspendido(antes.hasta)) return;
+
+    await this.db.transaction(async (tx) => {
+      await tx
+        .update(drivers)
+        .set({ suspendidoHasta: null, motivoSuspension: null, updatedAt: new Date() })
+        .where(eq(drivers.id, driverId));
+
+      await this.audit.record(
+        {
+          actorId: actor.id,
+          actorName: actor.name,
+          role: actor.role,
+          action: 'Levantó la suspensión de un conductor',
+          entity: 'drivers',
+          entityId: antes.code,
+          before: { hasta: antes.hasta!.toISOString() },
+          ip: actor.ip,
+        },
+        tx as unknown as Database,
+      );
+    });
   }
 
   /**

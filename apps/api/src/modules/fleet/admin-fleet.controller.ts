@@ -1,7 +1,19 @@
-import { Body, Controller, Get, HttpCode, Param, ParseUUIDPipe, Patch, Post, Req, UseGuards } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Delete,
+  Get,
+  HttpCode,
+  Param,
+  ParseUUIDPipe,
+  Patch,
+  Post,
+  Req,
+  UseGuards,
+} from '@nestjs/common';
 import type { FastifyRequest } from 'fastify';
 import { z } from 'zod';
-import { VEHICLE_TYPES } from '@tax/shared';
+import { VEHICLE_TYPES, suspensionSchema, type Suspension } from '@tax/shared';
 import { zodBody } from '../../common/zod.pipe';
 import { Roles, SessionGuard } from '../identity/guards';
 import { FleetService } from './fleet.service';
@@ -23,6 +35,8 @@ const cambiosSchema = z
     active: z.boolean().optional(),
     /** Cuenta con la que el equipo prueba: no cuenta en Reportes sin pruebas. */
     esPrueba: z.boolean().optional(),
+    /** Recibe pagos electrónicos: solo a estos les llegan esas carreras. */
+    aceptaPagoElectronico: z.boolean().optional(),
   })
   .refine((v) => Object.keys(v).length > 0, 'No hay nada que cambiar');
 
@@ -77,6 +91,29 @@ export class AdminFleetController {
     @Body(zodBody(cambiosSchema)) body: z.infer<typeof cambiosSchema>,
   ) {
     await this.admin.updateDriver(driverId, body, actorDe(request));
+  }
+
+  /**
+   * Suspende por unos días (reglamento interno). Reemplaza la suspensión que
+   * hubiera; vuelve sola al cumplirse.
+   */
+  @Post(':driverId/suspension')
+  @Roles('administrador')
+  async suspender(
+    @Req() request: FastifyRequest,
+    @Param('driverId', ParseUUIDPipe) driverId: string,
+    @Body(zodBody(suspensionSchema)) body: Suspension,
+  ) {
+    const { hasta } = await this.admin.suspender(driverId, body, actorDe(request));
+    return { suspendidoHasta: hasta.toISOString() };
+  }
+
+  /** Levanta la suspensión antes de que se cumpla. */
+  @Delete(':driverId/suspension')
+  @Roles('administrador')
+  @HttpCode(204)
+  async levantarSuspension(@Req() request: FastifyRequest, @Param('driverId', ParseUUIDPipe) driverId: string) {
+    await this.admin.levantarSuspension(driverId, actorDe(request));
   }
 
   /** Genera un PIN nuevo y levanta el bloqueo por intentos fallidos. */

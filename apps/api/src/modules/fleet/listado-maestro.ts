@@ -280,13 +280,60 @@ export async function leerListadoMaestro(contenido: Buffer): Promise<ListadoLeid
     });
   }
 
-  // Un móvil o una placa repetidos no se pueden adivinar: la carga no sigue.
-  const errores: string[] = [];
-  const repetidos = (claves: string[]) => [...new Set(claves.filter((c, i) => claves.indexOf(c) !== i))];
-  for (const interno of repetidos(moviles.map((m) => m.interno))) errores.push(`El número interno ${interno} aparece más de una vez.`);
-  for (const placa of repetidos(moviles.map((m) => m.placa))) errores.push(`La placa ${placa} aparece más de una vez.`);
+  return { hoja: hoja.name, ...juntarPorPlaca(moviles, avisos) };
+}
 
-  return { hoja: hoja.name, moviles, avisos, errores };
+/**
+ * Un carro lo manejan varios conductores, así que una placa puede venir en
+ * varias filas: una por cada uno. Esas filas son el mismo móvil y se juntan,
+ * con todos sus conductores: el primero que aparezca queda de conductor y
+ * los demás de relevadores, sin repetir cédula. La ficha del vehículo es la
+ * de la primera fila.
+ *
+ * Lo que sí frena la carga es una contradicción, porque no se puede adivinar
+ * cuál fila tiene razón: la misma placa con dos números internos, o el mismo
+ * número interno con dos placas.
+ */
+export function juntarPorPlaca(
+  filas: MovilDelListado[],
+  avisos: string[],
+): { moviles: MovilDelListado[]; avisos: string[]; errores: string[] } {
+  const errores: string[] = [];
+  const porPlaca = new Map<string, MovilDelListado>();
+  const moviles: MovilDelListado[] = [];
+
+  for (const fila of filas) {
+    const previo = porPlaca.get(fila.placa);
+    if (!previo) {
+      porPlaca.set(fila.placa, fila);
+      moviles.push(fila);
+      continue;
+    }
+    if (previo.interno !== fila.interno) {
+      errores.push(
+        `La placa ${fila.placa} aparece con dos números internos: ${previo.interno} (fila ${previo.fila}) y ${fila.interno} (fila ${fila.fila}).`,
+      );
+      continue;
+    }
+
+    const cedulas = new Set([previo.conductor, ...previo.relevadores].flatMap((p) => (p ? [p.cedula] : [])));
+    for (const persona of [fila.conductor, ...fila.relevadores]) {
+      if (!persona || cedulas.has(persona.cedula)) continue;
+      cedulas.add(persona.cedula);
+      if (previo.conductor) previo.relevadores.push(persona);
+      else previo.conductor = persona;
+    }
+    avisos.push(
+      `Fila ${fila.fila}: la placa ${fila.placa} ya venía en la fila ${previo.fila}; es el mismo móvil y se le suman sus conductores.`,
+    );
+  }
+
+  const internos = moviles.map((m) => m.interno);
+  for (const interno of new Set(internos.filter((c, i) => internos.indexOf(c) !== i))) {
+    errores.push(`El número interno ${interno} aparece con placas distintas.`);
+  }
+
+  return { moviles, avisos, errores };
 }
 
 /** La fila que tiene «N° Interno» y «Placa», entre las diez primeras. */

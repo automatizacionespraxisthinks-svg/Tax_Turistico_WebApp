@@ -45,6 +45,8 @@ export interface ApiRide {
   zoneId: string | null;
   vehicleType: VehicleType;
   passengers: number;
+  /** Ausente si la API todavía no se ha actualizado: efectivo. */
+  pagoElectronico?: boolean;
   distanceKm: number | null;
   dropoffSource: 'cliente' | 'conductor' | null;
   pickupPhotoAt: string | null;
@@ -90,6 +92,10 @@ export interface ApiDriver {
   status: DriverStatus;
   active: boolean;
   esPrueba?: boolean;
+  aceptaPagoElectronico?: boolean;
+  /** Solo mientras la suspensión sigue en pie. */
+  suspendidoHasta?: string | null;
+  motivoSuspension?: string | null;
   licenseExpiresOn?: string | null;
   licenseRestriction?: string | null;
   moviles?: {
@@ -175,6 +181,7 @@ export function toRide(row: ApiRide): Ride {
     zoneId: row.zoneId ?? '',
     vehicleType: row.vehicleType,
     passengers: row.passengers,
+    pagoElectronico: row.pagoElectronico ?? false,
     distanceKm: row.distanceKm ?? undefined,
     dropoffSource: row.dropoffSource ?? undefined,
     pickupPhotoAt: row.pickupPhotoAt ?? undefined,
@@ -226,6 +233,9 @@ export function toDriver(row: ApiDriver): Driver {
     status: row.status,
     active: row.active,
     esPrueba: row.esPrueba ?? false,
+    aceptaPagoElectronico: row.aceptaPagoElectronico ?? false,
+    suspendidoHasta: row.suspendidoHasta ?? undefined,
+    motivoSuspension: row.motivoSuspension ?? undefined,
     licenciaVence: row.licenseExpiresOn ?? undefined,
     licenciaRestriccion: row.licenseRestriction ?? undefined,
     moviles: (row.moviles ?? []).map((m) => ({

@@ -33,6 +33,8 @@ const cancelSchema = z.object({
   reason: z.string().min(3, 'El motivo es obligatorio'),
 });
 
+const pagoSchema = z.object({ pagoElectronico: z.boolean() });
+
 /**
  * Lo que identifica un pedido de taxi: quién lo pide y, si compartió su
  * ubicación, dónde está.
@@ -115,6 +117,21 @@ export class RidesController {
     @Body(zodBody(addressSchema)) body: z.infer<typeof addressSchema>,
   ) {
     return this.rides.updateAddress(rideId, body, actorFrom(request, 'customer'));
+  }
+
+  /**
+   * El cliente cambia cómo va a pagar. Solo con la carrera sin asignar: es
+   * la salida cuando nadie con pago electrónico la tomó y el cliente acepta
+   * pagar en efectivo. Después hay que relanzarla.
+   */
+  @Patch(':rideId/payment')
+  @Scopes('rides:write')
+  cambiarMedioDePago(
+    @Req() request: FastifyRequest,
+    @Param('rideId', ParseUUIDPipe) rideId: string,
+    @Body(zodBody(pagoSchema)) body: z.infer<typeof pagoSchema>,
+  ) {
+    return this.rides.cambiarMedioDePago(rideId, body.pagoElectronico, actorFrom(request, 'customer'));
   }
 
   @Post(':rideId/cancel')

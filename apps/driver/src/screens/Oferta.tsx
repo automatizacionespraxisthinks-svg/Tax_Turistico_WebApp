@@ -3,7 +3,9 @@ import { motion } from 'motion/react';
 import { Check, MapPin, Users, X } from 'lucide-react';
 import { formatDistance } from '@tax/shared';
 import { Button, ProgressRing, StatusPill, cn, transition } from '@tax/ui';
+import { BotonDeEtapa } from '../components/BotonDeEtapa';
 import { ActionBar, AddressBlock, Screen } from '../components/Chrome';
+import { MedioDePago } from '../components/MedioDePago';
 import type { OfferedRide } from '../state/session';
 
 /**
@@ -11,7 +13,10 @@ import type { OfferedRide } from '../state/session';
  *
  * Es la pantalla más exigente: llega sin aviso, el conductor puede estar en
  * movimiento y la ventana es de segundos. Por eso:
- *  - un solo dato grande (la dirección) y un solo botón principal;
+ *  - un solo dato grande (la dirección) y un solo botón principal, en el
+ *    ámbar de «Buscando taxi» del panel;
+ *  - sin destino: casi nunca se sabe al pedir, y se confundía con la
+ *    dirección de recogida;
  *  - el aro de cuenta atrás cambia a crítico en los últimos 10 s;
  *  - vibra al aparecer, para que se note sin mirar.
  */
@@ -95,15 +100,11 @@ export function Oferta({
           <Chip icon={<Users className="size-3.5" />}>
             {offer.passengers} {offer.passengers === 1 ? 'pasajero' : 'pasajeros'}
           </Chip>
-          <Chip>{offer.zoneName}</Chip>
+          {/* La oferta del socket no trae la zona: sin ella, un chip vacío. */}
+          {offer.zoneName ? <Chip>{offer.zoneName}</Chip> : null}
         </div>
 
-        <div className="rounded-lg border border-line bg-surface-sunk p-4">
-          <p className="text-micro font-semibold uppercase tracking-[0.07em] text-ink-muted">
-            Destino
-          </p>
-          <p className="mt-1 text-xl font-medium text-ink">{offer.dropoffText ?? 'Sin destino indicado'}</p>
-        </div>
+        <MedioDePago electronico={offer.pagoElectronico} />
 
         {offer.notes ? (
           <p className="rounded-md border border-line px-3 py-2.5 text-lg leading-snug text-ink-secondary">
@@ -117,9 +118,9 @@ export function Oferta({
       </Screen>
 
       <ActionBar>
-        <Button variant="primary" size="touch" icon={<Check className="size-6" />} onClick={onAccept}>
+        <BotonDeEtapa estado="NOTIFIED" icon={<Check className="size-6" />} onClick={onAccept}>
           Aceptar carrera
-        </Button>
+        </BotonDeEtapa>
         <Button variant="ghost" size="lg" className="w-full" icon={<X className="size-4" />} onClick={onReject}>
           Rechazar
         </Button>

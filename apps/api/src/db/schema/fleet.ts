@@ -47,6 +47,22 @@ export const drivers = pgTable(
      * incluir pruebas».
      */
     esPrueba: boolean('es_prueba').notNull().default(false),
+    /**
+     * Si recibe pagos electrónicos (Nequi, transferencia, datáfono). Las
+     * carreras de clientes que pagan así solo se les ofrecen a ellos.
+     */
+    aceptaPagoElectronico: boolean('acepta_pago_electronico').notNull().default(false),
+    /**
+     * Suspensión por el reglamento interno: hasta cuándo no puede trabajar.
+     *
+     * Es la desactivación con fecha de vuelta: mientras dure no recibe
+     * carreras, no entra a la PWA ni abre turno; al pasar la fecha vuelve
+     * solo, sin que nadie tenga que acordarse de reactivarlo. Nula si no
+     * está suspendido; una fecha pasada es una suspensión ya cumplida.
+     */
+    suspendidoHasta: timestamp('suspendido_hasta', { withTimezone: true }),
+    /** Por qué, para la oficina; el conductor solo ve hasta cuándo. */
+    motivoSuspension: text('motivo_suspension'),
     /** Intentos fallidos seguidos; a los 5 se bloquea el acceso (§8.1). */
     failedAttempts: integer('failed_attempts').notNull().default(0),
     lockedUntil: timestamp('locked_until', { withTimezone: true }),

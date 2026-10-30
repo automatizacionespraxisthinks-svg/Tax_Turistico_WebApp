@@ -1,11 +1,13 @@
 import { useMemo, useState } from 'react';
 import type { ReactNode } from 'react';
 import { AnimatePresence, motion } from 'motion/react';
-import { Car, Search, ShieldAlert, SignalLow } from 'lucide-react';
+import { Ban, Car, CreditCard, Search, ShieldAlert, SignalLow } from 'lucide-react';
 import type { Driver, MovilVinculado } from '@tax/shared';
 import {
   DRIVER_STATUS_LABEL,
   DRIVER_STATUS_TONE,
+  ZONA_HORARIA_PAIPA,
+  finDeSuspension,
   formatDistance,
   formatRelative,
   haversineKm,
@@ -41,6 +43,7 @@ const FILTERS: { value: Filter; label: string; match: (d: Driver) => boolean }[]
     value: 'atencion',
     label: 'Con alerta',
     match: (d) =>
+      Boolean(d.suspendidoHasta) ||
       !d.deviceRegistered ||
       !d.vehicle.active ||
       Boolean(estadoLicencia(d.licenciaVence).alerta) ||
@@ -211,8 +214,15 @@ function DriverCard({ driver, onClick }: { driver: Driver; onClick: () => void }
         ) : null}
       </div>
 
-      {(stale || !driver.deviceRegistered || !driver.vehicle.active || licencia.alerta) && (
+      {(driver.suspendidoHasta ||
+        driver.aceptaPagoElectronico ||
+        stale ||
+        !driver.deviceRegistered ||
+        !driver.vehicle.active ||
+        licencia.alerta) && (
         <div className="mt-2.5 flex flex-wrap gap-1.5">
+          {driver.suspendidoHasta ? <Suspendido hasta={driver.suspendidoHasta} /> : null}
+          {driver.aceptaPagoElectronico ? <PagoElectronico /> : null}
           {stale ? <Alert>Sin GPS reciente</Alert> : null}
           {!driver.deviceRegistered ? <Alert>Dispositivo sin registrar</Alert> : null}
           {!driver.vehicle.active ? <Alert>Vehículo inactivo</Alert> : null}
@@ -220,6 +230,33 @@ function DriverCard({ driver, onClick }: { driver: Driver; onClick: () => void }
         </div>
       )}
     </motion.button>
+  );
+}
+
+/**
+ * Suspendido por el reglamento: rojo, porque hoy no puede trabajar. En la
+ * tarjeta va solo el día; la hora exacta, en el título y en la ficha.
+ */
+function Suspendido({ hasta }: { hasta: string }) {
+  const dia = new Date(hasta).toLocaleDateString('es-CO', { day: 'numeric', month: 'short', timeZone: ZONA_HORARIA_PAIPA });
+  return (
+    <span
+      title={`Suspendido hasta el ${finDeSuspension(hasta)}`}
+      className="tone-critical inline-flex items-center gap-1 rounded-full border border-[var(--tone-line)] bg-[var(--tone-bg)] px-2 py-0.5 text-micro font-medium text-[var(--tone-ink)]"
+    >
+      <Ban className="size-3" />
+      Suspendido hasta el {dia}
+    </span>
+  );
+}
+
+/** Recibe pagos electrónicos: un dato, no una alerta, y en azul. */
+function PagoElectronico() {
+  return (
+    <span className="tone-info inline-flex items-center gap-1 rounded-full border border-[var(--tone-line)] bg-[var(--tone-bg)] px-2 py-0.5 text-micro text-[var(--tone-ink)]">
+      <CreditCard className="size-3" />
+      Pago electrónico
+    </span>
   );
 }
 
@@ -262,6 +299,7 @@ function DriverDetail({ driver, rideCode }: { driver: Driver; rideCode?: string 
         <Meta label="Capacidad">{driver.vehicle.capacity} pasajeros</Meta>
         <Meta label="Carreras hoy">{driver.ridesToday}</Meta>
         <Meta label="Aceptación">{Math.round(driver.acceptanceRate * 100)} %</Meta>
+        <Meta label="Pago electrónico">{driver.aceptaPagoElectronico ? 'Lo recibe' : 'No lo recibe'}</Meta>
       </div>
 
       <div>

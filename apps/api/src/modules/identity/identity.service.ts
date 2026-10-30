@@ -1,9 +1,9 @@
 import { randomBytes } from 'node:crypto';
 import { Inject, Injectable, Logger } from '@nestjs/common';
-import { and, eq, isNull, ne, or, gt } from 'drizzle-orm';
+import { and, eq, inArray, isNull, ne, or, gt } from 'drizzle-orm';
 import { uuidv7 } from 'uuidv7';
 import { DB, type Database } from '../../db/db.module';
-import { apiKeys, driverDevices, drivers, sessions, userRecoveryCodes, users } from '../../db/schema';
+import { apiKeys, driverDevices, drivers, rides, sessions, userRecoveryCodes, users } from '../../db/schema';
 import { AppError } from '../../common/problem';
 import {
   decryptColumn,
@@ -16,7 +16,7 @@ import {
 } from '../../common/crypto';
 import { base32Decode, generateTotpSecret, otpauthUri, verifyTotp } from '../../common/totp';
 import { loadEnv } from '../../config/env';
-import { evaluatePassword, normalizeLogin } from '@tax/shared';
+import { ACTIVE_RIDE_STATUSES, evaluatePassword, finDeSuspension, normalizeLogin, sigueSuspendido } from '@tax/shared';
 import { AuditService } from '../audit/audit.service';
 
 export interface ApiPrincipal {
@@ -177,6 +177,16 @@ export class IdentityService {
     // solo se comprueba que venga, porque sin ella el acceso sería código+PIN.
     if (!plate || plate.trim().length < 5) throw invalid;
 
+    // Después del PIN y no antes: decir «suspendido» a quien no lo tiene
+    // revelaría que el código existe. Con el PIN correcto, en cambio, se le
+    // dice hasta cuándo; un «PIN incorrecto» lo mandaría a pedir otro.
+    if (sigueSuspendido(driver.suspendidoHasta)) {
+      throw new AppError(
+        'DRIVER_SUSPENDED',
+        `Estás suspendido hasta el ${finDeSuspension(driver.suspendidoHasta!)}; para cualquier duda, llama a la oficina.`,
+      );
+    }
+
     const refreshToken = randomToken(32);
     let deviceId = uuidv7();
 
@@ -266,6 +276,7 @@ export class IdentityService {
         code: drivers.code,
         name: drivers.name,
         active: drivers.active,
+        suspendidoHasta: drivers.suspendidoHasta,
       })
       .from(driverDevices)
       .innerJoin(drivers, eq(drivers.id, driverDevices.driverId))
@@ -275,6 +286,22 @@ export class IdentityService {
       .limit(1);
 
     if (!row || !row.active) return null;
+
+    /*
+     * Un suspendido queda fuera de la PWA, salvo que tenga una carrera
+     * andando: se la deja terminar, porque cortarle el acceso dejaría al
+     * pasajero a mitad de camino y la carrera abierta para siempre. Al
+     * cerrarla se le cierra también el turno, y la siguiente petición ya no
+     * pasa. Solo se consulta para los suspendidos, que son pocos.
+     */
+    if (sigueSuspendido(row.suspendidoHasta)) {
+      const [enCarrera] = await this.db
+        .select({ id: rides.id })
+        .from(rides)
+        .where(and(eq(rides.driverId, row.driverId), inArray(rides.status, ACTIVE_RIDE_STATUSES)))
+        .limit(1);
+      if (!enCarrera) return null;
+    }
 
     return {
       kind: 'driver',

@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { AnimatePresence, motion } from 'motion/react';
-import { Ban, Camera, Car, MessageSquare, RefreshCw } from 'lucide-react';
+import { Ban, Banknote, Camera, Car, CreditCard, MessageSquare, RefreshCw } from 'lucide-react';
 import type { Driver, Ride, RideOffer, WaveLogEntry } from '@tax/shared';
 import {
   ACTOR_LABEL,
@@ -134,6 +134,12 @@ function Resumen({ ride, driver }: { ride: Ride; driver?: Driver }) {
         </Meta>
         <Meta label="Línea">{ride.line}</Meta>
         <Meta label="Pasajeros">{ride.passengers}</Meta>
+        <Meta label="Paga con">
+          <span className={cn('inline-flex items-center gap-1.5', ride.pagoElectronico && 'font-medium text-brand')}>
+            {ride.pagoElectronico ? <CreditCard className="size-3.5" /> : <Banknote className="size-3.5" />}
+            {ride.pagoElectronico ? 'Pago electrónico' : 'Efectivo'}
+          </span>
+        </Meta>
       </div>
 
       {ride.customerId ? <TelefonoDePrueba ride={ride} /> : null}
@@ -237,10 +243,41 @@ function RideActions({ ride }: { ride: Ride }) {
   const drivers = useLive((s) => s.drivers);
   const [assigning, setAssigning] = useState(false);
   const [choice, setChoice] = useState('');
+  const [cambiandoPago, setCambiandoPago] = useState(false);
 
-  const available = drivers.filter((d) => d.status === 'AVAILABLE');
+  // Las mismas reglas que el despacho: ni suspendidos, ni quien no recibe
+  // pago electrónico si la carrera se paga así. La API también lo exige.
+  const available = drivers.filter(
+    (d) =>
+      d.status === 'AVAILABLE' &&
+      !d.suspendidoHasta &&
+      (!ride.pagoElectronico || d.aceptaPagoElectronico),
+  );
   const allowed = transitionsFrom(ride.status, 'operator');
   if (allowed.length === 0) return null;
+
+  /** Solo sin asignar: es la salida cuando nadie con pago electrónico la tomó. */
+  const cambiarPago = (pagoElectronico: boolean) => {
+    setCambiandoPago(true);
+    void api
+      .patch(`/v1/admin/rides/${ride.id}/payment`, { pagoElectronico })
+      .then(() => loadRideDetail(ride.id))
+      .then(() =>
+        push({
+          tone: 'info',
+          title: pagoElectronico ? 'Ahora paga con pago electrónico' : 'Ahora paga en efectivo',
+          description: 'Relanza el despacho para volver a buscar taxi.',
+        }),
+      )
+      .catch((error: unknown) =>
+        push({
+          tone: 'critical',
+          title: 'No se pudo cambiar el medio de pago',
+          description: error instanceof Error ? error.message : undefined,
+        }),
+      )
+      .finally(() => setCambiandoPago(false));
+  };
 
   const canRelaunch = allowed.some((t) => t.to === 'NOTIFIED');
   const canAssign = allowed.some((t) => t.to === 'ASSIGNED');
@@ -274,6 +311,17 @@ function RideActions({ ride }: { ride: Ride }) {
             }}
           >
             Relanzar despacho
+          </Button>
+        ) : null}
+
+        {ride.status === 'UNASSIGNED' ? (
+          <Button
+            variant="secondary"
+            icon={ride.pagoElectronico ? <Banknote className="size-3.5" /> : <CreditCard className="size-3.5" />}
+            loading={cambiandoPago}
+            onClick={() => cambiarPago(!ride.pagoElectronico)}
+          >
+            {ride.pagoElectronico ? 'Cambiar a efectivo' : 'Cambiar a pago electrónico'}
           </Button>
         ) : null}
 
@@ -321,7 +369,11 @@ function RideActions({ ride }: { ride: Ride }) {
             className="overflow-hidden"
           >
             <div className="flex items-end gap-2 pt-1">
-              <Field label="Conductor disponible" className="flex-1" htmlFor="assign-driver">
+              <Field
+                label={ride.pagoElectronico ? 'Conductor disponible con pago electrónico' : 'Conductor disponible'}
+                className="flex-1"
+                htmlFor="assign-driver"
+              >
                 <Select id="assign-driver" value={choice} onChange={(e) => setChoice(e.target.value)}>
                   <option value="">Selecciona un conductor…</option>
                   {available.map((d) => (
@@ -361,6 +413,13 @@ function RideActions({ ride }: { ride: Ride }) {
           </motion.div>
         ) : null}
       </AnimatePresence>
+
+      {ride.status === 'UNASSIGNED' && ride.pagoElectronico ? (
+        <p className="text-caption text-ink-secondary">
+          Se ofreció solo a conductores que reciben pago electrónico. Si el cliente puede pagar en
+          efectivo, cámbiala y relanza el despacho.
+        </p>
+      ) : null}
 
       <p className="text-micro text-ink-muted">
         Solo aparecen las transiciones que la máquina de estados permite desde{' '}

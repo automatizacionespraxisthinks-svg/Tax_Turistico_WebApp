@@ -4,7 +4,7 @@ export * from './motion';
 export { Button, IconButton } from './components/Button';
 export type { ButtonProps, ButtonVariant, ButtonSize } from './components/Button';
 export { Card, CardHeader, SectionLabel } from './components/Card';
-export { StatusPill, LiveDot, Meta, TONE_CLASS } from './components/StatusPill';
+export { StatusPill, LiveDot, Meta, TONE_CLASS, BANDA_DE_ESTADO } from './components/StatusPill';
 export { Stat, AnimatedNumber } from './components/Stat';
 export { Field, Input, Textarea, Select, Switch } from './components/Field';
 export { Sheet } from './components/Sheet';

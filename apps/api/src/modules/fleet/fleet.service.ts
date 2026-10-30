@@ -3,14 +3,36 @@ import { Redis } from 'ioredis';
 import { and, eq, inArray, isNull, sql } from 'drizzle-orm';
 import { uuidv7 } from 'uuidv7';
 import type { Point, VehicleType } from '@tax/shared';
-import { estimateEtaMinutes, haversineKm } from '@tax/shared';
+import {
+  ACTIVE_RIDE_STATUSES,
+  estimateEtaMinutes,
+  finDeSuspension,
+  haversineKm,
+  sigueSuspendido,
+} from '@tax/shared';
 import { DB, type Database } from '../../db/db.module';
 import { REDIS, redisKeys } from '../../redis/redis.module';
-import { driverDevices, driverPositions, driverShifts, drivers, vehicleDrivers, vehicles } from '../../db/schema';
+import {
+  driverDevices,
+  driverPositions,
+  driverShifts,
+  drivers,
+  rides,
+  vehicleDrivers,
+  vehicles,
+} from '../../db/schema';
 import { AppError } from '../../common/problem';
 import { loadEnv } from '../../config/env';
+import { RealtimeGateway } from '../../realtime/realtime.gateway';
 import { ZonesService } from '../pricing/zones.service';
 import { isUniqueViolation } from '../../common/pg-errors';
+
+/**
+ * Sin suspensión en pie: nunca suspendido, o la suspensión ya se cumplió. Se
+ * compara con la hora de la base, así una suspensión vence sola sin que
+ * nadie tenga que quitarla.
+ */
+export const noSuspendido = sql`(${drivers.suspendidoHasta} is null or ${drivers.suspendidoHasta} <= now())`;
 
 /** Un móvil al que está vinculado un conductor, según el listado maestro. */
 export interface MovilVinculado {
@@ -33,6 +55,10 @@ export interface DriverWithPosition {
   status: string;
   active: boolean;
   esPrueba: boolean;
+  aceptaPagoElectronico: boolean;
+  /** Solo mientras la suspensión sigue en pie. */
+  suspendidoHasta?: Date;
+  motivoSuspension?: string;
   shiftStartedAt: Date | null;
   plate: string | null;
   vehicleType: string | null;
@@ -69,11 +95,14 @@ export class FleetService {
     @Inject(DB) private readonly db: Database,
     @Inject(REDIS) private readonly redis: Redis,
     private readonly zonesService: ZonesService,
+    private readonly realtime: RealtimeGateway,
   ) {}
 
   /* ------------------------------------------------------------- turnos */
 
   async openShift(driverId: string, plate: string): Promise<{ shiftId: string }> {
+    await this.exigirNoSuspendido(driverId);
+
     const [vehicle] = await this.db
       .select()
       .from(vehicles)
@@ -81,6 +110,8 @@ export class FleetService {
       .limit(1);
 
     if (!vehicle) throw new AppError('NOT_FOUND', `No hay un vehículo activo con placa ${plate}`);
+
+    await this.relevar(vehicle.id, vehicle.plate, driverId);
 
     const shiftId = uuidv7();
 
@@ -100,6 +131,68 @@ export class FleetService {
     }
 
     return { shiftId };
+  }
+
+  /**
+   * Relevo: un carro lo manejan varios conductores —el titular y sus
+   * relevadores— con la misma placa, y lo normal es que quien entrega el
+   * carro olvide cerrar su turno en la PWA.
+   *
+   * Si el carro sigue con el turno abierto de otro, ese turno se cierra y el
+   * que llega abre el suyo: el carro solo puede estar en una mano a la vez, y
+   * la que manda es la de quien lo tiene ahora. La única excepción es una
+   * carrera en curso: entonces el carro está ocupado de verdad y no se le
+   * quita a nadie a mitad de camino.
+   */
+  private async relevar(vehicleId: string, plate: string, driverId: string): Promise<void> {
+    const [otro] = await this.db
+      .select({ driverId: driverShifts.driverId, name: drivers.name })
+      .from(driverShifts)
+      .innerJoin(drivers, eq(drivers.id, driverShifts.driverId))
+      .where(and(eq(driverShifts.vehicleId, vehicleId), isNull(driverShifts.endedAt)))
+      .limit(1);
+
+    if (!otro || otro.driverId === driverId) return;
+
+    if (await this.tieneCarreraActiva(otro.driverId)) {
+      throw new AppError(
+        'DRIVER_BUSY',
+        `El móvil ${plate} está en una carrera con ${otro.name}. Cuando la termine, vuelve a intentarlo.`,
+      );
+    }
+
+    await this.closeShift(otro.driverId);
+    this.realtime.turnoCerrado(otro.driverId, `Otro conductor tomó el móvil ${plate}. Tu turno quedó cerrado.`);
+  }
+
+  /** Si tiene una carrera asignada, en el punto o en curso. */
+  async tieneCarreraActiva(driverId: string): Promise<boolean> {
+    const [fila] = await this.db
+      .select({ id: rides.id })
+      .from(rides)
+      .where(and(eq(rides.driverId, driverId), inArray(rides.status, ACTIVE_RIDE_STATUSES)))
+      .limit(1);
+    return fila !== undefined;
+  }
+
+  /** Hasta cuándo está suspendido, o nulo si no lo está (o ya se cumplió). */
+  async suspensionDe(driverId: string): Promise<Date | null> {
+    const [fila] = await this.db
+      .select({ hasta: drivers.suspendidoHasta })
+      .from(drivers)
+      .where(eq(drivers.id, driverId))
+      .limit(1);
+    return fila?.hasta && sigueSuspendido(fila.hasta) ? fila.hasta : null;
+  }
+
+  async exigirNoSuspendido(driverId: string): Promise<void> {
+    const hasta = await this.suspensionDe(driverId);
+    if (hasta) {
+      throw new AppError(
+        'DRIVER_SUSPENDED',
+        `Estás suspendido hasta el ${finDeSuspension(hasta)}; para cualquier duda, llama a la oficina.`,
+      );
+    }
   }
 
   async closeShift(driverId: string): Promise<void> {
@@ -311,6 +404,7 @@ export class FleetService {
   async findAllAvailable(
     pickup: Point,
     exclude: string[] = [],
+    pagoElectronico = false,
   ): Promise<{ candidates: Candidate[]; sinGps: number }> {
     const rows = await this.db
       .select({
@@ -327,6 +421,8 @@ export class FleetService {
         and(
           eq(drivers.status, 'AVAILABLE'),
           eq(drivers.active, true),
+          noSuspendido,
+          pagoElectronico ? eq(drivers.aceptaPagoElectronico, true) : undefined,
           eq(vehicles.active, true),
         ),
       );
@@ -371,12 +467,17 @@ export class FleetService {
     };
   }
 
+  /**
+   * Con `pagoElectronico`, solo los que lo aceptan: es un filtro más, como el
+   * tipo de vehículo, y no cambia las oleadas ni sus radios por zona.
+   */
   async findCandidates(
     pickup: Point,
     radiusKm: number,
     vehicleType: VehicleType,
     limit: number,
     exclude: string[] = [],
+    pagoElectronico = false,
   ): Promise<Candidate[]> {
     const nearby = (await this.redis.geosearch(
       redisKeys.driverPositions,
@@ -389,9 +490,9 @@ export class FleetService {
       'ASC',
       'WITHDIST',
       // Se pide holgura porque muchos de los cercanos se caerán en el filtro
-      // de Postgres (ocupados, tipo distinto, GPS viejo).
+      // de Postgres (ocupados, tipo distinto, GPS viejo, sin pago electrónico).
       'COUNT',
-      Math.max(limit * 4, 20),
+      Math.max(limit * (pagoElectronico ? 8 : 4), 20),
     )) as [string, string][];
 
     const excluded = new Set(exclude);
@@ -421,6 +522,8 @@ export class FleetService {
           inArray(drivers.id, ids),
           eq(drivers.status, 'AVAILABLE'),
           eq(drivers.active, true),
+          noSuspendido,
+          pagoElectronico ? eq(drivers.aceptaPagoElectronico, true) : undefined,
           eq(vehicles.active, true),
           eq(vehicles.type, vehicleType),
         ),
@@ -471,6 +574,9 @@ export class FleetService {
         status: drivers.status,
         active: drivers.active,
         esPrueba: drivers.esPrueba,
+        aceptaPagoElectronico: drivers.aceptaPagoElectronico,
+        suspendidoHasta: drivers.suspendidoHasta,
+        motivoSuspension: drivers.motivoSuspension,
         shiftStartedAt: driverShifts.startedAt,
         plate: vehicles.plate,
         vehicleType: vehicles.type,
@@ -530,12 +636,16 @@ export class FleetService {
 
     const now = Date.now();
 
-    return rows.map((row, index) => {
+    return rows.map(({ suspendidoHasta, motivoSuspension, ...row }, index) => {
       const position = positions[index];
       const recordedAt = ages?.[index]?.[1] as string | null | undefined;
+      // Una suspensión cumplida no se manda: para el panel ya no existe.
+      const suspendido = suspendidoHasta && sigueSuspendido(suspendidoHasta) ? suspendidoHasta : undefined;
 
       return {
         ...row,
+        suspendidoHasta: suspendido,
+        motivoSuspension: suspendido ? (motivoSuspension ?? undefined) : undefined,
         moviles: movilesDe.get(row.id) ?? [],
         deviceRegistered: registrados.has(row.id),
         position:

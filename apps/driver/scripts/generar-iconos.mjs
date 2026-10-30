@@ -20,11 +20,13 @@ import { fileURLToPath } from 'node:url';
  * reproducibles: el repositorio guarda el original y la receta, no solo el
  * resultado.
  *
- * El original es hoy un PNG de 256 × 251 sacado de los documentos de la
- * empresa. Alcanza para la barra lateral (38 px, nítido hasta pantallas 3×),
- * pero el icono de 512 sale ampliado y pierde nitidez. Cuando llegue el logo
- * en vector: exportarlo a PNG de 1024 px con fondo transparente, reemplazar
- * `packages/ui/src/assets/logo-tax-turistico.png` y volver a correr esto.
+ * El original es un PNG de 687 × 674 con fondo transparente, sacado del
+ * logo oficial que entregó la empresa (`logo-taxturistico.jpeg`): el blanco
+ * conectado con el borde de la imagen se volvió transparente, con el borde
+ * dentado suavizado. Alcanza para todo lo de aquí, el icono de 512 incluido.
+ * Si algún día llega el vector: exportarlo a PNG de 1024 px con fondo
+ * transparente, reemplazar `packages/ui/src/assets/logo-tax-turistico.png` y
+ * volver a correr esto.
  *
  *   node apps/driver/scripts/generar-iconos.mjs
  */
@@ -307,9 +309,9 @@ const salidas = [
   { archivo: join(PWA, 'favicon-16.png'), tamano: 16 },
   { archivo: join(PANEL, 'favicon-32.png'), tamano: 32 },
   { archivo: join(PANEL, 'favicon-16.png'), tamano: 16 },
-  // Barra lateral del panel: se pinta a 38 px, así que 128 lo deja nítido
-  // hasta en pantallas de densidad 3.
-  { archivo: join(RAIZ, 'apps/admin/src/assets/logo-tax-turistico.png'), tamano: 128 },
+  // Panel: 38 px en la barra lateral y 64 en el acceso; 256 deja nítido el
+  // del acceso hasta en pantallas de densidad 3.
+  { archivo: join(RAIZ, 'apps/admin/src/assets/logo-tax-turistico.png'), tamano: 256 },
   // PWA: 64 px en el acceso y 24 en la cabecera; 192 cubre la densidad 3.
   { archivo: join(RAIZ, 'apps/driver/src/assets/logo-tax-turistico.png'), tamano: 192 },
 ];

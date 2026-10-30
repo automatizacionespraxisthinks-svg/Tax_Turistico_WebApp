@@ -17,7 +17,8 @@ export interface OfferPush {
   code: string;
   pickupText: string;
   pickupReference?: string | null;
-  dropoffText?: string | null;
+  /** Si el cliente paga con pago electrónico; ausente es efectivo. */
+  pagoElectronico?: boolean;
   passengers: number;
   distanceKm: number;
   etaMinutes: number;
@@ -36,6 +37,8 @@ export interface DriverSocketHandlers {
   onOffer: (offer: OfferPush) => void;
   onOfferRevoked: (rideId: string) => void;
   onRideChanged: (event: RideChangedPush) => void;
+  /** Le cerraron el turno sin pedirlo (relevo o suspensión), con el motivo. */
+  onShiftClosed: (motivo: string) => void;
   onConnectionChange: (connected: boolean) => void;
 }
 
@@ -75,6 +78,7 @@ export function connectDriverSocket(handlers: DriverSocketHandlers): () => void 
     handlers.onOfferRevoked(event.rideId),
   );
   socket.on('ride:changed', handlers.onRideChanged);
+  socket.on('shift:closed', (event: { motivo: string }) => handlers.onShiftClosed(event.motivo));
 
   return () => {
     socket.removeAllListeners();

@@ -117,12 +117,19 @@ export function TopStatus({
   );
 }
 
-/** Contenedor de pantalla: una sola columna, respiro inferior para el pulgar. */
+/**
+ * Contenedor de pantalla: una sola columna, respiro inferior para el pulgar.
+ *
+ * Los hijos no se encogen (`*:shrink-0`): si no caben, la pantalla hace
+ * scroll. Sin esto, un bloque con `overflow-hidden` —la foto del lugar— se
+ * aplastaba hasta quedar en una franja en cuanto la carrera no cabía en el
+ * celular, porque para el flex era el único que podía ceder altura.
+ */
 export function Screen({ children, className }: { children: ReactNode; className?: string }) {
   return (
     <div
       className={cn(
-        'flex min-h-0 flex-1 flex-col gap-5 overflow-y-auto px-5 pb-[max(1.25rem,env(safe-area-inset-bottom))] pt-6',
+        'flex min-h-0 flex-1 flex-col gap-5 overflow-y-auto px-5 pb-[max(1.25rem,env(safe-area-inset-bottom))] pt-6 *:shrink-0',
         className,
       )}
     >
@@ -160,7 +167,7 @@ export function AddressBlock({
       <p className="text-micro font-semibold uppercase tracking-[0.07em] text-ink-muted">{label}</p>
       <p
         className={cn(
-          'mt-1 text-[1.5rem] font-semibold leading-tight tracking-[-0.015em]',
+          'mt-1 text-[1.75rem] font-semibold leading-tight tracking-[-0.015em]',
           tone === 'accent' ? 'text-ink' : 'text-ink-secondary',
         )}
       >

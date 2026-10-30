@@ -1,11 +1,12 @@
 import { useEffect, useState } from 'react';
-import type { ReactNode } from 'react';
 import { AnimatePresence, motion } from 'motion/react';
 import { Camera, Flag, LocateFixed, Lock, Navigation, Phone, UserCheck, X } from 'lucide-react';
-import type { RideStatus, StatusTone } from '@tax/shared';
+import type { RideStatus } from '@tax/shared';
 import { RIDE_STATUS_LABEL, formatDistance } from '@tax/shared';
-import { StatusPill, TONE_CLASS, cn, spring, transition } from '@tax/ui';
+import { BANDA_DE_ESTADO, StatusPill, cn, transition } from '@tax/ui';
+import { BotonDeEtapa, tonoDeEtapa } from '../components/BotonDeEtapa';
 import { ActionBar, AddressBlock, Screen } from '../components/Chrome';
+import { MedioDePago } from '../components/MedioDePago';
 import { AvisoDeUbicacion, IrConMapas } from '../components/IrConMapas';
 import { api } from '../api/client';
 import type { OfferedRide } from '../state/session';
@@ -15,27 +16,17 @@ type ActiveStatus = Extract<RideStatus, 'ASSIGNED' | 'DRIVER_ARRIVED' | 'IN_PROG
 const STEPS: ActiveStatus[] = ['ASSIGNED', 'DRIVER_ARRIVED', 'IN_PROGRESS'];
 
 /**
- * Color de cada etapa en la PWA: azul mientras va a recoger y en el punto,
- * verde con el pasajero a bordo. No es el del panel, que pone «En el sitio»
- * en rojo: aquí ese color iría en el botón «Pasajero a bordo», y un botón
- * rojo grande se lee como «peligro» o «borrar» (decisión de la empresa con
- * la HU-UI-01).
- */
-const STAGE_TONE: Record<ActiveStatus, StatusTone> = {
-  ASSIGNED: 'info',
-  DRIVER_ARRIVED: 'info',
-  IN_PROGRESS: 'positive',
-};
-
-/**
  * Carrera en curso: un solo botón grande por estado.
  *
- * El botón lleva el color de la etapa: azul mientras va a recoger y en el
- * punto, verde con el pasajero a bordo. Así el conductor sabe en qué paso
- * está sin leer.
+ * El botón, la píldora y la barra llevan el color del estado en el tablero
+ * del panel: azul en camino, rojo en el lugar —el botón «Pasajero a bordo»—
+ * y verde en curso —«Finalizar»—. La empresa lo cambió así después de la
+ * HU-UI-01, que dejaba el del lugar en azul.
  *
  * Debajo de la dirección van Maps y Waze, ya con la ruta pedida, y un aviso
- * cuando el punto no es la ubicación que compartió el cliente.
+ * cuando el punto no es la ubicación que compartió el cliente. No se muestra
+ * destino: el cliente casi nunca lo dice al pedir, y en la pantalla del
+ * conductor se confundía con la dirección de recogida.
  *
  * "Llegué" solo se habilita a menos de 150 m del punto; más lejos se puede
  * marcar igual, pero queda registrada la excepción (§5.3). "Finalizar" queda
@@ -65,13 +56,13 @@ export function Carrera({
   const conPunto = offer.pickupPoint !== undefined;
   const nearby = conPunto && metersToPickup !== null && metersToPickup <= 150;
   const stepIndex = STEPS.indexOf(status);
-  const tone = STAGE_TONE[status];
+  const tone = tonoDeEtapa(status);
   const faltan = useFaltaParaFinalizar(status === 'IN_PROGRESS' ? offer.startedAt : undefined, minRideMinutes);
 
   return (
     <>
       <Screen className="gap-4">
-        <Progress stepIndex={stepIndex} tone={tone} />
+        <Progress stepIndex={stepIndex} status={status} />
 
         <div className="flex items-center justify-between gap-3">
           <StatusPill tone={tone} size="md" live>
@@ -80,14 +71,7 @@ export function Carrera({
           <span className="font-mono text-caption text-ink-muted">{offer.code}</span>
         </div>
 
-        {status === 'IN_PROGRESS' ? (
-          <div className="flex flex-col gap-3">
-            <AddressBlock label="Llevar a" text={offer.dropoffText ?? 'Sin destino indicado'} />
-            {/* Al destino solo con coordenadas: casi siempre lo dicen ya a
-                bordo, y una dirección suelta puede ser de otro pueblo. */}
-            <IrConMapas point={offer.dropoffPoint} />
-          </div>
-        ) : (
+        {status !== 'IN_PROGRESS' ? (
           <div className="flex flex-col gap-3">
             <AddressBlock
               label="Recoger en"
@@ -97,6 +81,9 @@ export function Carrera({
             <AvisoDeUbicacion origen={offer.pickupSource} />
             <IrConMapas point={offer.pickupPoint} text={offer.pickupText} />
           </div>
+        ) : (
+          // Con el pasajero a bordo lo que importa es cómo va a pagar.
+          <MedioDePago electronico={offer.pagoElectronico} grande />
         )}
 
         {/* La foto solo mientras va a recogerlo: después ya no le sirve, y
@@ -161,6 +148,14 @@ export function Carrera({
               <Phone className="size-5" />
             </a>
           </div>
+          {status !== 'IN_PROGRESS' ? (
+            <p className="mt-3 border-t border-line pt-3 text-lg text-ink-secondary">
+              Paga con{' '}
+              <span className={cn('font-semibold', offer.pagoElectronico ? 'text-brand' : 'text-ink')}>
+                {offer.pagoElectronico ? 'pago electrónico' : 'efectivo'}
+              </span>
+            </p>
+          ) : null}
           {offer.notes ? (
             <p className="mt-3 border-t border-line pt-3 text-lg leading-snug text-ink-secondary">
               {offer.notes}
@@ -171,13 +166,13 @@ export function Carrera({
 
       <ActionBar>
         {status === 'ASSIGNED' ? (
-          <BotonDeEtapa tone={tone} icon={<Navigation className="size-6" />} onClick={onArrived}>
+          <BotonDeEtapa estado="ASSIGNED" icon={<Navigation className="size-6" />} onClick={onArrived}>
             {nearby ? 'Llegué al punto' : 'Marcar que llegué'}
           </BotonDeEtapa>
         ) : null}
 
         {status === 'DRIVER_ARRIVED' ? (
-          <BotonDeEtapa tone={tone} icon={<UserCheck className="size-6" />} onClick={onBoard}>
+          <BotonDeEtapa estado="DRIVER_ARRIVED" icon={<UserCheck className="size-6" />} onClick={onBoard}>
             Pasajero a bordo
           </BotonDeEtapa>
         ) : null}
@@ -185,7 +180,7 @@ export function Carrera({
         {status === 'IN_PROGRESS' ? (
           minRideMinutes !== null && faltan > 0 ? (
             <BotonDeEtapa
-              tone={tone}
+              estado="IN_PROGRESS"
               icon={<Lock className="size-6" />}
               disabled
               progreso={1 - faltan / (minRideMinutes * 60_000)}
@@ -193,7 +188,7 @@ export function Carrera({
               Finalizar en <span className="tnum">{formatoCuenta(faltan)}</span>
             </BotonDeEtapa>
           ) : (
-            <BotonDeEtapa tone={tone} icon={<Flag className="size-6" />} onClick={onFinish}>
+            <BotonDeEtapa estado="IN_PROGRESS" icon={<Flag className="size-6" />} onClick={onFinish}>
               Finalizar carrera
             </BotonDeEtapa>
           )
@@ -258,62 +253,6 @@ function useFaltaParaFinalizar(startedAt: number | undefined, minutos: number | 
 function formatoCuenta(ms: number): string {
   const total = Math.ceil(ms / 1000);
   return `${Math.floor(total / 60)}:${String(total % 60).padStart(2, '0')}`;
-}
-
-/**
- * El botón de cada etapa: grande, con letra de 24 px y el color del estado.
- *
- * Bloqueado se queda gris, y por dentro se va llenando del color de la etapa
- * a medida que pasa el tiempo: se ve de lejos cuánto falta sin leer el número.
- */
-function BotonDeEtapa({
-  tone,
-  icon,
-  children,
-  onClick,
-  disabled = false,
-  progreso,
-}: {
-  tone: StatusTone;
-  icon: ReactNode;
-  children: ReactNode;
-  onClick?: () => void;
-  disabled?: boolean;
-  progreso?: number;
-}) {
-  return (
-    <motion.button
-      type="button"
-      onClick={onClick}
-      disabled={disabled}
-      aria-disabled={disabled}
-      whileTap={disabled ? undefined : { scale: 0.985 }}
-      transition={spring.snappy}
-      className={cn(
-        TONE_CLASS[tone],
-        'relative flex h-[4.5rem] w-full items-center justify-center overflow-hidden rounded-lg px-6',
-        'text-2xl font-bold tracking-[-0.01em]',
-        disabled
-          ? 'cursor-not-allowed border border-line bg-surface-sunk text-ink-secondary'
-          : 'border border-transparent bg-[var(--tone-solid)] text-on-accent shadow-sm',
-      )}
-    >
-      {progreso !== undefined ? (
-        <motion.span
-          aria-hidden="true"
-          initial={false}
-          animate={{ scaleX: Math.min(1, Math.max(0, progreso)) }}
-          transition={{ duration: 0.9, ease: 'linear' }}
-          style={{ originX: 0 }}
-          className="absolute inset-0 bg-[var(--tone-bg)]"
-        />
-      ) : null}
-      <span className="relative flex items-center gap-3">
-        {icon}
-        <span>{children}</span>
-      </span>
-    </motion.button>
-  );
 }
 
 /**
@@ -395,9 +334,9 @@ function FotoDelLugar({ rideId, version }: { rideId: string; version: string }) 
 }
 
 /** Tres pasos; el relleno avanza, no salta, y lleva el color de la etapa. */
-function Progress({ stepIndex, tone }: { stepIndex: number; tone: StatusTone }) {
+function Progress({ stepIndex, status }: { stepIndex: number; status: ActiveStatus }) {
   return (
-    <div className={cn(TONE_CLASS[tone], 'flex items-center gap-1.5')}>
+    <div className="flex items-center gap-1.5">
       {STEPS.map((step, index) => (
         <div key={step} className="h-1.5 flex-1 overflow-hidden rounded-full bg-surface-sunk">
           <motion.div
@@ -405,7 +344,7 @@ function Progress({ stepIndex, tone }: { stepIndex: number; tone: StatusTone }) 
             animate={{ scaleX: index <= stepIndex ? 1 : 0 }}
             transition={transition.panel}
             style={{ originX: 0 }}
-            className="h-full rounded-full bg-[var(--tone-solid)]"
+            className={cn('h-full rounded-full', BANDA_DE_ESTADO[status])}
           />
         </div>
       ))}

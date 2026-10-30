@@ -8,4 +8,5 @@ export * from './domain/system';
 export * from './domain/labels';
 export * from './domain/informes';
 export * from './domain/lugares';
+export * from './domain/suspension';
 export * from './format';

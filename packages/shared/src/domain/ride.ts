@@ -185,6 +185,13 @@ export const createRideSchema = z.object({
   dropoff: rideAddressSchema.optional(),
   vehicleType: z.enum(VEHICLE_TYPES).default('sedan'),
   passengers: z.number().int().min(1).max(8).default(1),
+  /**
+   * El cliente va a pagar con pago electrónico (Nequi, transferencia,
+   * datáfono). La carrera solo se les ofrece a conductores que lo aceptan;
+   * si en las oleadas no aparece ninguno, queda «sin asignar» como cualquier
+   * otra, sin abrirse a los demás. Sin el campo, efectivo.
+   */
+  pagoElectronico: z.boolean().default(false),
   notes: z.string().max(280).optional(),
   /**
    * Enlace a la foto del lugar que mandó el cliente (el `data_url` del
@@ -274,6 +281,8 @@ export interface Ride {
   zoneId: string;
   vehicleType: VehicleType;
   passengers: number;
+  /** Paga con pago electrónico; ausente o falso, en efectivo. */
+  pagoElectronico?: boolean;
   /**
    * Lo que se recorrió, una vez conocido el destino. Ausente mientras la
    * carrera no ha terminado, y también después si el conductor cerró sin GPS.

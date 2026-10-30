@@ -5,6 +5,7 @@ import { Check, Copy, Download, KeyRound, LockKeyhole, ShieldCheck, Smartphone }
 import QRCode from 'qrcode';
 import { PASSWORD_MIN_LENGTH, evaluatePassword } from '@tax/shared';
 import { Banner, Button, Field, Input, transition } from '@tax/ui';
+import logo from '../assets/logo-tax-turistico.png';
 import { ApiError, api } from '../api/client';
 import { Medidor } from '../components/CambiarClave';
 
@@ -109,15 +110,19 @@ export function AuthGate({ children }: { children: (user: User) => ReactNode }) 
   return <>{children(user)}</>;
 }
 
-/** Marco común de las tres pantallas previas al panel. */
+/**
+ * Marco común de las pantallas previas al panel, con la marca de la empresa:
+ * la franja azul, verde y roja arriba de la pantalla y de la tarjeta, como la
+ * barra lateral y la PWA (HU-UI-01).
+ */
 function Shell({ children, wide = false }: { children: ReactNode; wide?: boolean }) {
   return (
-    <div className="flex min-h-dvh items-center justify-center bg-canvas px-5 py-10">
+    <div className="franja-marca flex min-h-dvh items-center justify-center bg-canvas px-5 py-10">
       <motion.div
         initial={{ opacity: 0, y: 12 }}
         animate={{ opacity: 1, y: 0 }}
         transition={transition.panel}
-        className={`w-full ${wide ? 'max-w-md' : 'max-w-sm'} space-y-6 rounded-lg border border-line bg-surface p-6`}
+        className={`franja-marca w-full ${wide ? 'max-w-md' : 'max-w-sm'} space-y-6 rounded-lg border border-line bg-surface p-6 pt-7 shadow-sm`}
       >
         {children}
       </motion.div>
@@ -125,23 +130,16 @@ function Shell({ children, wide = false }: { children: ReactNode; wide?: boolean
   );
 }
 
+/** El logo oficial a 64 px sobre círculo blanco, igual que en el acceso de la PWA. */
 function Logo() {
   return (
-    <div
-      aria-hidden="true"
-      className="mb-5 flex size-10 items-center justify-center rounded-md border border-line bg-surface-sunk"
-    >
-      <svg viewBox="0 0 16 16" className="size-5 text-ink-secondary" fill="none">
-        <path
-          d="M2.5 11.5 8 3l5.5 8.5"
-          stroke="currentColor"
-          strokeWidth="1.6"
-          strokeLinecap="round"
-          strokeLinejoin="round"
-        />
-        <circle cx="8" cy="11.6" r="1.4" fill="currentColor" />
-      </svg>
-    </div>
+    <img
+      src={logo}
+      alt="Logo Tax Turístico"
+      width={64}
+      height={64}
+      className="mb-5 size-16 rounded-full bg-surface shadow-sm"
+    />
   );
 }
 

@@ -37,6 +37,14 @@ export interface Driver {
   active: boolean;
   /** Cuenta con la que el equipo prueba; Reportes la puede dejar fuera. */
   esPrueba?: boolean;
+  /** Recibe pagos electrónicos: solo a estos les llegan las carreras que se pagan así. */
+  aceptaPagoElectronico?: boolean;
+  /**
+   * Suspendido por el reglamento interno hasta esta fecha (ISO). Solo viene
+   * mientras la suspensión sigue en pie; una ya cumplida no se manda.
+   */
+  suspendidoHasta?: string;
+  motivoSuspension?: string;
   /** Del listado maestro: vencimiento de la licencia (`AAAA-MM-DD`) y su restricción. */
   licenciaVence?: string;
   licenciaRestriccion?: string;

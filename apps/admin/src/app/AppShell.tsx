@@ -382,8 +382,8 @@ function SidebarLink({
 }
 
 /**
- * El logo oficial a 38 px sobre un círculo blanco. El archivo mide 128 px,
- * así que sigue nítido en pantallas de densidad 3.
+ * El logo oficial a 38 px sobre un círculo blanco. El archivo mide 256 px
+ * (es el mismo del acceso), así que sigue nítido en pantallas de densidad 3.
  */
 function Logo() {
   return (

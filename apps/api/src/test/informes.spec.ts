@@ -34,6 +34,7 @@ function carrera(cambios: Partial<FilaCarrera> = {}): FilaCarrera {
     referencia: null,
     destino: null,
     pasajeros: 1,
+    pagoElectronico: false,
     vehiculo: 'sedan',
     cliente: 'Cliente',
     telefono: '+573001112233',

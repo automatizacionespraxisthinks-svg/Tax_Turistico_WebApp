@@ -102,6 +102,12 @@ export const rides = pgTable(
     zoneId: uuid('zone_id').references(() => zones.id),
     vehicleType: vehicleType('vehicle_type').notNull().default('sedan'),
     passengers: integer('passengers').notNull().default(1),
+    /**
+     * El cliente paga con pago electrónico (Nequi, transferencia, datáfono).
+     * Pesa en el despacho igual que el tipo de vehículo: solo se le ofrece a
+     * conductores que lo aceptan (`drivers.acepta_pago_electronico`).
+     */
+    pagoElectronico: boolean('pago_electronico').notNull().default(false),
 
     /** Pesos colombianos, sin decimales. Siempre «estimada» de cara al
         cliente (Ley 1480). */

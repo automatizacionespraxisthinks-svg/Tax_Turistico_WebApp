@@ -82,19 +82,28 @@ archivo al compilar (`packages/ui/marca.vite.ts`).
 - **Tonos de estado.** Verde es bien o disponible, azul es en curso, ámbar es
   pausa y rojo es atención. Los estados de carrera y de conductor se mapean a un
   tono en `packages/shared/src/domain/labels.ts`, así que el color de un estado
-  se decide una sola vez. La única excepción son los botones de etapa de la
-  PWA, que no van en rojo (ver `screens/Carrera.tsx`).
+  se decide una sola vez. El color sólido de cada estado vivo de una carrera
+  (ámbar buscando taxi, azul en camino, rojo en el lugar, verde en curso) está
+  en `BANDA_DE_ESTADO`, en `packages/ui`: lo usan las columnas del tablero y
+  los botones de la PWA, así que «Aceptar» es ámbar, «Llegué» azul,
+  «Pasajero a bordo» rojo y «Finalizar» verde. La HU-UI-01 dejaba el del lugar
+  en azul; la empresa lo pidió igual al panel.
 - **Tarjetas.** Blancas sobre el fondo azul claro, separadas por sombra y no
   por borde.
 - **Tipografía.** Atkinson Hyperlegible 400 y 700, servida desde la propia app
   con `font-display: swap` y precacheada en la PWA: el conductor la ve aunque
   su celular tenga otra fuente y aunque no tenga señal. Números tabulares en
   todo dato que se actualiza.
-- **Logo.** El original está en `packages/ui/src/assets/`; los íconos de la
-  PWA, los favicon, el logo de la barra lateral del panel y el de la PWA (en
-  el acceso y en la cabecera) salen de él con
-  `node apps/driver/scripts/generar-iconos.mjs`. Hoy es un PNG de 256 px:
-  cuando exista el vector, se exporta a 1024 px y se vuelve a correr.
+- **Logo.** El original está en `packages/ui/src/assets/`: un PNG de 687 px
+  con fondo transparente, sacado del logo oficial que entregó la empresa
+  (`logo-taxturistico.jpeg`). Los íconos de la PWA, los favicon y los logos
+  del panel (barra lateral y acceso) y de la PWA (acceso y cabecera) salen de
+  él con `node apps/driver/scripts/generar-iconos.mjs`. Si llega el vector, se
+  exporta a 1024 px y se vuelve a correr.
+- **Acceso del panel.** El logo oficial a 64 px y la franja de marca arriba de
+  la pantalla y de la tarjeta, igual en las cuatro pantallas previas al panel
+  (acceso, cambio de contraseña, alta del segundo factor y códigos de
+  respaldo).
 - **Gráficas.** Colores de serie en orden fijo (azul, verde, ámbar), nunca
   ciclados. El rojo no entra en el orden: lo lleva a mano la serie que mide
   algo fuera de objetivo, como el p95.
@@ -201,6 +210,53 @@ El panel no inventa acciones: cada botón sale de la tabla de transiciones.
   se compara con el límite real del contenedor.
 - **Privacidad**: el conductor no ve el teléfono del cliente hasta aceptar; el
   GPS solo existe con turno abierto.
+- **Pago electrónico**: cada conductor dice si lo recibe (`drivers.
+  acepta_pago_electronico`, desde la ficha en *Flota*) y cada carrera si el
+  cliente paga así (`rides.pago_electronico`). Es un filtro más del despacho,
+  como el tipo de vehículo: las oleadas y sus radios por zona son los mismos,
+  solo que entre los que lo reciben. Si nadie con pago electrónico la toma,
+  queda «sin asignar» sin abrirse a los demás; la oficina, o n8n, le pregunta
+  al cliente si puede pagar en efectivo, la cambia (`PATCH …/payment`) y la
+  relanza. La asignación manual respeta la misma regla. El conductor ve el
+  medio de pago en la oferta y en la carrera. Prueba: `e2e-pago-y-suspension.ts`.
+- **Sin destino en la PWA**: el cliente casi nunca lo dice al pedir, y en la
+  pantalla del conductor se confundía con la dirección de recogida. Se sigue
+  guardando si llega, y el panel lo muestra.
+- **Suspensión con fecha**: además de desactivar, la oficina puede suspender a
+  un conductor por unos días con un motivo (reglamento interno). Mientras dura
+  no entra en las oleadas, no entra a la PWA —al intentarlo ve hasta cuándo— ni
+  abre turno; si estaba en turno se le cierra, y si llevaba una carrera la
+  termina y el turno se le cierra al finalizarla. Al cumplirse vuelve solo, sin
+  que nadie tenga que reactivarlo.
+- **Un carro, varios conductores**: la placa se repite entre el conductor y
+  sus relevadores. Dar de alta un conductor con una placa existente lo vincula
+  a ese móvil; en el listado maestro, las filas con la misma placa se juntan en
+  un solo móvil. Y si quien entrega el carro olvidó cerrar su turno, el que lo
+  recibe lo abre igual: el turno anterior se cierra solo (relevo) y a ese
+  teléfono le llega el aviso, salvo que el carro esté en plena carrera.
+
+## Cambios para los flujos de n8n: pago electrónico
+
+Los flujos no viven en este repositorio; esto es lo que tienen que cambiar.
+
+1. **Preguntar el medio de pago.** El agente pregunta «¿Va a pagar en
+   efectivo o con pago electrónico (Nequi, transferencia, datáfono)?» y lo
+   manda al crear la carrera: `POST /v1/rides` con `"pagoElectronico": true`
+   o `false`, booleano (no `"true"` en texto). Sin el campo se toma efectivo,
+   así que los flujos de hoy siguen funcionando sin cambios.
+2. **`ride.created`** trae `pagoElectronico`, para confirmarle al cliente lo
+   que se entendió.
+3. **`ride.no_driver`** trae `pagoElectronico`. Si es `true`, el mensaje no es
+   «no hay taxis» sino «no hay taxis con pago electrónico cerca; ¿puede pagar
+   en efectivo?». Si el cliente acepta:
+   `PATCH /v1/rides/:id/payment` con `{ "pagoElectronico": false }` y después
+   `POST /v1/rides/:id/redispatch`. El cambio solo se acepta con la carrera
+   sin asignar (`INVALID_TRANSITION` si no).
+4. **`ride.assigned`** trae `pagoElectronico`, por si el aviso de «ya va en
+   camino» quiere recordarlo.
+5. **Asignación manual** (`POST /v1/rides/:id/assign`) responde
+   `DRIVER_NO_ELECTRONIC_PAYMENT` o `DRIVER_SUSPENDED` si el conductor no
+   cumple la regla.
 
 ## Cómo se mantienen al día las pantallas
 

@@ -69,16 +69,33 @@ describe('lectura del Excel', () => {
     expect(tres!.relevadores).toEqual([]);
   });
 
-  it('no deja cargar un número interno o una placa repetidos', async () => {
+  it('junta en un solo móvil las filas con la misma placa, con todos sus conductores', async () => {
+    const listado = await leerListadoMaestro(
+      await listadoDePrueba([
+        { interno: '010', placa: 'XYZ001', conductor: ['Titular Diez', 2000010], relevador: ['Relevo Diez', 3000010] },
+        // El mismo carro otra vez, con otro conductor y repitiendo al relevador.
+        { interno: '10', placa: 'xyz 001', conductor: ['Otro Diez', 2000011], relevador: ['Relevo Diez', 3000010] },
+      ]),
+    );
+    expect(listado.errores).toEqual([]);
+    expect(listado.moviles).toHaveLength(1);
+    expect(listado.moviles[0]!.conductor).toMatchObject({ cedula: '2000010' });
+    expect(listado.moviles[0]!.relevadores.map((p) => p.cedula)).toEqual(['3000010', '2000011']);
+    expect(listado.avisos.some((a) => a.includes('ya venía en la fila'))).toBe(true);
+  });
+
+  it('no deja cargar una placa con dos internos ni un interno con dos placas', async () => {
     const listado = await leerListadoMaestro(
       await listadoDePrueba([
         { interno: '010', placa: 'XYZ001' },
-        { interno: '010', placa: 'XYZ001' },
+        { interno: '012', placa: 'XYZ001' },
+        { interno: '013', placa: 'XYZ003' },
+        { interno: '013', placa: 'XYZ004' },
       ]),
     );
     expect(listado.errores).toEqual([
-      'El número interno 010 aparece más de una vez.',
-      'La placa XYZ001 aparece más de una vez.',
+      'La placa XYZ001 aparece con dos números internos: 010 (fila 3) y 012 (fila 4).',
+      'El número interno 013 aparece con placas distintas.',
     ]);
   });
 
