@@ -1,11 +1,14 @@
 import { useEffect } from 'react';
+import type { ReactNode } from 'react';
 import { BrowserRouter, Navigate, Route, Routes, useLocation } from 'react-router';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { AnimatePresence, MotionConfig, motion } from 'motion/react';
+import type { Permiso } from '@tax/shared';
 import { ToastProvider, routeTransition } from '@tax/ui';
 import { AppShell } from './app/AppShell';
 import { AuthGate } from './app/AuthGate';
 import { startLive } from './live/store';
+import { usePuede, useSesion } from './api/queries';
 import { Operacion } from './pages/Operacion';
 import { Carreras } from './pages/Carreras';
 import { Flota } from './pages/Flota';
@@ -59,13 +62,31 @@ function AnimatedRoutes() {
           <Route path="/carreras/:rideId" element={<Carreras />} />
           <Route path="/flota" element={<Flota />} />
           <Route path="/zonas" element={<Zonas />} />
-          <Route path="/reportes" element={<Reportes />} />
+          <Route
+            path="/reportes"
+            element={
+              <ConPermiso permiso="reportes.ver">
+                <Reportes />
+              </ConPermiso>
+            }
+          />
           <Route path="/sistema" element={<Sistema />} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
       </motion.div>
     </AnimatePresence>
   );
+}
+
+/**
+ * Una página entera que pide un permiso: sin él, a Operación. Es para quien
+ * llega por un enlace guardado; la barra lateral ya no la enseña.
+ */
+function ConPermiso({ permiso, children }: { permiso: Permiso; children: ReactNode }) {
+  const sesion = useSesion();
+  const puede = usePuede();
+  if (sesion.isLoading) return null;
+  return puede(permiso) ? children : <Navigate to="/" replace />;
 }
 
 /** El estado en vivo arranca solo cuando hay sesión: sin ella, todo da 401. */

@@ -60,8 +60,6 @@ export const outboxEventTypeValues = [
   'waha.line_up',
 ] as const;
 
-export const userRoleValues = ['administrador', 'operador'] as const;
-
 export const rideStatus = pgEnum('ride_status', rideStatusValues);
 export const driverStatus = pgEnum('driver_status', driverStatusValues);
 export const vehicleType = pgEnum('vehicle_type', vehicleTypeValues);
@@ -70,7 +68,6 @@ export const transitionActor = pgEnum('transition_actor', transitionActorValues)
 export const offerResponse = pgEnum('offer_response', offerResponseValues);
 export const outboxStatus = pgEnum('outbox_status', outboxStatusValues);
 export const outboxEventType = pgEnum('outbox_event_type', outboxEventTypeValues);
-export const userRole = pgEnum('user_role', userRoleValues);
 
 /* ------------------------------------------------------------------------- */
 /* Verificación: los enumerados de la base y los del dominio son el mismo

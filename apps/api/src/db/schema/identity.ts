@@ -10,9 +10,29 @@ import {
   uniqueIndex,
   uuid,
 } from 'drizzle-orm/pg-core';
-import { userRole } from './enums';
+/**
+ * Roles de la oficina (RBAC, §8.1): un nombre y la lista de permisos del
+ * catálogo de `@tax/shared` (`PERMISOS`).
+ *
+ * La clave es legible (`administrador`, `supervisor-nocturno`) porque es lo
+ * que guarda `users.role` y lo que queda escrito en la bitácora. Cambiar el
+ * nombre no cambia la clave.
+ *
+ * `administrador` y `operador` los siembra la migración y no se borran. Los
+ * permisos guardados del administrador no se leen: los tiene todos.
+ */
+export const roles = pgTable('roles', {
+  key: text('key').primaryKey(),
+  name: text('name').notNull(),
+  description: text('description'),
+  permissions: jsonb('permissions').$type<string[]>().notNull().default([]),
+  /** De base: no se borra ni se renombra. */
+  system: boolean('system').notNull().default(false),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+});
 
-/** Administradores y operadores: correo + contraseña Argon2id + TOTP (§8.1). */
+/** Usuarios de la oficina: correo + contraseña Argon2id + TOTP (§8.1). */
 export const users = pgTable(
   'users',
   {
@@ -32,7 +52,11 @@ export const users = pgTable(
      * contraseña que conocen dos no identifica a nadie.
      */
     tempPasswordExpiresAt: timestamp('temp_password_expires_at', { withTimezone: true }),
-    role: userRole('role').notNull().default('operador'),
+    /** Clave del rol. Un rol con usuarios no se puede borrar. */
+    role: text('role')
+      .notNull()
+      .default('operador')
+      .references(() => roles.key, { onDelete: 'restrict', onUpdate: 'cascade' }),
     /** Secreto TOTP cifrado; el 2FA es obligatorio para la oficina. */
     totpSecretEncrypted: text('totp_secret_encrypted'),
     totpEnabled: boolean('totp_enabled').notNull().default(false),

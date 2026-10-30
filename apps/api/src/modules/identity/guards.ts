@@ -1,13 +1,18 @@
 import { CanActivate, ExecutionContext, Injectable, SetMetadata } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
 import type { FastifyRequest } from 'fastify';
+import { PERMISOS, type Permiso } from '@tax/shared';
 import { AppError } from '../../common/problem';
 import { IdentityService, type DriverPrincipal, type UserPrincipal } from './identity.service';
 
-export const ROLES_KEY = 'tax:roles';
+export const PERMISO_KEY = 'tax:permiso';
 
-/** Roles de la oficina admitidos por el endpoint (RBAC, §8.1). */
-export const Roles = (...roles: ('administrador' | 'operador')[]) => SetMetadata(ROLES_KEY, roles);
+/**
+ * El permiso que exige el endpoint (RBAC, §8.1). Los permisos son del rol
+ * del usuario y se editan en el panel; el catálogo está en `@tax/shared`.
+ * Sin esta marca, basta con tener sesión: ver la operación es de todos.
+ */
+export const RequierePermiso = (permiso: Permiso) => SetMetadata(PERMISO_KEY, permiso);
 
 export const SESSION_COOKIE = 'tax_session';
 
@@ -90,13 +95,14 @@ export class SessionGuard implements CanActivate {
       }
     }
 
-    const required = this.reflector.getAllAndOverride<('administrador' | 'operador')[]>(ROLES_KEY, [
+    const requerido = this.reflector.getAllAndOverride<Permiso | undefined>(PERMISO_KEY, [
       context.getHandler(),
       context.getClass(),
     ]);
 
-    if (required?.length && !required.includes(user.role)) {
-      throw new AppError('FORBIDDEN', `Se requiere rol: ${required.join(' o ')}`);
+    if (requerido && !user.permissions.includes(requerido)) {
+      const nombre = PERMISOS.find((p) => p.clave === requerido)?.nombre ?? requerido;
+      throw new AppError('FORBIDDEN', `Tu rol no tiene el permiso «${nombre}»`);
     }
 
     return true;

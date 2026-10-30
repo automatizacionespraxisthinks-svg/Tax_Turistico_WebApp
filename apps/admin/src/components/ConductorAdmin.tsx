@@ -30,9 +30,9 @@ import { actions } from '../live/store';
  * Gestión de conductores desde la oficina (§6, §8.1).
  *
  * Todo lo que hay aquí lo autoriza el servidor, no esta pantalla: los
- * endpoints exigen rol `administrador`. Ocultar los botones a un operador es
- * cortesía —enseñar algo que siempre va a fallar es peor que no enseñarlo—,
- * no la barrera.
+ * endpoints exigen «Gestionar conductores» o «Suspender conductores». Ocultar
+ * los botones a quien no los tiene es cortesía —enseñar algo que siempre va a
+ * fallar es peor que no enseñarlo—, no la barrera.
  *
  * El PIN aparece una sola vez, cuando se genera. No hay «ver PIN» en ningún
  * sitio porque en la base solo existe su hash Argon2; la única salida cuando
@@ -316,7 +316,7 @@ function Suspension({ driver }: { driver: Driver }) {
 
   if (driver.suspendidoHasta) {
     return (
-      <div className="tone-warning -mx-3 flex items-start justify-between gap-3 border-y border-[var(--tone-line)] bg-[var(--tone-bg)] px-3 py-3">
+      <div className="tone-warning -mx-3 flex items-start justify-between gap-3 border-y border-[var(--tone-line)] bg-[var(--tone-bg)] px-3 py-3 first:-mt-3 first:border-t-0">
         <div className="min-w-0">
           <p className="flex items-center gap-1.5 text-base font-medium text-[var(--tone-ink)]">
             <Ban className="size-3.5 shrink-0" />
@@ -335,7 +335,7 @@ function Suspension({ driver }: { driver: Driver }) {
   }
 
   return (
-    <div className="border-t border-line pt-3">
+    <div className="border-t border-line pt-3 first:border-t-0 first:pt-0">
       <div className="flex items-center justify-between gap-3">
         <div className="min-w-0">
           <p className="text-base text-ink">Suspender por un tiempo</p>
@@ -432,7 +432,19 @@ function Suspension({ driver }: { driver: Driver }) {
   );
 }
 
-export function GestionConductor({ driver }: { driver: Driver }) {
+/**
+ * Lo que se le puede hacer a un conductor, según el rol: `gestionar` es todo
+ * menos suspender, y `suspender` es solo eso.
+ */
+export function GestionConductor({
+  driver,
+  gestionar,
+  suspender,
+}: {
+  driver: Driver;
+  gestionar: boolean;
+  suspender: boolean;
+}) {
   const [pinNuevo, setPinNuevo] = useState<string | null>(null);
   const toast = useToast();
   const qc = useQueryClient();
@@ -440,6 +452,7 @@ export function GestionConductor({ driver }: { driver: Driver }) {
   const dispositivos = useQuery({
     queryKey: ['dispositivos', driver.id],
     queryFn: () => api.get<Dispositivo[]>(`/v1/admin/drivers/${driver.id}/devices`),
+    enabled: gestionar,
   });
 
   const reiniciarPin = useMutation({
@@ -516,84 +529,90 @@ export function GestionConductor({ driver }: { driver: Driver }) {
         <SectionLabel>Gestión</SectionLabel>
 
         <div className="mt-2 space-y-3 rounded-md border border-line p-3">
-          <div className="flex items-center justify-between gap-3">
-            <div className="min-w-0">
-              <p className="text-base text-ink">Puede recibir carreras</p>
-              <p className="text-micro text-ink-muted">
-                {driver.active
-                  ? 'Al desactivarlo sale de las oleadas de inmediato. Una carrera en curso no se interrumpe.'
-                  : 'Está desactivado: no entra en ninguna oleada.'}
-              </p>
+          {gestionar ? (
+            <div className="flex items-center justify-between gap-3">
+              <div className="min-w-0">
+                <p className="text-base text-ink">Puede recibir carreras</p>
+                <p className="text-micro text-ink-muted">
+                  {driver.active
+                    ? 'Al desactivarlo sale de las oleadas de inmediato. Una carrera en curso no se interrumpe.'
+                    : 'Está desactivado: no entra en ninguna oleada.'}
+                </p>
+              </div>
+              <Button
+                size="sm"
+                variant={driver.active ? 'secondary' : 'primary'}
+                loading={cambiarActivo.isPending}
+                onClick={() => cambiarActivo.mutate(!driver.active)}
+              >
+                {driver.active ? 'Desactivar' : 'Activar'}
+              </Button>
             </div>
-            <Button
-              size="sm"
-              variant={driver.active ? 'secondary' : 'primary'}
-              loading={cambiarActivo.isPending}
-              onClick={() => cambiarActivo.mutate(!driver.active)}
-            >
-              {driver.active ? 'Desactivar' : 'Activar'}
-            </Button>
-          </div>
+          ) : null}
 
-          <Suspension driver={driver} />
+          {suspender ? <Suspension driver={driver} /> : null}
 
-          <div className="flex items-center justify-between gap-3 border-t border-line pt-3">
-            <div className="min-w-0">
-              <p className="flex items-center gap-1.5 text-base text-ink">
-                <CreditCard className="size-3.5 shrink-0 text-ink-muted" />
-                Recibe pagos electrónicos
-              </p>
-              <p className="text-micro text-ink-muted">
-                {driver.aceptaPagoElectronico
-                  ? 'Le llegan también las carreras de clientes que pagan con Nequi, transferencia o datáfono.'
-                  : 'No le llegan las carreras de clientes que pagan con pago electrónico.'}
-              </p>
-            </div>
-            <Button
-              size="sm"
-              variant={driver.aceptaPagoElectronico ? 'secondary' : 'primary'}
-              loading={cambiarPago.isPending}
-              onClick={() => cambiarPago.mutate(!driver.aceptaPagoElectronico)}
-            >
-              {driver.aceptaPagoElectronico ? 'Quitar' : 'Habilitar'}
-            </Button>
-          </div>
+          {gestionar ? (
+            <>
+              <div className="flex items-center justify-between gap-3 border-t border-line pt-3">
+                <div className="min-w-0">
+                  <p className="flex items-center gap-1.5 text-base text-ink">
+                    <CreditCard className="size-3.5 shrink-0 text-ink-muted" />
+                    Recibe pagos electrónicos
+                  </p>
+                  <p className="text-micro text-ink-muted">
+                    {driver.aceptaPagoElectronico
+                      ? 'Le llegan también las carreras de clientes que pagan con Nequi, transferencia o datáfono.'
+                      : 'No le llegan las carreras de clientes que pagan con pago electrónico.'}
+                  </p>
+                </div>
+                <Button
+                  size="sm"
+                  variant={driver.aceptaPagoElectronico ? 'secondary' : 'primary'}
+                  loading={cambiarPago.isPending}
+                  onClick={() => cambiarPago.mutate(!driver.aceptaPagoElectronico)}
+                >
+                  {driver.aceptaPagoElectronico ? 'Quitar' : 'Habilitar'}
+                </Button>
+              </div>
 
-          <div className="flex items-center justify-between gap-3 border-t border-line pt-3">
-            <div className="min-w-0">
-              <p className="text-base text-ink">Cuenta de prueba</p>
-              <p className="text-micro text-ink-muted">
-                {driver.esPrueba
-                  ? 'Sus carreras, ofertas y turnos no cuentan en Reportes con «No incluir pruebas».'
-                  : 'Márcala si el equipo la usa para probar la aplicación.'}
-              </p>
-            </div>
-            <Button
-              size="sm"
-              variant="secondary"
-              loading={cambiarPrueba.isPending}
-              onClick={() => cambiarPrueba.mutate(!driver.esPrueba)}
-            >
-              {driver.esPrueba ? 'Quitar marca' : 'Marcar'}
-            </Button>
-          </div>
+              <div className="flex items-center justify-between gap-3 border-t border-line pt-3">
+                <div className="min-w-0">
+                  <p className="text-base text-ink">Cuenta de prueba</p>
+                  <p className="text-micro text-ink-muted">
+                    {driver.esPrueba
+                      ? 'Sus carreras, ofertas y turnos no cuentan en Reportes con «No incluir pruebas».'
+                      : 'Márcala si el equipo la usa para probar la aplicación.'}
+                  </p>
+                </div>
+                <Button
+                  size="sm"
+                  variant="secondary"
+                  loading={cambiarPrueba.isPending}
+                  onClick={() => cambiarPrueba.mutate(!driver.esPrueba)}
+                >
+                  {driver.esPrueba ? 'Quitar marca' : 'Marcar'}
+                </Button>
+              </div>
 
-          <div className="flex items-center justify-between gap-3 border-t border-line pt-3">
-            <div className="min-w-0">
-              <p className="text-base text-ink">PIN personal</p>
-              <p className="text-micro text-ink-muted">
-                No se puede consultar: solo existe su hash. Si lo olvidó, genera otro.
-              </p>
-            </div>
-            <Button
-              size="sm"
-              icon={<KeyRound className="size-4" />}
-              loading={reiniciarPin.isPending}
-              onClick={() => reiniciarPin.mutate()}
-            >
-              Reiniciar
-            </Button>
-          </div>
+              <div className="flex items-center justify-between gap-3 border-t border-line pt-3">
+                <div className="min-w-0">
+                  <p className="text-base text-ink">PIN personal</p>
+                  <p className="text-micro text-ink-muted">
+                    No se puede consultar: solo existe su hash. Si lo olvidó, genera otro.
+                  </p>
+                </div>
+                <Button
+                  size="sm"
+                  icon={<KeyRound className="size-4" />}
+                  loading={reiniciarPin.isPending}
+                  onClick={() => reiniciarPin.mutate()}
+                >
+                  Reiniciar
+                </Button>
+              </div>
+            </>
+          ) : null}
         </div>
 
         {pinNuevo ? (
@@ -603,45 +622,47 @@ export function GestionConductor({ driver }: { driver: Driver }) {
         ) : null}
       </div>
 
-      <div>
-        <SectionLabel>Celulares registrados</SectionLabel>
-        <div className="mt-2 space-y-2">
-          {dispositivos.isLoading ? (
-            <p className="text-caption text-ink-muted">Cargando…</p>
-          ) : vivos.length === 0 ? (
-            <p className="rounded-md border border-line p-3 text-base text-ink-muted">
-              Ninguno activo. El conductor registra el suyo al entrar a la aplicación.
-            </p>
-          ) : (
-            vivos.map((d) => (
-              <div
-                key={d.id}
-                className="flex items-start justify-between gap-3 rounded-md border border-line p-3"
-              >
-                <div className="min-w-0">
-                  <p className="flex items-center gap-1.5 truncate text-base text-ink">
-                    <Smartphone className="size-3.5 shrink-0 text-ink-muted" />
-                    {/* El `label` es el user-agent: largo e ilegible entero. */}
-                    {d.label.slice(0, 48)}
-                  </p>
-                  <p className="text-micro text-ink-muted">
-                    {d.lastSeenAt ? `Visto ${formatRelative(d.lastSeenAt)}` : 'Sin actividad'}
-                    {d.recibeAvisos ? ' · recibe avisos' : ' · sin avisos'}
-                  </p>
-                </div>
-                <Button
-                  size="sm"
-                  variant="danger"
-                  loading={revocar.isPending}
-                  onClick={() => revocar.mutate(d.id)}
+      {gestionar ? (
+        <div>
+          <SectionLabel>Celulares registrados</SectionLabel>
+          <div className="mt-2 space-y-2">
+            {dispositivos.isLoading ? (
+              <p className="text-caption text-ink-muted">Cargando…</p>
+            ) : vivos.length === 0 ? (
+              <p className="rounded-md border border-line p-3 text-base text-ink-muted">
+                Ninguno activo. El conductor registra el suyo al entrar a la aplicación.
+              </p>
+            ) : (
+              vivos.map((d) => (
+                <div
+                  key={d.id}
+                  className="flex items-start justify-between gap-3 rounded-md border border-line p-3"
                 >
-                  Revocar
-                </Button>
-              </div>
-            ))
-          )}
+                  <div className="min-w-0">
+                    <p className="flex items-center gap-1.5 truncate text-base text-ink">
+                      <Smartphone className="size-3.5 shrink-0 text-ink-muted" />
+                      {/* El `label` es el user-agent: largo e ilegible entero. */}
+                      {d.label.slice(0, 48)}
+                    </p>
+                    <p className="text-micro text-ink-muted">
+                      {d.lastSeenAt ? `Visto ${formatRelative(d.lastSeenAt)}` : 'Sin actividad'}
+                      {d.recibeAvisos ? ' · recibe avisos' : ' · sin avisos'}
+                    </p>
+                  </div>
+                  <Button
+                    size="sm"
+                    variant="danger"
+                    loading={revocar.isPending}
+                    onClick={() => revocar.mutate(d.id)}
+                  >
+                    Revocar
+                  </Button>
+                </div>
+              ))
+            )}
+          </div>
         </div>
-      </div>
+      ) : null}
     </div>
   );
 }

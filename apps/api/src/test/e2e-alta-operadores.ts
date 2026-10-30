@@ -1,7 +1,7 @@
 import 'dotenv/config';
 import { drizzle } from 'drizzle-orm/node-postgres';
 import { Pool } from 'pg';
-import { and, eq, inArray, like, or } from 'drizzle-orm';
+import { and, eq, inArray, like, ne, or } from 'drizzle-orm';
 import { uuidv7 } from 'uuidv7';
 import * as schema from '../db/schema';
 import { hashSecret } from '../common/crypto';
@@ -93,7 +93,7 @@ async function main(): Promise<void> {
     }
   };
 
-  /** Desactiva a los operadores que ya hubiera, para medir el límite desde cero. */
+  /** Desactiva a quien ya ocupara cupo (todos menos administradores), para medir el límite desde cero. */
   let apartados: string[] = [];
 
   try {
@@ -102,7 +102,7 @@ async function main(): Promise<void> {
     const previos = await db
       .select({ id: schema.users.id })
       .from(schema.users)
-      .where(and(eq(schema.users.role, 'operador'), eq(schema.users.active, true)));
+      .where(and(ne(schema.users.role, 'administrador'), eq(schema.users.active, true)));
     apartados = previos.map((u) => u.id);
     if (apartados.length > 0) {
       await db.update(schema.users).set({ active: false }).where(inArray(schema.users.id, apartados));
@@ -245,7 +245,7 @@ async function main(): Promise<void> {
 
     const lista = (await admin.call('/v1/admin/users')).body as {
       users: { email: string; temporaryPassword: { expired: boolean } | null }[];
-      operators: { active: number; max: number };
+      cupo: { active: number; max: number };
     };
     const beto = lista.users.find((u) => u.email === b.login);
     assert(beto?.temporaryPassword?.expired === true, 'y el panel lo ve como caducada');
@@ -280,7 +280,7 @@ async function main(): Promise<void> {
     });
     assert(code(sobra.body) === 'OPERATOR_LIMIT_REACHED', 'el siguiente se rechaza', sobra.body);
 
-    const cuenta = ((await admin.call('/v1/admin/users')).body as typeof lista).operators;
+    const cuenta = ((await admin.call('/v1/admin/users')).body as typeof lista).cupo;
     assert(cuenta.active === MAXIMO && cuenta.max === MAXIMO, `la lista dice ${cuenta.active} de ${cuenta.max}`);
 
     /* ------------------------------------------------------------------ */
@@ -344,8 +344,8 @@ async function main(): Promise<void> {
       .where(like(schema.auditLog.entityId, `${PREFIJO}%`));
     const acciones = new Set(entradas.map((e) => e.action));
     for (const accion of [
-      'Creó un operador',
-      'Desactivó un operador',
+      'Creó un usuario',
+      'Desactivó un usuario',
       'Cambió su contraseña temporal por una propia',
     ]) {
       assert(acciones.has(accion), `«${accion}»`);

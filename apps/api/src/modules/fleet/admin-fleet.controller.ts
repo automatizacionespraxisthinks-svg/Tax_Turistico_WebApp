@@ -15,7 +15,7 @@ import type { FastifyRequest } from 'fastify';
 import { z } from 'zod';
 import { VEHICLE_TYPES, suspensionSchema, type Suspension } from '@tax/shared';
 import { zodBody } from '../../common/zod.pipe';
-import { Roles, SessionGuard } from '../identity/guards';
+import { RequierePermiso, SessionGuard } from '../identity/guards';
 import { FleetService } from './fleet.service';
 import { FleetAdminService, type AdminActor } from './fleet-admin.service';
 
@@ -73,7 +73,7 @@ export class AdminFleetController {
    * solo queda su hash Argon2, así que si se pierde hay que generar otro.
    */
   @Post()
-  @Roles('administrador')
+  @RequierePermiso('conductores.gestionar')
   async create(
     @Req() request: FastifyRequest,
     @Body(zodBody(nuevoConductorSchema)) body: z.infer<typeof nuevoConductorSchema>,
@@ -83,7 +83,7 @@ export class AdminFleetController {
   }
 
   @Patch(':driverId')
-  @Roles('administrador')
+  @RequierePermiso('conductores.gestionar')
   @HttpCode(204)
   async update(
     @Req() request: FastifyRequest,
@@ -98,7 +98,7 @@ export class AdminFleetController {
    * hubiera; vuelve sola al cumplirse.
    */
   @Post(':driverId/suspension')
-  @Roles('administrador')
+  @RequierePermiso('conductores.suspender')
   async suspender(
     @Req() request: FastifyRequest,
     @Param('driverId', ParseUUIDPipe) driverId: string,
@@ -110,7 +110,7 @@ export class AdminFleetController {
 
   /** Levanta la suspensión antes de que se cumpla. */
   @Delete(':driverId/suspension')
-  @Roles('administrador')
+  @RequierePermiso('conductores.suspender')
   @HttpCode(204)
   async levantarSuspension(@Req() request: FastifyRequest, @Param('driverId', ParseUUIDPipe) driverId: string) {
     await this.admin.levantarSuspension(driverId, actorDe(request));
@@ -118,7 +118,7 @@ export class AdminFleetController {
 
   /** Genera un PIN nuevo y levanta el bloqueo por intentos fallidos. */
   @Post(':driverId/pin')
-  @Roles('administrador')
+  @RequierePermiso('conductores.gestionar')
   async resetPin(@Req() request: FastifyRequest, @Param('driverId', ParseUUIDPipe) driverId: string) {
     const { code, pin } = await this.admin.resetPin(driverId, actorDe(request));
     return { code, pin, aviso: 'Este PIN no se vuelve a mostrar.' };
@@ -131,7 +131,7 @@ export class AdminFleetController {
   }
 
   @Get(':driverId/devices')
-  @Roles('administrador')
+  @RequierePermiso('conductores.gestionar')
   async devices(@Param('driverId', ParseUUIDPipe) driverId: string) {
     const rows = await this.admin.listDevices(driverId);
     // La suscripción de push es un secreto del navegador; afuera solo se dice
@@ -143,7 +143,7 @@ export class AdminFleetController {
   }
 
   @Post('devices/:deviceId/revoke')
-  @Roles('administrador')
+  @RequierePermiso('conductores.gestionar')
   @HttpCode(204)
   async revoke(@Req() request: FastifyRequest, @Param('deviceId', ParseUUIDPipe) deviceId: string) {
     await this.admin.revokeDevice(deviceId, actorDe(request));

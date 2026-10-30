@@ -201,10 +201,19 @@ El panel no inventa acciones: cada botón sale de la tabla de transiciones.
   por conductor, zona, día y hora; el PDF es el resumen para imprimir; desde
   *Carreras* se exporta lo que se está viendo, con sus filtros. Horas y fechas
   en hora de Paipa. Prueba: `src/test/e2e-exportaciones.ts`.
-- **Alta de operadores desde el panel**, hasta cinco activos: contraseña
-  temporal de 72 horas que se muestra una vez, y al entrar, primero el cambio
-  de contraseña y después el segundo factor, los dos impuestos por el servidor.
-  Los administradores siguen creándose solo desde el terminal.
+- **Usuarios desde el panel**, hasta cinco activos sin contar
+  administradores: contraseña temporal de 72 horas que se muestra una vez, y
+  al entrar, primero el cambio de contraseña y después el segundo factor, los
+  dos impuestos por el servidor.
+- **Roles y permisos** (*Sistema › Roles y permisos*, migración 0018): un rol
+  es un nombre con permisos de un catálogo de 14 (`@tax/shared`,
+  `PERMISOS`), y la API pide el permiso en cada endpoint, no el rol. Ver la
+  operación es de todos. `administrador` (todo, no se edita) y `operador` (lo
+  que podía hacer antes) son de base; se pueden crear otros. Reglas: nadie da
+  permisos que no tiene ni gestiona a quien tiene más que él, nadie se cambia
+  su propio rol, siempre queda un administrador activo, y dar un rol o cambiar
+  permisos pide el código del teléfono aunque la sesión esté abierta (cinco
+  códigos mal cierran la sesión). Prueba: `src/test/e2e-roles-y-permisos.ts`.
 - **Página de estado sin textos fijos**: PostgreSQL, Redis, los webhooks de
   n8n, WAHA y la clave de API se comprueban en cada consulta, y la memoria
   se compara con el límite real del contenedor.

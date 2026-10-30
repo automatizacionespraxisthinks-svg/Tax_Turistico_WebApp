@@ -9,12 +9,15 @@ import {
   MessageSquareText,
   ShieldCheck,
   ShieldOff,
+  UserCog,
   UserMinus,
   UserPlus,
   UserRoundCheck,
 } from 'lucide-react';
 import {
   LOGIN_HINT,
+  ROL_ADMINISTRADOR,
+  ROL_OPERADOR,
   TEMP_PASSWORD_HOURS,
   formatDateTime,
   formatRelative,
@@ -35,35 +38,43 @@ import {
 } from '@tax/ui';
 import { ApiError, api } from '../api/client';
 import { useSesion } from '../api/queries';
+import { CodigoDeConfirmacion, SelectorDeRol, type RolAsignable } from './Permisos';
 
 /**
- * Usuarios de la oficina (§8.1). Solo lo ven los administradores.
+ * Usuarios de la oficina (§8.1). Con «Gestionar usuarios».
  *
- * Desde aquí se dan de alta operadores —hasta el máximo que fija la API—, se
- * desactivan cuando dejan la oficina y se les genera una contraseña nueva si
- * la olvidan. Toda contraseña que sale de aquí es temporal: quien la genera la
- * ve, así que caduca y al entrar hay que cambiarla.
+ * Desde aquí se da de alta a la gente con un rol —hasta el cupo que fija la
+ * API—, se le cambia el rol, se la desactiva cuando deja la oficina y se le
+ * genera una contraseña nueva si la olvida. Toda contraseña que sale de aquí
+ * es temporal: quien la genera la ve, así que caduca y al entrar hay que
+ * cambiarla.
  *
- * Aquí NO se crean administradores ni se reinicia el segundo factor de nadie,
- * y es deliberado: cualquiera de las dos permitiría a un administrador entrar
- * en la cuenta de otro. Eso se queda en el terminal del servidor.
+ * Solo se gestiona a quien no tiene más permisos que uno, y dar un rol
+ * distinto del de operador pide el código del teléfono. Lo que NO se hace
+ * aquí es reiniciar el segundo factor de nadie: junto con la contraseña,
+ * permitiría entrar en la cuenta de otro. Eso sigue en el terminal.
  */
 
 interface Usuario {
   id: string;
   email: string;
   name: string;
-  role: 'administrador' | 'operador';
+  role: string;
+  roleName: string;
   active: boolean;
   totpEnabled: boolean;
   lastLoginAt: string | null;
   locked: boolean;
   temporaryPassword: { expiresAt: string; expired: boolean } | null;
+  /** Si quien mira puede cambiarle el rol, desactivarlo o reiniciarle la clave. */
+  gestionable: boolean;
 }
 
 interface ListaUsuarios {
   users: Usuario[];
-  operators: { active: number; max: number };
+  roles: RolAsignable[];
+  /** Usuarios activos que no son administradores, y cuántos caben. */
+  cupo: { active: number; max: number };
 }
 
 /** Lo que se le entrega a la persona: una sola vez. */
@@ -172,33 +183,46 @@ function ClaveUnaVez({ clave, onCerrar }: { clave: ClaveEntregable; onCerrar: ()
   );
 }
 
-function NuevoOperador({
+function NuevoUsuario({
+  roles,
   onCreado,
   cupoLleno,
 }: {
+  roles: RolAsignable[];
   onCreado: (clave: ClaveEntregable) => void;
   cupoLleno: boolean;
 }) {
   const [nombre, setNombre] = useState('');
   const [login, setLogin] = useState('');
+  const [rol, setRol] = useState<string>(ROL_OPERADOR);
+  const [codigo, setCodigo] = useState('');
   const [error, setError] = useState<string>();
   const qc = useQueryClient();
 
   const loginValido = isValidLogin(login);
-  const puedeCrear = nombre.trim().length >= 3 && loginValido && !cupoLleno;
+  // Con el rol de operador, como siempre; con otro, se confirma con el teléfono.
+  const pideCodigo = rol !== ROL_OPERADOR;
+  // Los administradores no ocupan cupo.
+  const sinCupo = cupoLleno && rol !== ROL_ADMINISTRADOR;
+  const puedeCrear =
+    nombre.trim().length >= 3 && loginValido && !sinCupo && (!pideCodigo || codigo.length === 6);
 
   const crear = useMutation({
     mutationFn: () =>
       api.post<{ login: string; password: string; expiresAt: string }>('/v1/admin/users', {
         name: nombre.trim(),
         login,
+        role: rol,
+        ...(pideCodigo ? { codigo } : {}),
       }),
     onSuccess: async (r) => {
       onCreado({ nombre: nombre.trim(), login: r.login, password: r.password, expiresAt: r.expiresAt, nueva: true });
       await qc.invalidateQueries({ queryKey: ['usuarios'] });
     },
-    onError: (causa: unknown) =>
-      setError(causa instanceof ApiError ? causa.message : 'No se pudo crear. Inténtalo de nuevo.'),
+    onError: (causa: unknown) => {
+      setCodigo('');
+      setError(causa instanceof ApiError ? causa.message : 'No se pudo crear. Inténtalo de nuevo.');
+    },
   });
 
   return (
@@ -228,13 +252,41 @@ function NuevoOperador({
           placeholder="marcela.ruiz"
           value={login}
           onChange={(e) => setLogin(normalizeLogin(e.target.value))}
-          onKeyDown={(e) => e.key === 'Enter' && puedeCrear && crear.mutate()}
           className="font-mono"
         />
       </Field>
 
+      <div className="space-y-1.5">
+        <p className="text-caption font-medium text-ink">Rol</p>
+        <SelectorDeRol
+          roles={roles}
+          value={rol}
+          onChange={(key) => {
+            setRol(key);
+            setError(undefined);
+          }}
+        />
+      </div>
+
+      {sinCupo ? (
+        <Banner tone="info" icon={<UserMinus className="size-4" />}>
+          El cupo está lleno. Desactiva a alguien que ya no esté en la oficina, o da el rol de
+          administrador, que no ocupa cupo.
+        </Banner>
+      ) : null}
+
+      {pideCodigo ? (
+        <CodigoDeConfirmacion
+          value={codigo}
+          onChange={(c) => {
+            setCodigo(c);
+            setError(undefined);
+          }}
+          onEnter={() => puedeCrear && crear.mutate()}
+        />
+      ) : null}
+
       <ul className="space-y-1.5 rounded-md border border-line p-3 text-caption text-ink-secondary">
-        <li>Se crea con rol de operador.</li>
         <li>
           Recibirás una contraseña temporal que se muestra una sola vez y caduca a las{' '}
           {TEMP_PASSWORD_HOURS} horas.
@@ -253,7 +305,85 @@ function NuevoOperador({
         loading={crear.isPending}
         onClick={() => crear.mutate()}
       >
-        Crear operador
+        Crear usuario
+      </Button>
+    </div>
+  );
+}
+
+/** Cambia el rol de alguien. Siempre con el código del teléfono de quien lo cambia. */
+function CambiarRol({
+  usuario,
+  roles,
+  onListo,
+}: {
+  usuario: Usuario;
+  roles: RolAsignable[];
+  onListo: () => void;
+}) {
+  const [rol, setRol] = useState(usuario.role);
+  const [codigo, setCodigo] = useState('');
+  const [error, setError] = useState<string>();
+  const qc = useQueryClient();
+  const toast = useToast();
+
+  const elegido = roles.find((r) => r.key === rol);
+  const puedeGuardar = rol !== usuario.role && codigo.length === 6;
+
+  const guardar = useMutation({
+    mutationFn: () => api.patch(`/v1/admin/users/${usuario.id}/role`, { role: rol, codigo }),
+    onSuccess: async () => {
+      toast.push({
+        tone: 'positive',
+        title: `${usuario.name} ahora es ${elegido?.name ?? rol}`,
+        description: 'Vale desde su siguiente acción en el panel, sin volver a entrar.',
+      });
+      await Promise.all([
+        qc.invalidateQueries({ queryKey: ['usuarios'] }),
+        qc.invalidateQueries({ queryKey: ['roles'] }),
+      ]);
+      onListo();
+    },
+    onError: (causa: unknown) => {
+      setCodigo('');
+      setError(causa instanceof ApiError ? causa.message : 'No se pudo cambiar. Inténtalo de nuevo.');
+    },
+  });
+
+  return (
+    <div className="space-y-4">
+      <SelectorDeRol
+        roles={roles}
+        value={rol}
+        actual={usuario.role}
+        onChange={(key) => {
+          setRol(key);
+          setError(undefined);
+        }}
+      />
+
+      {rol !== usuario.role ? (
+        <CodigoDeConfirmacion
+          value={codigo}
+          onChange={(c) => {
+            setCodigo(c);
+            setError(undefined);
+          }}
+          onEnter={() => puedeGuardar && guardar.mutate()}
+        />
+      ) : null}
+
+      {error ? <Banner tone="critical">{error}</Banner> : null}
+
+      <Button
+        variant="primary"
+        size="lg"
+        className="w-full"
+        disabled={!puedeGuardar}
+        loading={guardar.isPending}
+        onClick={() => guardar.mutate()}
+      >
+        {rol === usuario.role ? 'Elige otro rol' : `Cambiar a ${elegido?.name ?? rol}`}
       </Button>
     </div>
   );
@@ -276,7 +406,10 @@ function PildoraTemporal({ temporal }: { temporal: NonNullable<Usuario['temporar
 }
 
 export function UsuariosAdmin() {
-  type Panel = { tipo: 'nuevo' } | { tipo: 'reiniciar'; usuario: Usuario };
+  type Panel =
+    | { tipo: 'nuevo' }
+    | { tipo: 'reiniciar'; usuario: Usuario }
+    | { tipo: 'rol'; usuario: Usuario };
   const [panel, setPanel] = useState<Panel | null>(null);
   const [clave, setClave] = useState<ClaveEntregable | null>(null);
   const [confirmando, setConfirmando] = useState<string | null>(null);
@@ -313,7 +446,7 @@ export function UsuariosAdmin() {
       setConfirmando(null);
       toast.push({
         tone: 'positive',
-        title: v.active ? 'Operador reactivado' : 'Operador desactivado',
+        title: v.active ? 'Usuario reactivado' : 'Usuario desactivado',
         description: v.active
           ? `${v.usuario.name} puede volver a entrar.`
           : `${v.usuario.name} ya no puede entrar y sus sesiones se cerraron.`,
@@ -328,8 +461,9 @@ export function UsuariosAdmin() {
       }),
   });
 
-  const operadores = usuarios.data?.operators;
-  const cupoLleno = operadores ? operadores.active >= operadores.max : false;
+  const cupo = usuarios.data?.cupo;
+  const cupoLleno = cupo ? cupo.active >= cupo.max : false;
+  const roles = usuarios.data?.roles ?? [];
 
   const cerrarPanel = () => {
     setPanel(null);
@@ -342,8 +476,8 @@ export function UsuariosAdmin() {
         <CardHeader
           title="Usuarios de la oficina"
           subtitle={
-            operadores
-              ? `${operadores.active} de ${operadores.max} operadores activos. La contraseña no se puede consultar: si alguien la olvida, se genera otra.`
+            cupo
+              ? `${cupo.active} de ${cupo.max} cupos en uso (los administradores no ocupan cupo). La contraseña no se puede consultar: si alguien la olvida, se genera otra.`
               : 'La contraseña no se puede consultar: solo existe su hash. Si alguien la olvida, se genera otra.'
           }
           actions={
@@ -351,19 +485,18 @@ export function UsuariosAdmin() {
               variant="primary"
               size="sm"
               icon={<UserPlus className="size-4" />}
-              disabled={!operadores || cupoLleno}
-              title={cupoLleno ? 'Se alcanzó el máximo de operadores activos' : undefined}
+              disabled={!cupo}
               onClick={() => setPanel({ tipo: 'nuevo' })}
             >
-              Nuevo operador
+              Nuevo usuario
             </Button>
           }
         />
 
-        {cupoLleno && operadores ? (
+        {cupoLleno && cupo ? (
           <Banner tone="info" icon={<UserMinus className="size-4" />}>
-            Ya hay {operadores.active} operadores activos, el máximo. Para dar de alta a otro,
-            desactiva a alguien que ya no esté en la oficina.
+            Ya hay {cupo.active} usuarios activos sin contar administradores, el máximo. Para dar de
+            alta a otro, desactiva a alguien que ya no esté en la oficina.
           </Banner>
         ) : null}
 
@@ -373,7 +506,7 @@ export function UsuariosAdmin() {
           ) : (
             (usuarios.data?.users ?? []).map((u) => {
               const esYo = u.id === sesion.data?.user.id;
-              const gestionable = u.role === 'operador' && !esYo;
+              const gestionable = u.gestionable;
               return (
                 <div
                   key={u.id}
@@ -388,7 +521,11 @@ export function UsuariosAdmin() {
                   </div>
 
                   <div className="flex flex-wrap items-center gap-2">
-                    <StatusPill tone={u.role === 'administrador' ? 'info' : 'neutral'}>{u.role}</StatusPill>
+                    <StatusPill
+                      tone={u.role === ROL_ADMINISTRADOR ? 'info' : u.role === ROL_OPERADOR ? 'neutral' : 'accent'}
+                    >
+                      {u.roleName}
+                    </StatusPill>
 
                     {!u.active ? (
                       <StatusPill tone="neutral" dot={false}>
@@ -414,7 +551,17 @@ export function UsuariosAdmin() {
 
                     {u.locked ? <StatusPill tone="critical">bloqueado</StatusPill> : null}
 
-                    {u.active ? (
+                    {gestionable && u.active ? (
+                      <Button
+                        size="sm"
+                        icon={<UserCog className="size-4" />}
+                        onClick={() => setPanel({ tipo: 'rol', usuario: u })}
+                      >
+                        Cambiar rol
+                      </Button>
+                    ) : null}
+
+                    {(gestionable || esYo) && u.active ? (
                       <Button
                         size="sm"
                         icon={<KeyRound className="size-4" />}
@@ -444,8 +591,8 @@ export function UsuariosAdmin() {
                       <Button
                         size="sm"
                         icon={<UserRoundCheck className="size-4" />}
-                        disabled={cupoLleno}
-                        title={cupoLleno ? 'Se alcanzó el máximo de operadores activos' : undefined}
+                        disabled={cupoLleno && u.role !== ROL_ADMINISTRADOR}
+                        title={cupoLleno && u.role !== ROL_ADMINISTRADOR ? 'El cupo está lleno' : undefined}
                         loading={cambiarEstado.isPending && cambiarEstado.variables?.usuario.id === u.id}
                         onClick={() => cambiarEstado.mutate({ usuario: u, active: true })}
                       >
@@ -460,9 +607,9 @@ export function UsuariosAdmin() {
         </div>
 
         <p className="text-micro text-ink-muted">
-          Desde aquí solo se crean operadores. Los administradores, y reiniciar un segundo factor
-          perdido, se hacen desde el terminal del servidor: desde el panel, un administrador podría
-          acabar entrando en la cuenta de otro.
+          Solo puedes gestionar a quien no tenga más permisos que tú, y nadie se cambia el rol a sí
+          mismo. Reiniciar un segundo factor perdido se hace desde el terminal del servidor: junto con
+          la contraseña, permitiría entrar en la cuenta de otro.
         </p>
       </Card>
 
@@ -474,24 +621,34 @@ export function UsuariosAdmin() {
         title={
           clave
             ? clave.nueva
-              ? 'Operador creado'
+              ? 'Usuario creado'
               : 'Contraseña reiniciada'
             : panel?.tipo === 'nuevo'
-              ? 'Nuevo operador'
-              : 'Reiniciar contraseña'
+              ? 'Nuevo usuario'
+              : panel?.tipo === 'rol'
+                ? `Rol de ${panel.usuario.name}`
+                : 'Reiniciar contraseña'
         }
-        subtitle={clave ? clave.nombre : panel?.tipo === 'reiniciar' ? panel.usuario.email : undefined}
+        subtitle={
+          clave
+            ? clave.nombre
+            : panel?.tipo === 'reiniciar' || panel?.tipo === 'rol'
+              ? panel.usuario.email
+              : undefined
+        }
       >
         {clave ? (
           <ClaveUnaVez
             clave={clave}
             onCerrar={() => {
-              toast.push({ tone: 'positive', title: clave.nueva ? 'Operador creado' : 'Contraseña reiniciada' });
+              toast.push({ tone: 'positive', title: clave.nueva ? 'Usuario creado' : 'Contraseña reiniciada' });
               cerrarPanel();
             }}
           />
         ) : panel?.tipo === 'nuevo' ? (
-          <NuevoOperador onCreado={setClave} cupoLleno={cupoLleno} />
+          <NuevoUsuario roles={roles} onCreado={setClave} cupoLleno={cupoLleno} />
+        ) : panel?.tipo === 'rol' ? (
+          <CambiarRol usuario={panel.usuario} roles={roles} onListo={cerrarPanel} />
         ) : panel?.tipo === 'reiniciar' ? (
           <div className="space-y-4">
             <p className="text-base text-ink-secondary">

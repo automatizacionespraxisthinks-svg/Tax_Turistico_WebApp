@@ -14,7 +14,9 @@ interface User {
   name: string;
   /** El usuario de acceso: un correo o un nombre de usuario. */
   email: string;
-  role: 'administrador' | 'operador';
+  /** Clave del rol: `administrador`, `operador` o uno creado en el panel. */
+  role: string;
+  roleName?: string;
   /** Si no, la sesión solo sirve para darlo de alta (§8.1). */
   totpEnabled: boolean;
   /** Entró con una contraseña temporal: primero tiene que cambiarla. */

@@ -17,10 +17,11 @@ import {
   WifiOff,
   X,
 } from 'lucide-react';
-import { WAHA_STATUS_LABEL, WAHA_STATUS_TONE, formatTime, type StatusTone } from '@tax/shared';
+import { WAHA_STATUS_LABEL, WAHA_STATUS_TONE, formatTime, type Permiso, type StatusTone } from '@tax/shared';
 import { Banner, LiveDot, StatusPill, cn, spring, transition } from '@tax/ui';
 import { actions, useLive, type AlertaRecibida } from '../live/store';
 import { api } from '../api/client';
+import { usePuede, useSesion } from '../api/queries';
 import { CambiarClave } from '../components/CambiarClave';
 import logo from '../assets/logo-tax-turistico.png';
 
@@ -29,6 +30,8 @@ interface NavItem {
   label: string;
   icon: LucideIcon;
   end?: boolean;
+  /** Se enseña si el rol tiene alguno de estos. Sin lista, todos lo ven. */
+  permisos?: Permiso[];
 }
 
 const NAV: NavItem[] = [
@@ -36,8 +39,13 @@ const NAV: NavItem[] = [
   { to: '/carreras', label: 'Carreras', icon: RouteIcon },
   { to: '/flota', label: 'Flota', icon: Users },
   { to: '/zonas', label: 'Zonas', icon: Map },
-  { to: '/reportes', label: 'Reportes', icon: BarChart3 },
-  { to: '/sistema', label: 'Sistema', icon: ServerCog },
+  { to: '/reportes', label: 'Reportes', icon: BarChart3, permisos: ['reportes.ver'] },
+  {
+    to: '/sistema',
+    label: 'Sistema',
+    icon: ServerCog,
+    permisos: ['usuarios.gestionar', 'roles.gestionar', 'auditoria.ver'],
+  },
 ];
 
 const TITLES: Record<string, string> = {
@@ -230,6 +238,8 @@ function Sidebar({
   pending: number;
   userName: string;
 }) {
+  const puede = usePuede();
+  const rol = useSesion().data?.user.roleName;
   const initials = userName
     .split(' ')
     .slice(0, 2)
@@ -269,7 +279,7 @@ function Sidebar({
       </div>
 
       <nav className="flex-1 space-y-0.5 px-2 py-2">
-        {NAV.map((item) => (
+        {NAV.filter((item) => !item.permisos || item.permisos.some(puede)).map((item) => (
           <SidebarLink
             key={item.to}
             item={item}
@@ -305,7 +315,10 @@ function Sidebar({
           </div>
           {!collapsed ? (
             <div className="min-w-0 flex-1">
-              <p className="truncate text-caption font-medium text-on-ink">{userName}</p>
+              <p className="truncate text-caption font-medium text-on-ink" title={rol}>
+                {userName}
+                {rol ? <span className="font-normal text-on-ink-muted"> · {rol}</span> : null}
+              </p>
               <div className="flex items-center gap-2">
                 <CambiarClave />
                 <span aria-hidden="true" className="text-micro text-on-ink-muted">

@@ -3,7 +3,7 @@ import type { FastifyReply, FastifyRequest } from 'fastify';
 import { z } from 'zod';
 import { MAX_DIAS_INFORME, RIDE_STATUSES, diasDelRango } from '@tax/shared';
 import { zodBody } from '../../common/zod.pipe';
-import { SessionGuard } from '../identity/guards';
+import { RequierePermiso, SessionGuard } from '../identity/guards';
 import { ExportsService } from './exports.service';
 
 const fecha = z.string().regex(/^\d{4}-\d{2}-\d{2}$/);
@@ -41,6 +41,7 @@ const solicitudSchema = z
  */
 @Controller('v1/reports/exports')
 @UseGuards(SessionGuard)
+@RequierePermiso('reportes.exportar')
 export class ExportsController {
   constructor(private readonly exports: ExportsService) {}
 

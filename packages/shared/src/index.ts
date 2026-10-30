@@ -10,4 +10,5 @@ export * from './domain/informes';
 export * from './domain/lugares';
 export * from './domain/suspension';
 export * from './domain/enlace-de-mapa';
+export * from './domain/permisos';
 export * from './format';

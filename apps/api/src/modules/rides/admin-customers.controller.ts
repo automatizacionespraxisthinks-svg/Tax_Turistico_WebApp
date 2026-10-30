@@ -2,7 +2,7 @@ import { Body, Controller, Param, ParseUUIDPipe, Patch, Req, UseGuards } from '@
 import type { FastifyRequest } from 'fastify';
 import { z } from 'zod';
 import { zodBody } from '../../common/zod.pipe';
-import { SessionGuard } from '../identity/guards';
+import { RequierePermiso, SessionGuard } from '../identity/guards';
 import { RidesService, type Actor } from './rides.service';
 
 const cambiosSchema = z.object({ esPrueba: z.boolean() });
@@ -19,6 +19,7 @@ export class AdminCustomersController {
   constructor(private readonly rides: RidesService) {}
 
   @Patch(':customerId')
+  @RequierePermiso('clientes.marcar')
   update(
     @Req() request: FastifyRequest,
     @Param('customerId', ParseUUIDPipe) customerId: string,

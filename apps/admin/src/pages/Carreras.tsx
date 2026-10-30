@@ -23,6 +23,7 @@ import {
   transition,
 } from '@tax/ui';
 import { useExportar } from '../api/exportaciones';
+import { usePuede } from '../api/queries';
 import { RideDetail } from '../components/RideDetail';
 import { useLive } from '../live/store';
 
@@ -45,6 +46,7 @@ export function Carreras() {
   const navigate = useNavigate();
   const location = useLocation();
   const { exportar, generando } = useExportar();
+  const puedeExportar = usePuede()('reportes.exportar');
 
   const rides = useLive((s) => s.rides);
   const drivers = useLive((s) => s.drivers);
@@ -142,24 +144,26 @@ export function Carreras() {
 
         {/* Lo que se está viendo: el mismo estado, zona y búsqueda, de los
             últimos 30 días. La lista de arriba solo trae las 300 más recientes. */}
-        <Button
-          icon={<Download className="size-3.5" />}
-          loading={generando('carreras-xlsx')}
-          title="Excel con las carreras de los últimos 30 días que cumplen estos filtros"
-          onClick={() =>
-            void exportar({
-              kind: 'carreras',
-              format: 'xlsx',
-              days: 30,
-              statuses: filter === 'todas' ? undefined : RIDE_STATUSES.filter((s) => active.match(s)),
-              zoneId: zoneId || undefined,
-              query: query.trim() || undefined,
-              filterLabel: filter === 'todas' ? undefined : active.label,
-            })
-          }
-        >
-          Exportar
-        </Button>
+        {puedeExportar ? (
+          <Button
+            icon={<Download className="size-3.5" />}
+            loading={generando('carreras-xlsx')}
+            title="Excel con las carreras de los últimos 30 días que cumplen estos filtros"
+            onClick={() =>
+              void exportar({
+                kind: 'carreras',
+                format: 'xlsx',
+                days: 30,
+                statuses: filter === 'todas' ? undefined : RIDE_STATUSES.filter((s) => active.match(s)),
+                zoneId: zoneId || undefined,
+                query: query.trim() || undefined,
+                filterLabel: filter === 'todas' ? undefined : active.label,
+              })
+            }
+          >
+            Exportar
+          </Button>
+        ) : null}
       </div>
 
       <Card flush className="overflow-hidden">

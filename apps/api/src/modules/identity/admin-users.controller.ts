@@ -3,59 +3,65 @@ import type { FastifyRequest } from 'fastify';
 import { z } from 'zod';
 import { TEMP_PASSWORD_HOURS, isValidLogin, normalizeLogin } from '@tax/shared';
 import { zodBody } from '../../common/zod.pipe';
-import { Roles, SessionGuard } from './guards';
+import { RequierePermiso, SessionGuard } from './guards';
 import { UsersAdminService } from './users-admin.service';
-import type { AdminActor } from '../fleet/fleet-admin.service';
+import type { ActorConPermisos } from './roles.service';
 
-const nuevoOperadorSchema = z.object({
+/** El código de la aplicación de autenticación de quien hace el cambio. */
+const codigo = z.string().trim().max(20).optional();
+
+const nuevoUsuarioSchema = z.object({
   name: z.string().trim().min(3, 'Escribe nombre y apellido').max(120),
   /** Un correo o un nombre de usuario: con eso entrará al panel. */
   login: z.string().transform(normalizeLogin).refine(isValidLogin, 'Usuario o correo no válido'),
+  /** Clave del rol; sin ella, operador. */
+  role: z.string().trim().min(1).max(40).optional(),
+  codigo,
 });
 
 const estadoSchema = z.object({ active: z.boolean() });
+const rolSchema = z.object({ role: z.string().trim().min(1).max(40), codigo });
 
-function actorDe(request: FastifyRequest): AdminActor {
+export function actorConPermisos(request: FastifyRequest): ActorConPermisos {
   const user = request.user!;
-  return { id: user.id, name: user.name, role: user.role, ip: request.ip };
+  return { id: user.id, name: user.name, role: user.role, permissions: user.permissions, ip: request.ip };
 }
 
 /**
- * Usuarios de la oficina desde el panel (§8.1). Solo administradores.
+ * Usuarios de la oficina desde el panel (§8.1). Con «Gestionar usuarios».
  *
- * Lo que NO hay aquí, a propósito: crear administradores ni reiniciar el
- * segundo factor de nadie. Las dos cosas convertirían a cualquier
- * administrador en capaz de entrar en la cuenta de otro, y se quedan en el
- * terminal del servidor (`cli/usuarios.js`, `cli/crear-usuario.js`).
+ * Lo que NO hay aquí, a propósito: reiniciar el segundo factor de nadie. Junto
+ * con reiniciar la contraseña permitiría entrar en la cuenta de otro, y se
+ * queda en el terminal del servidor (`cli/usuarios.js`).
  */
 @Controller('v1/admin/users')
 @UseGuards(SessionGuard)
-@Roles('administrador')
+@RequierePermiso('usuarios.gestionar')
 export class AdminUsersController {
   constructor(private readonly usuarios: UsersAdminService) {}
 
   @Get()
-  list() {
-    return this.usuarios.list();
+  list(@Req() request: FastifyRequest) {
+    return this.usuarios.list(actorConPermisos(request));
   }
 
   /**
-   * Da de alta un operador. Su contraseña temporal se devuelve **una sola
+   * Da de alta a alguien. Su contraseña temporal se devuelve **una sola
    * vez**: al entrar con ella tendrá que cambiarla y activar el segundo factor.
    */
   @Post()
   async create(
     @Req() request: FastifyRequest,
-    @Body(zodBody(nuevoOperadorSchema)) body: z.infer<typeof nuevoOperadorSchema>,
+    @Body(zodBody(nuevoUsuarioSchema)) body: z.infer<typeof nuevoUsuarioSchema>,
   ) {
-    const creado = await this.usuarios.create(body, actorDe(request));
+    const creado = await this.usuarios.create(body, actorConPermisos(request));
     return {
       ...creado,
       aviso: `Esta contraseña no se vuelve a mostrar y caduca en ${TEMP_PASSWORD_HOURS} horas.`,
     };
   }
 
-  /** Desactiva o reactiva un operador. Desactivar cierra sus sesiones. */
+  /** Desactiva o reactiva a alguien. Desactivar cierra sus sesiones. */
   @Patch(':userId')
   @HttpCode(204)
   async setActive(
@@ -63,7 +69,18 @@ export class AdminUsersController {
     @Param('userId', ParseUUIDPipe) userId: string,
     @Body(zodBody(estadoSchema)) body: z.infer<typeof estadoSchema>,
   ) {
-    await this.usuarios.setActive(userId, body.active, actorDe(request));
+    await this.usuarios.setActive(userId, body.active, actorConPermisos(request));
+  }
+
+  /** Cambia el rol. Pide el código de la aplicación de quien lo cambia. */
+  @Patch(':userId/role')
+  @HttpCode(204)
+  async cambiarRol(
+    @Req() request: FastifyRequest,
+    @Param('userId', ParseUUIDPipe) userId: string,
+    @Body(zodBody(rolSchema)) body: z.infer<typeof rolSchema>,
+  ) {
+    await this.usuarios.cambiarRol(userId, body, actorConPermisos(request));
   }
 
   /**
@@ -75,7 +92,7 @@ export class AdminUsersController {
     @Req() request: FastifyRequest,
     @Param('userId', ParseUUIDPipe) userId: string,
   ) {
-    const { email, password, expiresAt } = await this.usuarios.resetPassword(userId, actorDe(request));
+    const { email, password, expiresAt } = await this.usuarios.resetPassword(userId, actorConPermisos(request));
     return {
       email,
       password,

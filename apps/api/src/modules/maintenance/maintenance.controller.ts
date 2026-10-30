@@ -4,7 +4,7 @@ import type { Queue } from 'bullmq';
 import { sql } from 'drizzle-orm';
 import { DB, type Database } from '../../db/db.module';
 import { loadEnv } from '../../config/env';
-import { Roles, SessionGuard } from '../identity/guards';
+import { RequierePermiso, SessionGuard } from '../identity/guards';
 import { MAINTENANCE_QUEUE, PURGE_POSITIONS_JOB } from './retention.service';
 
 /**
@@ -16,7 +16,7 @@ import { MAINTENANCE_QUEUE, PURGE_POSITIONS_JOB } from './retention.service';
  */
 @Controller('v1/admin/maintenance')
 @UseGuards(SessionGuard)
-@Roles('administrador')
+@RequierePermiso('sistema.tecnico')
 export class MaintenanceController {
   constructor(
     @Inject(DB) private readonly db: Database,

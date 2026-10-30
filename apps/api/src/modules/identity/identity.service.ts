@@ -1,9 +1,9 @@
 import { randomBytes } from 'node:crypto';
 import { Inject, Injectable, Logger } from '@nestjs/common';
-import { and, eq, inArray, isNull, ne, or, gt } from 'drizzle-orm';
+import { and, eq, inArray, isNull, ne, or, gt, lt } from 'drizzle-orm';
 import { uuidv7 } from 'uuidv7';
 import { DB, type Database } from '../../db/db.module';
-import { apiKeys, driverDevices, drivers, rides, sessions, userRecoveryCodes, users } from '../../db/schema';
+import { apiKeys, driverDevices, drivers, rides, roles, sessions, userRecoveryCodes, users } from '../../db/schema';
 import { AppError } from '../../common/problem';
 import {
   decryptColumn,
@@ -16,7 +16,15 @@ import {
 } from '../../common/crypto';
 import { base32Decode, generateTotpSecret, otpauthUri, verifyTotp } from '../../common/totp';
 import { loadEnv } from '../../config/env';
-import { ACTIVE_RIDE_STATUSES, evaluatePassword, finDeSuspension, normalizeLogin, sigueSuspendido } from '@tax/shared';
+import {
+  ACTIVE_RIDE_STATUSES,
+  evaluatePassword,
+  finDeSuspension,
+  normalizeLogin,
+  permisosDelRol,
+  sigueSuspendido,
+  type Permiso,
+} from '@tax/shared';
 import { AuditService } from '../audit/audit.service';
 
 export interface ApiPrincipal {
@@ -32,7 +40,14 @@ export interface UserPrincipal {
   name: string;
   /** Lo necesita el panel para juzgar una contraseña nueva igual que aquí. */
   email: string;
-  role: 'administrador' | 'operador';
+  /** Clave del rol (`administrador`, `operador` o uno creado en el panel). */
+  role: string;
+  roleName: string;
+  /**
+   * Se leen del rol en cada petición, no al entrar: un permiso que se quita
+   * deja de servir en la siguiente, sin esperar a que caduque la sesión.
+   */
+  permissions: Permiso[];
   /** Si no, la sesión solo sirve para darlo de alta (§8.1). */
   totpEnabled: boolean;
   /**
@@ -366,14 +381,16 @@ export class IdentityService {
     userAgent?: string,
   ): Promise<{ user: UserPrincipal; token: string; expiresAt: Date }> {
     const env = loadEnv();
-    const [user] = await this.db
-      .select()
+    const [fila] = await this.db
+      .select({ user: users, rol: roles })
       .from(users)
+      .innerJoin(roles, eq(roles.key, users.role))
       .where(and(eq(users.email, normalizeLogin(email)), eq(users.active, true)))
       .limit(1);
 
     const invalid = new AppError('UNAUTHORIZED', 'Correo o contraseña incorrectos');
-    if (!user) throw invalid;
+    if (!fila) throw invalid;
+    const user = fila.user;
 
     if (user.lockedUntil && user.lockedUntil > new Date()) {
       throw new AppError('UNAUTHORIZED', 'Cuenta bloqueada por intentos fallidos');
@@ -480,6 +497,8 @@ export class IdentityService {
         name: user.name,
         email: user.email,
         role: user.role,
+        roleName: fila.rol.name,
+        permissions: permisosDelRol(fila.rol),
         totpEnabled: user.totpEnabled,
         mustChangePassword: user.tempPasswordExpiresAt !== null,
       },
@@ -495,6 +514,8 @@ export class IdentityService {
         name: users.name,
         email: users.email,
         role: users.role,
+        roleName: roles.name,
+        rolePermissions: roles.permissions,
         active: users.active,
         totpEnabled: users.totpEnabled,
         tempPasswordExpiresAt: users.tempPasswordExpiresAt,
@@ -503,6 +524,7 @@ export class IdentityService {
       })
       .from(sessions)
       .innerJoin(users, eq(users.id, sessions.userId))
+      .innerJoin(roles, eq(roles.key, users.role))
       .where(eq(sessions.tokenHash, sha256Hex(token)))
       .limit(1);
 
@@ -513,6 +535,8 @@ export class IdentityService {
       name: row.name,
       email: row.email,
       role: row.role,
+      roleName: row.roleName,
+      permissions: permisosDelRol({ key: row.role, permissions: row.rolePermissions }),
       totpEnabled: row.totpEnabled,
       mustChangePassword: row.tempPasswordExpiresAt !== null,
     };
@@ -631,6 +655,76 @@ export class IdentityService {
     }
 
     return { ok: false };
+  }
+
+  /**
+   * Confirma con el teléfono un cambio que da poder: el rol de alguien, o los
+   * permisos de un rol.
+   *
+   * La sesión abierta no basta. En una oficina el computador de un
+   * administrador puede quedarse sin vigilancia, y sin esto cualquiera que
+   * pasara por delante se haría administrador en dos clics.
+   *
+   * Va dentro de la transacción del cambio: si el cambio falla después, el
+   * código no se gasta. Solo vale el de la aplicación, no los de respaldo:
+   * esos son para entrar cuando se pierde el teléfono. Y como seis dígitos
+   * se adivinan probando, cinco fallos seguidos cierran todas sus sesiones.
+   */
+  async confirmarConSegundoFactor(tx: Database, userId: string, presented: string | undefined): Promise<void> {
+    if (!presented?.trim()) {
+      throw new AppError(
+        'SECOND_FACTOR_REQUIRED',
+        'Escribe el código de tu aplicación de autenticación para confirmar el cambio',
+      );
+    }
+
+    const [user] = await tx.select().from(users).where(eq(users.id, userId)).limit(1);
+    if (!user?.totpEnabled || !user.totpSecretEncrypted) {
+      throw new AppError('SECOND_FACTOR_REQUIRED', 'Activa el segundo factor antes de cambiar permisos');
+    }
+
+    const env = loadEnv();
+    const secret = base32Decode(decryptColumn(env.ENCRYPTION_KEY, user.totpSecretEncrypted));
+    const check = verifyTotp(secret, presented, { lastCounter: user.totpLastCounter });
+
+    // Quemar el intervalo con una condición, no leyendo y escribiendo: dos
+    // peticiones a la vez con el mismo código las dos verían «vale», pero
+    // solo una encuentra el contador todavía por debajo.
+    const quemado =
+      check.valid && check.counter != null
+        ? await tx
+            .update(users)
+            .set({ totpLastCounter: check.counter, failedAttempts: 0 })
+            .where(
+              and(
+                eq(users.id, userId),
+                or(isNull(users.totpLastCounter), lt(users.totpLastCounter, check.counter)),
+              ),
+            )
+            .returning({ id: users.id })
+        : [];
+    if (quemado.length) return;
+
+    // Fuera de la transacción: el fallo tiene que contar aunque esta se deshaga.
+    const intentos = user.failedAttempts + 1;
+    await this.db
+      .update(users)
+      .set({
+        failedAttempts: intentos,
+        lockedUntil: intentos >= 5 ? new Date(Date.now() + 15 * 60_000) : null,
+      })
+      .where(eq(users.id, userId));
+
+    if (intentos >= 5) {
+      await this.db
+        .update(sessions)
+        .set({ revokedAt: new Date() })
+        .where(and(eq(sessions.userId, userId), isNull(sessions.revokedAt)));
+      this.logger.warn({ userId }, 'Cinco códigos fallidos al confirmar un cambio: sesiones cerradas');
+      throw new AppError('UNAUTHORIZED', 'Demasiados códigos incorrectos: se cerró la sesión por seguridad');
+    }
+
+    throw new AppError('SECOND_FACTOR_INVALID', 'Código incorrecto o ya usado: espera el siguiente');
   }
 
   /** Cuántos repuestos le quedan al operador, para avisarle cuando se acaban. */

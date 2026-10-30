@@ -20,6 +20,7 @@ import { MapCanvas } from '../components/MapCanvas';
 import { RideCard } from '../components/RideCard';
 import { RideDetail } from '../components/RideDetail';
 import { actions, useLive } from '../live/store';
+import { usePuede } from '../api/queries';
 
 /**
  * Columnas del tablero: el ciclo de vida leído de izquierda a derecha. Cada
@@ -196,6 +197,7 @@ function AttentionPanel({
 }) {
   // Suscribirse al pulso de un segundo mantiene vivos los aros de cuenta atrás.
   useLive((s) => s.tick);
+  const puedeRelanzar = usePuede()('carreras.despachar');
 
   return (
     <Card flush className="flex flex-col overflow-hidden">
@@ -259,7 +261,7 @@ function AttentionPanel({
                   </span>
                 </button>
 
-                {ride.status === 'UNASSIGNED' ? (
+                {ride.status === 'UNASSIGNED' && puedeRelanzar ? (
                   <Button
                     size="sm"
                     variant="primary"

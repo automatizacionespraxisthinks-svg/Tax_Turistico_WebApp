@@ -30,7 +30,7 @@ import {
 } from '@tax/ui';
 import { useLive } from '../live/store';
 import { zoneOf } from '../live/store';
-import { useSesion } from '../api/queries';
+import { usePuede } from '../api/queries';
 import { GestionConductor, NuevoConductorBoton } from '../components/ConductorAdmin';
 
 type Filter = 'turno' | 'disponibles' | 'carrera' | 'todos' | 'atencion';
@@ -59,10 +59,11 @@ export function Flota() {
   const [query, setQuery] = useState('');
   const [selectedId, setSelectedId] = useState<string | null>(null);
 
-  const sesion = useSesion();
-  // Solo cortesía: quien autoriza es el guardia de la API, que exige rol
-  // administrador. Enseñar un botón que siempre falla es peor que ocultarlo.
-  const esAdmin = sesion.data?.user.role === 'administrador';
+  // Solo cortesía: quien autoriza es el guardia de la API, que exige el
+  // permiso. Enseñar un botón que siempre falla es peor que ocultarlo.
+  const puede = usePuede();
+  const gestionar = puede('conductores.gestionar');
+  const suspender = puede('conductores.suspender');
 
   const active = FILTERS.find((f) => f.value === filter) ?? FILTERS[0]!;
 
@@ -130,7 +131,7 @@ export function Flota() {
             aria-label="Buscar conductores"
           />
         </div>
-        {esAdmin ? <NuevoConductorBoton /> : null}
+        {gestionar ? <NuevoConductorBoton /> : null}
       </div>
 
       {rows.length === 0 ? (
@@ -165,7 +166,9 @@ export function Flota() {
         {selected ? (
           <div className="space-y-5">
             <DriverDetail driver={selected} rideCode={selectedRide?.code} />
-            {esAdmin ? <GestionConductor driver={selected} /> : null}
+            {gestionar || suspender ? (
+              <GestionConductor driver={selected} gestionar={gestionar} suspender={suspender} />
+            ) : null}
           </div>
         ) : null}
       </Sheet>

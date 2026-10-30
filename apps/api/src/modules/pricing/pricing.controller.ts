@@ -15,7 +15,7 @@ import { DB, type Database } from '../../db/db.module';
 import { places } from '../../db/schema';
 import { zodBody } from '../../common/zod.pipe';
 import { ApiKeyGuard, Scopes } from '../identity/api-key.guard';
-import { Roles, SessionGuard } from '../identity/guards';
+import { RequierePermiso, SessionGuard } from '../identity/guards';
 import { ZonesService } from './zones.service';
 import { CatalogoService, type ActorDelPanel } from './catalogo.service';
 
@@ -68,13 +68,13 @@ export class AdminPricingController {
   ) {}
 
   @Post('zones')
-  @Roles('administrador')
+  @RequierePermiso('zonas.gestionar')
   createZone(@Req() request: FastifyRequest, @Body(zodBody(nuevaZonaSchema)) body: NuevaZona) {
     return this.catalogo.crearZona(body, actorDe(request));
   }
 
   @Patch('zones/:zoneId')
-  @Roles('administrador')
+  @RequierePermiso('zonas.gestionar')
   updateZone(
     @Req() request: FastifyRequest,
     @Param('zoneId', ParseUUIDPipe) zoneId: string,
@@ -84,11 +84,13 @@ export class AdminPricingController {
   }
 
   @Post('places')
+  @RequierePermiso('lugares.gestionar')
   createPlace(@Req() request: FastifyRequest, @Body(zodBody(nuevoLugarSchema)) body: NuevoLugar) {
     return this.catalogo.crearLugar(body, actorDe(request));
   }
 
   @Patch('places/:placeId')
+  @RequierePermiso('lugares.gestionar')
   updatePlace(
     @Req() request: FastifyRequest,
     @Param('placeId', ParseUUIDPipe) placeId: string,

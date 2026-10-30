@@ -5,6 +5,8 @@ import { VEHICLE_TYPES, type VehicleType } from '@tax/shared';
 import { DbModule } from '../db/db.module';
 import { AuditService } from '../modules/audit/audit.service';
 import { FleetAdminService } from '../modules/fleet/fleet-admin.service';
+import { FleetService } from '../modules/fleet/fleet.service';
+import { RealtimeGateway } from '../realtime/realtime.gateway';
 
 /**
  * Da de alta un conductor desde el servidor.
@@ -28,8 +30,20 @@ import { FleetAdminService } from '../modules/fleet/fleet-admin.service';
  * comando de terminal, y compilado hace que Nest falle al arrancar con
  * «can't resolve dependencies of the SessionGuard». El servicio por su cuenta
  * solo depende de la base.
+ *
+ * `FleetService` y `RealtimeGateway` van vacíos por lo mismo: el servicio los
+ * usa solo al suspender (cerrar el turno y avisar a la PWA), que necesita
+ * Redis y el socket. Aquí solo se crea, y crear no los toca.
  */
-@Module({ imports: [DbModule], providers: [AuditService, FleetAdminService] })
+@Module({
+  imports: [DbModule],
+  providers: [
+    AuditService,
+    FleetAdminService,
+    { provide: FleetService, useValue: {} },
+    { provide: RealtimeGateway, useValue: {} },
+  ],
+})
 class CliModule {}
 
 async function main(): Promise<void> {

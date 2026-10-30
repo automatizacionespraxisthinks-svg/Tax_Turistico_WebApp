@@ -1,7 +1,7 @@
 import { Controller, Get, Query, UseGuards } from '@nestjs/common';
 import { filtrosDeInformeSchema, type FiltrosDeInforme } from '@tax/shared';
 import { zodBody } from '../../common/zod.pipe';
-import { SessionGuard } from '../identity/guards';
+import { RequierePermiso, SessionGuard } from '../identity/guards';
 import { ReportsService } from './reports.service';
 
 /**
@@ -11,6 +11,7 @@ import { ReportsService } from './reports.service';
  */
 @Controller('v1/reports')
 @UseGuards(SessionGuard)
+@RequierePermiso('reportes.ver')
 export class ReportsController {
   constructor(private readonly reports: ReportsService) {}
 

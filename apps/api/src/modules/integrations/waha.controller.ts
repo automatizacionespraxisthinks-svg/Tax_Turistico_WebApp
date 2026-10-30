@@ -14,7 +14,7 @@ import type { FastifyRequest } from 'fastify';
 import { and, eq } from 'drizzle-orm';
 import { DB, type Database } from '../../db/db.module';
 import { wahaSessions } from '../../db/schema';
-import { Roles, SessionGuard } from '../identity/guards';
+import { RequierePermiso, SessionGuard } from '../identity/guards';
 import { AuditService } from '../audit/audit.service';
 import { WahaMonitorService } from './waha-monitor.service';
 
@@ -62,7 +62,7 @@ export class WahaController {
    * línea en `missing`: una viva la volvería a escribir el monitor al minuto.
    */
   @Delete(':id')
-  @Roles('administrador')
+  @RequierePermiso('sistema.tecnico')
   async quitar(@Req() request: FastifyRequest, @Param('id') id: string) {
     const user = request.user!;
     await this.db.transaction(async (tx) => {

@@ -59,6 +59,7 @@ import {
   useExportar,
   type Exportacion,
 } from '../api/exportaciones';
+import { usePuede } from '../api/queries';
 import { ApiError } from '../api/client';
 import { useFiltrosDeInforme, useOpcionesDeInforme, useTablero } from '../api/informes';
 import { ChartFrame, DataTable, HorizontalBars, Lines, MapaDeCalor, StackedBars } from '../components/charts';
@@ -111,6 +112,7 @@ export function Reportes() {
   const opciones = useOpcionesDeInforme();
   const tablero = useTablero(filtros);
   const { exportar, generando } = useExportar();
+  const puedeExportar = usePuede()('reportes.exportar');
 
   const t = tablero.data;
   const actualizando = tablero.isFetching && tablero.isPlaceholderData;
@@ -140,26 +142,28 @@ export function Reportes() {
         </div>
         {/* Del tablero tal como está filtrado. Cada formato con su color de
             siempre: Excel verde, PDF rojo. */}
-        <div className="flex flex-wrap gap-2">
-          <Button
-            variant="success-solid"
-            icon={<FileSpreadsheet className="size-3.5" />}
-            loading={generando('resumen-xlsx')}
-            title="Las cifras, todas las carreras del periodo y las tablas por conductor, zona, día y hora"
-            onClick={() => descargar('xlsx')}
-          >
-            Descargar Excel
-          </Button>
-          <Button
-            variant="danger-solid"
-            icon={<FileText className="size-3.5" />}
-            loading={generando('resumen-pdf')}
-            title="El resumen del periodo para imprimir o enviar"
-            onClick={() => descargar('pdf')}
-          >
-            Descargar informe PDF
-          </Button>
-        </div>
+        {puedeExportar ? (
+          <div className="flex flex-wrap gap-2">
+            <Button
+              variant="success-solid"
+              icon={<FileSpreadsheet className="size-3.5" />}
+              loading={generando('resumen-xlsx')}
+              title="Las cifras, todas las carreras del periodo y las tablas por conductor, zona, día y hora"
+              onClick={() => descargar('xlsx')}
+            >
+              Descargar Excel
+            </Button>
+            <Button
+              variant="danger-solid"
+              icon={<FileText className="size-3.5" />}
+              loading={generando('resumen-pdf')}
+              title="El resumen del periodo para imprimir o enviar"
+              onClick={() => descargar('pdf')}
+            >
+              Descargar informe PDF
+            </Button>
+          </div>
+        ) : null}
       </div>
 
       <BarraDeFiltros
@@ -205,7 +209,7 @@ export function Reportes() {
         </div>
       )}
 
-      <ExportQueue />
+      {puedeExportar ? <ExportQueue /> : null}
     </div>
   );
 }

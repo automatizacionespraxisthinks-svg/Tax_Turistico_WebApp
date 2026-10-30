@@ -56,6 +56,16 @@ export const ERROR_CODES = {
   LOGIN_TAKEN: 'Ya existe una cuenta con ese usuario',
   OPERATOR_LIMIT_REACHED: 'Se alcanzó el máximo de operadores activos',
 
+  /*
+   * Confirmar con el segundo factor un cambio que da poder (roles y
+   * permisos). No son 401 a propósito: la sesión sigue siendo buena, y un
+   * 401 haría que el panel volviera al acceso por un código mal escrito.
+   */
+  SECOND_FACTOR_REQUIRED: 'Confirma con el código de tu aplicación de autenticación',
+  SECOND_FACTOR_INVALID: 'Código incorrecto o ya usado',
+  ROLE_IN_USE: 'El rol tiene usuarios',
+  LAST_ADMIN: 'Tiene que quedar al menos un administrador activo',
+
   INVALID_TRANSITION: 'La máquina de estados no permite ese cambio',
   RIDE_ALREADY_TAKEN: 'Otro conductor aceptó la carrera primero',
   OFFER_NOT_VALID: 'La oferta venció o fue revocada',
@@ -98,6 +108,10 @@ const STATUS_BY_CODE: Record<ErrorCode, HttpStatus> = {
 
   LOGIN_TAKEN: HttpStatus.CONFLICT,
   OPERATOR_LIMIT_REACHED: HttpStatus.CONFLICT,
+  SECOND_FACTOR_REQUIRED: HttpStatus.FORBIDDEN,
+  SECOND_FACTOR_INVALID: HttpStatus.FORBIDDEN,
+  ROLE_IN_USE: HttpStatus.CONFLICT,
+  LAST_ADMIN: HttpStatus.CONFLICT,
 
   INVALID_TRANSITION: HttpStatus.CONFLICT,
   RIDE_ALREADY_TAKEN: HttpStatus.CONFLICT,

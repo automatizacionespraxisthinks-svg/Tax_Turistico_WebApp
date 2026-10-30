@@ -237,7 +237,7 @@ WAHA_API_KEY=...
 
 PUBLIC_ORIGINS=https://panel.TUDOMINIO,https://conductor.TUDOMINIO
 
-# Operadores activos a la vez; los administradores no cuentan.
+# Usuarios activos a la vez, de cualquier rol menos administrador.
 MAX_OPERADORES=5
 
 # Minutos a bordo antes de poder finalizar (0 lo desactiva, 120 es el máximo;
@@ -432,10 +432,11 @@ la siembra.
 node dist/cli/crear-usuario.js ana@TUDOMINIO "Ana Gómez" administrador
 ```
 
-El primero tiene que ser un administrador, y **los administradores solo se
-crean así**, desde el terminal. El usuario puede ser un correo o un nombre de
-usuario corto (`ana.gomez`); el tercer argumento es `administrador` u
-`operador`.
+El primero tiene que ser un administrador, y se crea así, desde el terminal.
+Los demás, también otros administradores, se crean desde el panel. El usuario
+puede ser un correo o un nombre de usuario corto (`ana.gomez`); el tercer
+argumento es la clave de un rol (`administrador`, `operador` o uno creado en
+el panel).
 
 Imprime una contraseña **temporal** una sola vez: caduca a las 72 horas y, al
 entrar con ella, el panel obliga a cambiarla antes de nada. En la base solo
@@ -446,13 +447,27 @@ persona al entrar, justo después de cambiar la contraseña, escaneando el QR
 con su teléfono. Así el secreto TOTP nunca pasa por las manos de quien crea la
 cuenta.
 
-### 4.2.0 Los operadores, desde el panel
+### 4.2.0 Los usuarios y sus roles, desde el panel
 
-Con el administrador dentro, los operadores se crean en *Sistema › Usuarios ›
-Nuevo operador*: nombre y usuario (correo o nombre corto). El panel enseña la
+Con el administrador dentro, el resto se crea en *Sistema › Usuarios › Nuevo
+usuario*: nombre, usuario (correo o nombre corto) y rol. El panel enseña la
 contraseña temporal una sola vez, con un botón que copia un mensaje listo para
 mandárselo por WhatsApp: la dirección del panel, el usuario, la contraseña y
 cuándo caduca.
+
+Qué puede hacer cada rol se ve y se cambia en *Sistema › Roles y permisos*.
+Ver la operación es de todos; los permisos son lo que se puede cambiar
+(despachar, cancelar, suspender conductores, zonas…) y lo que se ve aparte
+(reportes, auditoría). La migración 0018 deja `administrador` con todo y
+`operador` con lo mismo que tenía antes de que hubiera roles editables, así
+que desplegar no le cambia nada a nadie.
+
+Dar un rol distinto del de operador, cambiar el rol de alguien o tocar los
+permisos de un rol pide **el código de la aplicación de autenticación** de
+quien lo hace, aunque ya tenga la sesión abierta: un computador desatendido
+no basta para hacerse administrador. Además nadie puede dar permisos que su
+rol no tiene, nadie se cambia su propio rol y siempre queda un administrador
+activo.
 
 Al entrar, el operador pasa por dos pantallas antes del panel: elegir su
 contraseña y activar el segundo factor. No son avisos de la interfaz: hasta
@@ -461,7 +476,8 @@ salvo al propio cambio; y hasta activar el segundo factor, `TOTP_SETUP_REQUIRED`
 El orden importa: quien creó la cuenta conoce la temporal, y si el segundo
 factor fuera primero podría adelantarse y dar de alta su propio teléfono.
 
-Caben **cinco operadores activos** (`MAX_OPERADORES`). Para dar de alta a otro
+Caben **cinco usuarios activos** sin contar administradores
+(`MAX_OPERADORES`). Para dar de alta a otro
 con el cupo lleno, se desactiva a quien ya no esté en la oficina: deja de poder
 entrar en el acto y sus sesiones se cierran, pero no se borra, porque su
 nombre sigue en la bitácora y en las carreras que despachó.

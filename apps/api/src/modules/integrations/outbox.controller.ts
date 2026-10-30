@@ -1,7 +1,7 @@
 import { Controller, Get, Param, Post, Query, UseGuards } from '@nestjs/common';
 import { z } from 'zod';
 import { zodBody } from '../../common/zod.pipe';
-import { SessionGuard } from '../identity/guards';
+import { RequierePermiso, SessionGuard } from '../identity/guards';
 import { OutboxService } from './outbox.service';
 
 const listSchema = z.object({
@@ -27,6 +27,7 @@ export class OutboxController {
   }
 
   @Post(':eventId/retry')
+  @RequierePermiso('sistema.tecnico')
   async retry(@Param('eventId') eventId: string) {
     await this.outbox.revive(eventId);
     return { ok: true };

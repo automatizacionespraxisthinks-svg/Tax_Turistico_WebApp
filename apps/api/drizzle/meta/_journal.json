@@ -127,6 +127,13 @@
       "when": 1793363848832,
       "tag": "0017_enlace_de_ubicacion",
       "breakpoints": true
+    },
+    {
+      "idx": 18,
+      "version": "7",
+      "when": 1793387306242,
+      "tag": "0018_roles_y_permisos",
+      "breakpoints": true
     }
   ]
 }

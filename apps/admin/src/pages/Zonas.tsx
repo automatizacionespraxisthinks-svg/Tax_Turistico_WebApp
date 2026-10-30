@@ -19,7 +19,7 @@ import {
   useToast,
 } from '@tax/ui';
 import { ApiError, api } from '../api/client';
-import { usePlaces, useSesion } from '../api/queries';
+import { usePlaces, usePuede } from '../api/queries';
 import { actions, useLive } from '../live/store';
 import { FormularioLugar, FormularioZona } from '../components/FormulariosCatalogo';
 
@@ -33,15 +33,17 @@ type Tab = 'zonas' | 'lugares';
  * terminal»), con las palabras clave con que el asistente los reconoce. Los
  * dos se crean aquí, en una ventana sobre la vista.
  *
- * Crear una zona o cambiar sus oleadas es de administrador: cambia cómo se
- * despacha. Los lugares los agrega cualquiera de la oficina.
+ * Crear una zona o cambiar sus oleadas pide «Gestionar zonas y oleadas»:
+ * cambia cómo se despacha. Los lugares, «Gestionar lugares». Sin ellos, las
+ * dos pestañas se ven pero no se tocan.
  */
 export function Zonas() {
   const [tab, setTab] = useState<Tab>('zonas');
   const zoneCount = useLive((s) => s.zones.length);
   const places = usePlaces();
-  const sesion = useSesion();
-  const esAdmin = sesion.data?.user.role === 'administrador';
+  const puede = usePuede();
+  const zonasEditables = puede('zonas.gestionar');
+  const lugaresEditables = puede('lugares.gestionar');
 
   const [zonaNueva, setZonaNueva] = useState(false);
   const [lugarAbierto, setLugarAbierto] = useState<Place | 'nuevo' | null>(null);
@@ -57,12 +59,12 @@ export function Zonas() {
             { value: 'lugares', label: 'Catálogo de lugares', count: places.data?.length },
           ]}
         />
-        {tab === 'zonas' && esAdmin ? (
+        {tab === 'zonas' && zonasEditables ? (
           <Button variant="primary" icon={<Plus className="size-3.5" />} onClick={() => setZonaNueva(true)}>
             Nueva zona
           </Button>
         ) : null}
-        {tab === 'lugares' ? (
+        {tab === 'lugares' && lugaresEditables ? (
           <Button variant="primary" icon={<Plus className="size-3.5" />} onClick={() => setLugarAbierto('nuevo')}>
             Nuevo lugar
           </Button>
@@ -77,12 +79,12 @@ export function Zonas() {
           exit={{ opacity: 0, y: -6 }}
           transition={transition.base}
         >
-          {tab === 'zonas' ? <ZonasYOleadas editable={esAdmin} /> : null}
+          {tab === 'zonas' ? <ZonasYOleadas editable={zonasEditables} /> : null}
           {tab === 'lugares' ? (
             <Lugares
               places={places.data ?? []}
-              onAbrir={(lugar) => setLugarAbierto(lugar)}
-              onNuevo={() => setLugarAbierto('nuevo')}
+              onAbrir={lugaresEditables ? (lugar) => setLugarAbierto(lugar) : undefined}
+              onNuevo={lugaresEditables ? () => setLugarAbierto('nuevo') : undefined}
             />
           ) : null}
         </motion.div>
@@ -286,8 +288,9 @@ function Lugares({
   onNuevo,
 }: {
   places: Place[];
-  onAbrir: (lugar: Place) => void;
-  onNuevo: () => void;
+  /** Sin él, el catálogo es de solo lectura. */
+  onAbrir?: (lugar: Place) => void;
+  onNuevo?: () => void;
 }) {
   const [query, setQuery] = useState('');
 
@@ -299,9 +302,11 @@ function Lugares({
           title="Catálogo vacío"
           description="Agrega los sitios que los clientes nombran sin dirección: la terminal, el parque, los hoteles. El asistente los reconoce por sus palabras clave."
           action={
-            <Button size="sm" variant="primary" icon={<Plus className="size-3.5" />} onClick={onNuevo}>
-              Agregar el primero
-            </Button>
+            onNuevo ? (
+              <Button size="sm" variant="primary" icon={<Plus className="size-3.5" />} onClick={onNuevo}>
+                Agregar el primero
+              </Button>
+            ) : undefined
           }
         />
       </Card>
@@ -326,8 +331,8 @@ function Lugares({
         <div>
           <h2 className="text-base font-semibold text-ink">Catálogo de lugares</h2>
           <p className="text-micro text-ink-muted">
-            Cuando el cliente no manda ubicación ni dirección, el asistente busca aquí el lugar que nombró. Toca uno
-            para editarlo.
+            Cuando el cliente no manda ubicación ni dirección, el asistente busca aquí el lugar que nombró.
+            {onAbrir ? ' Toca uno para editarlo.' : ''}
           </p>
         </div>
         <Input
@@ -344,8 +349,9 @@ function Lugares({
           <li key={place.id} className="border-b border-line last:border-0">
             <button
               type="button"
-              onClick={() => onAbrir(place)}
-              className="flex w-full items-center gap-3 px-4 py-2.5 text-left transition-colors duration-150 ease-[var(--ease-standard)] hover:bg-surface-sunk"
+              disabled={!onAbrir}
+              onClick={() => onAbrir?.(place)}
+              className="flex w-full items-center gap-3 px-4 py-2.5 text-left transition-colors duration-150 ease-[var(--ease-standard)] enabled:hover:bg-surface-sunk"
             >
               <MapPin className="size-3.5 shrink-0 text-ink-muted" />
               <div className="min-w-0 flex-1">

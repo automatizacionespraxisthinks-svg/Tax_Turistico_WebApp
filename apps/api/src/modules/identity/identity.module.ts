@@ -5,6 +5,8 @@ import { DriverGuard, SessionGuard } from './guards';
 import { AuthController } from './auth.controller';
 import { AdminUsersController } from './admin-users.controller';
 import { UsersAdminService } from './users-admin.service';
+import { AdminRolesController } from './admin-roles.controller';
+import { RolesService } from './roles.service';
 
 /**
  * Identidad.
@@ -15,8 +17,8 @@ import { UsersAdminService } from './users-admin.service';
  */
 @Global()
 @Module({
-  providers: [IdentityService, UsersAdminService, ApiKeyGuard, SessionGuard, DriverGuard],
-  controllers: [AuthController, AdminUsersController],
+  providers: [IdentityService, UsersAdminService, RolesService, ApiKeyGuard, SessionGuard, DriverGuard],
+  controllers: [AuthController, AdminUsersController, AdminRolesController],
   exports: [IdentityService, UsersAdminService, ApiKeyGuard, SessionGuard, DriverGuard],
 })
 export class IdentityModule {}

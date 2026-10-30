@@ -16,7 +16,7 @@ import { z } from 'zod';
 import { RIDE_STATUSES, pointSchema, type RideStatus } from '@tax/shared';
 import { zodBody } from '../../common/zod.pipe';
 import { AppError } from '../../common/problem';
-import { SessionGuard } from '../identity/guards';
+import { RequierePermiso, SessionGuard } from '../identity/guards';
 import { RidesService, type Actor } from './rides.service';
 import { DispatchService } from '../dispatch/dispatch.service';
 import { FotosService } from './fotos.service';
@@ -81,6 +81,7 @@ export class AdminRidesController {
   }
 
   @Patch(':rideId/address')
+  @RequierePermiso('carreras.corregir')
   updateAddress(
     @Req() request: FastifyRequest,
     @Param('rideId', ParseUUIDPipe) rideId: string,
@@ -91,6 +92,7 @@ export class AdminRidesController {
 
   /** Efectivo o pago electrónico, con la carrera sin asignar. */
   @Patch(':rideId/payment')
+  @RequierePermiso('carreras.corregir')
   cambiarMedioDePago(
     @Req() request: FastifyRequest,
     @Param('rideId', ParseUUIDPipe) rideId: string,
@@ -100,6 +102,7 @@ export class AdminRidesController {
   }
 
   @Post(':rideId/cancel')
+  @RequierePermiso('carreras.cancelar')
   cancel(
     @Req() request: FastifyRequest,
     @Param('rideId', ParseUUIDPipe) rideId: string,
@@ -110,6 +113,7 @@ export class AdminRidesController {
 
   /** Relanzar el despacho desde la oleada 1 (§5.3). */
   @Post(':rideId/redispatch')
+  @RequierePermiso('carreras.despachar')
   async redispatch(@Req() request: FastifyRequest, @Param('rideId', ParseUUIDPipe) rideId: string) {
     await this.dispatch.redispatch(rideId, operator(request));
     return { ok: true };
@@ -117,6 +121,7 @@ export class AdminRidesController {
 
   /** Asignación manual a un conductor concreto (RF-41). */
   @Post(':rideId/assign')
+  @RequierePermiso('carreras.despachar')
   assign(
     @Req() request: FastifyRequest,
     @Param('rideId', ParseUUIDPipe) rideId: string,

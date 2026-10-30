@@ -1,5 +1,5 @@
 import { useQuery } from '@tanstack/react-query';
-import type { Place } from '@tax/shared';
+import type { Permiso, Place } from '@tax/shared';
 import { api } from './client';
 
 /**
@@ -59,7 +59,7 @@ export function useAuditLog(limit = 50) {
     queryKey: ['audit', limit],
     queryFn: () => api.get<AuditEntry[]>(`/v1/audit?limit=${limit}`),
     staleTime: 30_000,
-    // La bitácora es de administradores: un operador recibe 403 y la pantalla
+    // La bitácora pide «Ver la auditoría»: sin él llega un 403 y la pantalla
     // lo trata como «sin permiso», no como un fallo.
     retry: false,
   });
@@ -80,17 +80,20 @@ export interface SesionUsuario {
   id: string;
   name: string;
   email: string;
-  role: 'administrador' | 'operador';
+  /** Clave del rol: `administrador`, `operador` o uno creado en el panel. */
+  role: string;
+  roleName: string;
+  permissions: Permiso[];
   totpEnabled: boolean;
 }
 
 /**
- * Quién está en sesión y con qué rol.
+ * Quién está en sesión, con qué rol y qué permisos.
  *
  * El panel lo usa para no enseñar botones que el servidor va a rechazar. No
- * es la barrera de seguridad —esa está en el guardia de la API, que exige
- * `administrador`— sino cortesía: enseñar un botón que siempre falla es peor
- * que no enseñarlo.
+ * es la barrera de seguridad —esa está en el guardia de la API, que exige el
+ * permiso en cada petición— sino cortesía: enseñar un botón que siempre falla
+ * es peor que no enseñarlo.
  */
 export function useSesion() {
   return useQuery({
@@ -98,4 +101,14 @@ export function useSesion() {
     queryFn: () => api.get<{ user: SesionUsuario }>('/v1/auth/me'),
     staleTime: 5 * 60_000,
   });
+}
+
+/**
+ * `puede('flota.gestionar')`. Mientras la sesión carga, nada: es preferible
+ * que un botón aparezca un instante tarde a que aparezca y desaparezca.
+ */
+export function usePuede(): (permiso: Permiso) => boolean {
+  const sesion = useSesion();
+  const permisos = sesion.data?.user.permissions;
+  return (permiso) => permisos?.includes(permiso) ?? false;
 }

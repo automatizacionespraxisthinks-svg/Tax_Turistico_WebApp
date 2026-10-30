@@ -3,13 +3,15 @@ import { AnimatePresence, motion } from 'motion/react';
 import { Fingerprint } from 'lucide-react';
 import { formatRelative } from '@tax/shared';
 import { Card, EmptyState, SectionLabel, Skeleton, StatusPill, Tabs, cn, transition } from '@tax/ui';
-import { useAuditLog, useAuditVerification, useSesion } from '../api/queries';
+import { useAuditLog, useAuditVerification, usePuede, useSesion } from '../api/queries';
+import { RolesAdmin } from '../components/RolesAdmin';
 import { UsuariosAdmin } from '../components/UsuariosAdmin';
 
-type Tab = 'usuarios' | 'auditoria';
+type Tab = 'usuarios' | 'roles' | 'auditoria';
 
 /**
- * Sistema: las cuentas de la oficina y la bitácora de auditoría.
+ * Sistema: las cuentas de la oficina, sus roles y la bitácora de auditoría.
+ * Cada pestaña sale con su permiso.
  *
  * Aquí estaban también el estado de los servicios y los eventos a n8n. Se
  * quitaron de la vista por decisión de la empresa; la API sigue vigilando y
@@ -17,13 +19,17 @@ type Tab = 'usuarios' | 'auditoria';
  * para el monitoreo externo.
  */
 export function Sistema() {
-  // La pestaña de usuarios solo existe para administradores. No es la
-  // barrera —el servidor responde 403 a un operador— sino no enseñar lo que
-  // no puede usar. Un administrador entra directo a ella.
+  // Cada pestaña existe solo con su permiso. No es la barrera —el servidor
+  // responde 403— sino no enseñar lo que no se puede usar.
   const sesion = useSesion();
-  const esAdmin = sesion.data?.user.role === 'administrador';
+  const puede = usePuede();
+  const pestanas = [
+    ...(puede('usuarios.gestionar') ? [{ value: 'usuarios' as const, label: 'Usuarios' }] : []),
+    ...(puede('roles.gestionar') ? [{ value: 'roles' as const, label: 'Roles y permisos' }] : []),
+    ...(puede('auditoria.ver') ? [{ value: 'auditoria' as const, label: 'Auditoría' }] : []),
+  ];
   const [elegida, setElegida] = useState<Tab | null>(null);
-  const tab: Tab = esAdmin ? (elegida ?? 'usuarios') : 'auditoria';
+  const tab = pestanas.find((p) => p.value === elegida)?.value ?? pestanas[0]?.value;
 
   // Sin saber aún el rol, cualquier pestaña sería un parpadeo: al recargar se
   // veía un instante la auditoría antes de saltar a usuarios.
@@ -36,16 +42,23 @@ export function Sistema() {
     );
   }
 
+  if (!tab) {
+    return (
+      <div className="p-5">
+        <Card>
+          <EmptyState
+            icon={<Fingerprint className="size-4" />}
+            title="Nada que ver aquí con tu rol"
+            description="Usuarios, roles y auditoría piden permisos que tu rol no tiene."
+          />
+        </Card>
+      </div>
+    );
+  }
+
   return (
     <div className="space-y-4 p-5">
-      <Tabs
-        value={tab}
-        onChange={setElegida}
-        options={[
-          ...(esAdmin ? [{ value: 'usuarios' as const, label: 'Usuarios' }] : []),
-          { value: 'auditoria', label: 'Auditoría' },
-        ]}
-      />
+      <Tabs value={tab} onChange={setElegida} options={pestanas} />
 
       <AnimatePresence mode="wait" initial={false}>
         <motion.div
@@ -55,7 +68,8 @@ export function Sistema() {
           exit={{ opacity: 0, y: -6 }}
           transition={transition.base}
         >
-          {tab === 'usuarios' && esAdmin ? <UsuariosAdmin /> : null}
+          {tab === 'usuarios' ? <UsuariosAdmin /> : null}
+          {tab === 'roles' ? <RolesAdmin /> : null}
           {tab === 'auditoria' ? <Auditoria /> : null}
         </motion.div>
       </AnimatePresence>
@@ -83,8 +97,8 @@ function Auditoria() {
       <Card>
         <EmptyState
           icon={<Fingerprint className="size-4" />}
-          title="Sin permiso para ver la bitácora"
-          description="La auditoría es de administradores; tu sesión es de operador."
+          title="No se pudo leer la bitácora"
+          description="Si te acaban de quitar el permiso «Ver la auditoría», ya no la puedes ver."
         />
       </Card>
     );

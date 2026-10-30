@@ -30,6 +30,7 @@ import {
 } from '@tax/ui';
 import { actions, loadRideDetail, useLive } from '../live/store';
 import { API_BASE, api } from '../api/client';
+import { usePuede } from '../api/queries';
 
 type DetailTab = 'resumen' | 'oleadas' | 'bitacora';
 
@@ -258,6 +259,7 @@ function RideActions({ ride }: { ride: Ride }) {
   const [assigning, setAssigning] = useState(false);
   const [choice, setChoice] = useState('');
   const [cambiandoPago, setCambiandoPago] = useState(false);
+  const puede = usePuede();
 
   // Las mismas reglas que el despacho: ni suspendidos, ni quien no recibe
   // pago electrónico si la carrera se paga así. La API también lo exige.
@@ -293,9 +295,12 @@ function RideActions({ ride }: { ride: Ride }) {
       .finally(() => setCambiandoPago(false));
   };
 
-  const canRelaunch = allowed.some((t) => t.to === 'NOTIFIED');
-  const canAssign = allowed.some((t) => t.to === 'ASSIGNED');
-  const canCancel = allowed.some((t) => t.to === 'CANCELLED');
+  // Lo que permite la máquina de estados, y de eso, lo que permite el rol.
+  const canRelaunch = puede('carreras.despachar') && allowed.some((t) => t.to === 'NOTIFIED');
+  const canAssign = puede('carreras.despachar') && allowed.some((t) => t.to === 'ASSIGNED');
+  const canCancel = puede('carreras.cancelar') && allowed.some((t) => t.to === 'CANCELLED');
+  const canPago = puede('carreras.corregir') && ride.status === 'UNASSIGNED';
+  if (!canRelaunch && !canAssign && !canCancel && !canPago) return null;
 
   return (
     <div className="space-y-3 border-t border-line pt-4">
@@ -328,7 +333,7 @@ function RideActions({ ride }: { ride: Ride }) {
           </Button>
         ) : null}
 
-        {ride.status === 'UNASSIGNED' ? (
+        {canPago ? (
           <Button
             variant="secondary"
             icon={ride.pagoElectronico ? <Banknote className="size-3.5" /> : <CreditCard className="size-3.5" />}
@@ -798,6 +803,7 @@ function TelefonoDePrueba({ ride }: { ride: Ride }) {
   const toast = useToast();
   const [marcado, setMarcado] = useState(ride.customerEsPrueba ?? false);
   const [guardando, setGuardando] = useState(false);
+  const editable = usePuede()('clientes.marcar');
 
   useEffect(() => setMarcado(ride.customerEsPrueba ?? false), [ride.customerEsPrueba]);
 
@@ -820,6 +826,9 @@ function TelefonoDePrueba({ ride }: { ride: Ride }) {
     }
   };
 
+  // Sin el permiso solo se informa, y solo si ya está marcado.
+  if (!editable && !marcado) return null;
+
   return (
     <div className="flex items-center justify-between gap-3 rounded-md border border-line px-3 py-2.5">
       <div className="min-w-0">
@@ -832,9 +841,11 @@ function TelefonoDePrueba({ ride }: { ride: Ride }) {
             : 'Márcalo si es del equipo y se usó para probar el servicio.'}
         </p>
       </div>
-      <Button size="sm" variant="secondary" loading={guardando} onClick={() => void cambiar()}>
-        {marcado ? 'Quitar marca' : 'Marcar'}
-      </Button>
+      {editable ? (
+        <Button size="sm" variant="secondary" loading={guardando} onClick={() => void cambiar()}>
+          {marcado ? 'Quitar marca' : 'Marcar'}
+        </Button>
+      ) : null}
     </div>
   );
 }

@@ -436,6 +436,14 @@ grupos de rutas:
 No es duplicación: el agente y el operador pueden hacer cosas distintas sobre
 la misma carrera, y la bitácora tiene que poder distinguir quién fue.
 
+Dentro del panel, cada endpoint que cambia algo pide un permiso con
+`@RequierePermiso('…')`, no un rol. Los permisos se leen del rol en cada
+petición (`resolveSession` cruza `users` con `roles`), así que quitar uno vale
+desde la siguiente sin cerrar sesiones. El catálogo vive en `@tax/shared`
+(`PERMISOS`); agregar uno es agregarlo ahí y marcar el endpoint: el
+administrador lo recibe solo, y los demás roles no lo tienen hasta que alguien
+se lo dé.
+
 ## Lo que falta
 
 - **Adaptador de Chatwoot y WAHA** (capa anticorrupción) y el endpoint de
