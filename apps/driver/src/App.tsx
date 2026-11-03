@@ -14,7 +14,12 @@ import { Resumen } from './screens/Resumen';
 import { ApiError, api, installId, storeToken, storedToken } from './api/client';
 import { connectDriverSocket, type OfferPush } from './api/socket';
 import { onQueueChange, send, watchConnection } from './api/queue';
-import { watchPosition, type PositionWatcher } from './api/position';
+import {
+  CADENCIA_POR_DEFECTO,
+  watchPosition,
+  type PositionIntervals,
+  type PositionWatcher,
+} from './api/position';
 import { disablePush, enablePush, pushSupport, type PushState } from './api/push';
 import {
   initialSession,
@@ -41,7 +46,11 @@ interface DriverSessionResponse {
   /** Turno abierto, si lo hay: decide si la PWA arranca en espera o fuera. */
   shift: { shiftId: string; plate: string; startedAt: string; paused: boolean } | null;
   totals: { rides: number };
-  rules?: { minRideMinutes: number };
+  rules?: {
+    minRideMinutes: number;
+    /** Cada cuánto mandar la posición, en segundos, en carrera y en espera. */
+    positionSeconds?: { ride: number; idle: number };
+  };
   activeRide: ApiRide | null;
   pendingOffer: {
     rideId: string;
@@ -59,6 +68,13 @@ export function App() {
   const [push, setPush] = useState<PushState>(() => pushSupport());
   const previousPhase = useRef<Phase>(session.phase);
   const positionWatcher = useRef<PositionWatcher>(undefined);
+  /**
+   * Cada cuánto manda la posición, según la API. En una referencia y no en el
+   * estado porque solo la lee el vigilante del GPS: meterla en el reducer
+   * volvería a pintar la pantalla cada vez que `/me` la confirma, sin que
+   * nada de lo que se ve haya cambiado.
+   */
+  const cadencia = useRef<PositionIntervals>(CADENCIA_POR_DEFECTO);
   /**
    * El punto del cliente mientras el conductor va a recogerlo. Con él se mide
    * la distancia en cada lectura del GPS: el aviso de «a 300 m del punto» y
@@ -78,6 +94,10 @@ export function App() {
     try {
       const me = await api.get<DriverSessionResponse>('/v1/driver/rides/me');
       const shiftStartedAt = me.shift ? new Date(me.shift.startedAt).getTime() : null;
+
+      // Antes de cualquier `dispatch`: el efecto del GPS puede crear el
+      // vigilante en ese mismo ciclo y tiene que leer ya la cadencia buena.
+      if (me.rules?.positionSeconds) cadencia.current = me.rules.positionSeconds;
 
       // La placa del turno abierto manda sobre la recordada: es la que de
       // verdad está asociada en la base.
@@ -251,6 +271,7 @@ export function App() {
 
     positionWatcher.current ??= watchPosition({
       onError: setNotice,
+      intervals: () => cadencia.current,
       onPosition: (punto) => {
         const destino = puntoDeRecogida.current;
         if (destino) dispatch({ type: 'approach', meters: haversineKm(punto, destino) * 1000 });
@@ -294,25 +315,70 @@ export function App() {
     };
   }, []);
 
-  /* --- la pantalla no se apaga durante una carrera (Wake Lock API) --------- */
+  /* --- la pantalla no se apaga mientras haya turno (Wake Lock API) -------- */
+
+  const enTurno =
+    session.phase === 'available' || session.phase === 'paused' || session.phase === 'ride';
+
+  /*
+   * Antes solo durante la carrera; ahora todo el turno, y es lo que sostiene
+   * el mapa de la oficina.
+   *
+   * Una PWA no puede leer el GPS con la aplicación cerrada: la API de
+   * geolocalización no existe dentro del service worker, así que sin página
+   * viva no hay posición que mandar —ni con permiso «siempre», que en la web
+   * no existe—. Y en segundo plano Android congela la pestaña a los pocos
+   * minutos de taparla. Lo único que sí está en nuestra mano es que la
+   * pantalla no se apague sola mientras el conductor tiene turno abierto.
+   *
+   * El navegador suelta el bloqueo él mismo cada vez que la página se
+   * oculta, y NO lo devuelve al volver: de ahí que se vuelva a pedir en cada
+   * `visibilitychange`. Sin eso, bloquear el teléfono una sola vez dejaba la
+   * pantalla libre para apagarse el resto del turno, que es justo el caso
+   * por el que la oficina dejaba de ver al taxi.
+   */
   useEffect(() => {
-    if (session.phase !== 'ride') return;
+    if (!enTurno) return;
     let sentinel: WakeLockSentinel | undefined;
     let cancelled = false;
 
-    navigator.wakeLock
-      ?.request('screen')
-      .then((lock) => {
-        if (cancelled) void lock.release();
-        else sentinel = lock;
-      })
-      .catch(() => undefined);
+    const pedir = () => {
+      if (cancelled || sentinel !== undefined || document.visibilityState !== 'visible') return;
+      void navigator.wakeLock
+        ?.request('screen')
+        .then((lock) => {
+          if (cancelled) return void lock.release();
+          sentinel = lock;
+          // Soltado por el navegador al taparse la página: se olvida para
+          // poder volver a pedirlo cuando el conductor vuelva.
+          lock.addEventListener('release', () => {
+            if (sentinel === lock) sentinel = undefined;
+          });
+        })
+        .catch(() => undefined);
+    };
+
+    const alVolver = () => {
+      if (document.visibilityState !== 'visible') return;
+      pedir();
+      /*
+       * Volver a la vista es el momento en que la oficina lleva más tiempo
+       * sin saber nada de este taxi: mientras la página estuvo tapada el
+       * navegador pudo congelarla. La posición sale ya, sin esperar a que
+       * venza la cadencia.
+       */
+      positionWatcher.current?.flush();
+    };
+
+    pedir();
+    document.addEventListener('visibilitychange', alVolver);
 
     return () => {
       cancelled = true;
+      document.removeEventListener('visibilitychange', alVolver);
       void sentinel?.release();
     };
-  }, [session.phase]);
+  }, [enTurno]);
 
   /* --- comandos ------------------------------------------------------------ */
 

@@ -58,9 +58,11 @@ export class FleetController {
   }
 
   /**
-   * Posición del conductor. Es el endpoint más llamado de la API —62 taxis
-   * cada 10–30 s—, así que no escribe en Postgres en cada llamada: Redis
-   * guarda la última y el muestreo decide cuándo persistir (§6).
+   * Posición del conductor. Es con diferencia el endpoint más llamado de la
+   * API —62 taxis cada `POSITION_REPORT_*`, que por defecto son dos
+   * segundos: unas 31 peticiones por segundo—, así que no escribe en
+   * Postgres en cada llamada: Redis guarda la última, el socket la reparte
+   * al panel al instante y el muestreo decide cuándo persistir (§6).
    */
   @Post('position')
   async position(

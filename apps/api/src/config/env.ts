@@ -91,8 +91,35 @@ const envSchema = z.object({
     .default('http://localhost:5173,http://localhost:5174')
     .transform((value) => value.split(',').map((origin) => origin.trim()).filter(Boolean)),
 
-  /** Posición: antigüedad máxima para considerar a un conductor (§5.2). */
+  /**
+   * Posición: hasta qué antigüedad cuenta como «reciente» (§5.2).
+   *
+   * No es un descarte. Los de posición reciente se ofrecen primero, y solo
+   * si no hay ninguno se ofrece con la última posición conocida: mejor eso
+   * que dejar la carrera sin nadie.
+   */
   POSITION_MAX_AGE_SECONDS: z.coerce.number().int().min(10).max(600).default(60),
+
+  /*
+   * Cada cuánto manda su posición la PWA, y cada cuánto se guarda en
+   * Postgres. Son dos cosas distintas y por eso son dos pares de variables:
+   *
+   *  - ENVÍO: de la PWA a la API. Es lo que ve el panel, porque cada POST
+   *    emite `driver:moved` por el socket. Bajarlo mueve los taxis del mapa
+   *    más seguido; cuesta datos del conductor y peticiones a la API, no
+   *    espacio en la base.
+   *  - MUESTREO: de la API a `driver_positions`. Es el histórico del
+   *    recorrido, lo que llena la base y lo que luego purga la limpieza de
+   *    madrugada. Se deja aparte a propósito: el panel puede ir a dos
+   *    segundos sin que el histórico crezca quince veces.
+   *
+   * La PWA recibe los dos de envío en `/me`, así que cambiarlos aquí no
+   * obliga a recompilarla: el conductor los toma al abrir o al reconectar.
+   */
+  POSITION_REPORT_RIDE_SECONDS: z.coerce.number().int().min(1).max(120).default(2),
+  POSITION_REPORT_IDLE_SECONDS: z.coerce.number().int().min(1).max(300).default(2),
+  POSITION_SAMPLE_RIDE_SECONDS: z.coerce.number().int().min(1).max(600).default(10),
+  POSITION_SAMPLE_IDLE_SECONDS: z.coerce.number().int().min(1).max(900).default(30),
   /**
    * Minutos que tienen que pasar desde «Pasajero a bordo» para poder
    * finalizar. Una carrera de dos minutos en Paipa no existe: si aparece, es

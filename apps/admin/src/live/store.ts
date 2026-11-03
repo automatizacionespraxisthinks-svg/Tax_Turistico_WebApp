@@ -180,6 +180,47 @@ function scheduleRefresh(): void {
   }, 400);
 }
 
+/* ------------------------------------------ posiciones en vivo, por lotes --- */
+
+/**
+ * Las posiciones llegan muy seguidas: cada taxi manda la suya cada dos
+ * segundos (`POSITION_REPORT_*` en la API), así que con la flota entera son
+ * decenas de mensajes por segundo. Aplicada una por una, cada mensaje era una
+ * vuelta de React con el mapa dentro.
+ *
+ * Se juntan y se aplican una vez por cuadro. La cola va indexada por
+ * conductor, así que solo sobrevive la última posición de cada uno y no crece
+ * aunque la pestaña esté tapada y `requestAnimationFrame` no corra: al volver
+ * se pinta una sola vez, con el punto bueno de cada taxi.
+ */
+const movimientos = new Map<string, Point>();
+let frameMovimientos: number | undefined;
+
+function encolarMovimiento(driverId: string, point: Point): void {
+  movimientos.set(driverId, point);
+  if (frameMovimientos !== undefined) return;
+
+  frameMovimientos = window.requestAnimationFrame(() => {
+    frameMovimientos = undefined;
+    if (movimientos.size === 0) return;
+
+    const lote = new Map(movimientos);
+    movimientos.clear();
+    emit({
+      drivers: state.drivers.map((driver) => {
+        const punto = lote.get(driver.id);
+        return punto ? { ...driver, position: punto, positionAgeSeconds: 0 } : driver;
+      }),
+    });
+  });
+}
+
+function olvidarMovimientos(): void {
+  if (frameMovimientos !== undefined) window.cancelAnimationFrame(frameMovimientos);
+  frameMovimientos = undefined;
+  movimientos.clear();
+}
+
 function reportError(error: unknown): void {
   if (error instanceof ApiError && error.isUnauthorized) {
     emit({ error: 'La sesión expiró' });
@@ -350,13 +391,7 @@ export function startLive(): () => void {
     },
 
     onDriverMoved: (event) => {
-      emit({
-        drivers: state.drivers.map((driver) =>
-          driver.id === event.driverId
-            ? { ...driver, position: { lat: event.lat, lng: event.lng }, positionAgeSeconds: 0 }
-            : driver,
-        ),
-      });
+      encolarMovimiento(event.driverId, { lat: event.lat, lng: event.lng });
     },
 
     onAlert: (alert) => {
@@ -391,6 +426,7 @@ export function startLive(): () => void {
 
   return () => {
     disconnect();
+    olvidarMovimientos();
     window.clearInterval(driversPoll);
     window.clearInterval(wahaPoll);
     window.clearInterval(ticker);

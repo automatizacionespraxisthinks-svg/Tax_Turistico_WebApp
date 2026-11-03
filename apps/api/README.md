@@ -317,11 +317,21 @@ del documento y es razonable.
 
 ## Retención del histórico de GPS (§9.3)
 
-`driver_positions` es la tabla que crece de verdad: la PWA manda posición cada
-10 segundos con el turno abierto, así que 62 taxis a 12 horas son **267.840
-filas al día**. Medido, cada fila ocupa unos 142 bytes con sus índices, así
-que con el plazo de seis meses del documento la tabla se estabiliza en torno a
-**6,4 GB** — y sin purga, crece sin tope.
+`driver_positions` es la tabla que crece de verdad. Con el turno abierto la
+PWA manda posición cada dos segundos (`POSITION_REPORT_*`), pero **no se
+guarda cada envío**: a la tabla se muestrea cada
+`POSITION_SAMPLE_RIDE_SECONDS` en carrera y cada
+`POSITION_SAMPLE_IDLE_SECONDS` en espera —10 y 30 segundos—, así que 62 taxis
+a 12 horas de carrera son **267.840 filas al día**, y ese es el techo.
+
+La separación es a propósito: el mapa de la oficina va en vivo porque cada
+envío se reparte por el socket en cuanto llega, sin que el histórico crezca
+con él. Guardar los dos segundos serían 1,3 millones de filas al día, quince
+veces las 90.000 que deja un turno en espera.
+
+Medido, cada fila ocupa unos 142 bytes con sus índices, así que con el plazo
+de seis meses del documento la tabla se estabiliza en torno a **6,4 GB** — y
+sin purga, crece sin tope.
 
 Pero el motivo no es el disco, es lo que hay dentro: el recorrido minuto a
 minuto de 62 personas. Pasados unos meses no sirve para operar —el mapa en

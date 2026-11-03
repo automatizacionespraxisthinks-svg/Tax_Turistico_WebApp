@@ -219,6 +219,17 @@ El panel no inventa acciones: cada botón sale de la tabla de transiciones.
   se compara con el límite real del contenedor.
 - **Privacidad**: el conductor no ve el teléfono del cliente hasta aceptar; el
   GPS solo existe con turno abierto.
+- **Posición en vivo** (`POSITION_REPORT_RIDE_SECONDS` y
+  `POSITION_REPORT_IDLE_SECONDS`, dos segundos por defecto): la PWA manda su
+  punto a esa cadencia y la API lo reparte al panel por el socket
+  (`driver:moved`), así que es el ritmo al que se mueven los taxis en el mapa.
+  Guardar el recorrido va aparte (`POSITION_SAMPLE_*`, 10 s en carrera y 30 s
+  en espera): el mapa va en vivo sin que el histórico crezca con él. La PWA
+  recibe la cadencia en `/me`, así que se cambia solo en el entorno de la API.
+  Con la aplicación cerrada no hay posición —la web no puede leer el GPS sin
+  página viva, ni existe un permiso «siempre»—, así que la pantalla se
+  mantiene encendida mientras haya turno abierto y el reporte se pone al día
+  en cuanto el conductor vuelve a la aplicación.
 - **Pago electrónico**: cada conductor dice si lo recibe (`drivers.
   acepta_pago_electronico`, desde la ficha en *Flota*) y cada carrera si el
   cliente paga así (`rides.pago_electronico`). Es un filtro más del despacho,

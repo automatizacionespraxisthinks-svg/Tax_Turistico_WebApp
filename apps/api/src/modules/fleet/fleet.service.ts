@@ -1,4 +1,4 @@
-import { Inject, Injectable } from '@nestjs/common';
+import { Inject, Injectable, Logger } from '@nestjs/common';
 import { Redis } from 'ioredis';
 import { and, eq, inArray, isNull, sql } from 'drizzle-orm';
 import { uuidv7 } from 'uuidv7';
@@ -89,6 +89,7 @@ export interface Candidate {
  */
 @Injectable()
 export class FleetService {
+  private readonly logger = new Logger(FleetService.name);
   private readonly env = loadEnv();
 
   constructor(
@@ -329,9 +330,14 @@ export class FleetService {
   /**
    * Registra la posición del conductor.
    *
-   * Solo con turno abierto (§9.2). Redis guarda la última; a Postgres se
-   * muestrea cada 30 s fuera de carrera y cada 10 s en carrera, que es lo que
-   * fija la retención del histórico (§6).
+   * Solo con turno abierto (§9.2). Redis guarda la última, que es la que
+   * usan el panel y el despacho; a Postgres se muestrea a la cadencia de
+   * `POSITION_SAMPLE_*`, que es la que fija el tamaño del histórico (§6).
+   *
+   * El muestreo NO sigue a la cadencia de envío. La PWA manda cada dos
+   * segundos para que el mapa de la oficina vaya en vivo, y si cada envío
+   * se guardara, `driver_positions` crecería quince veces: 62 taxis en un
+   * turno de doce horas pasarían de unas 90.000 filas al día a 1,3 millones.
    */
   async recordPosition(
     driverId: string,
@@ -353,7 +359,9 @@ export class FleetService {
       .expire(metaKey, 15 * 60)
       .exec();
 
-    const sampleEverySeconds = options.rideId ? 10 : 30;
+    const sampleEverySeconds = options.rideId
+      ? this.env.POSITION_SAMPLE_RIDE_SECONDS
+      : this.env.POSITION_SAMPLE_IDLE_SECONDS;
     const lastSampled = Number((await this.redis.hget(metaKey, 'sampledAt')) ?? 0);
 
     if (now - lastSampled >= sampleEverySeconds * 1000) {
@@ -532,14 +540,29 @@ export class FleetService {
     const zone = this.zonesService.classify(pickup);
     const tortuosity = zone?.tortuosity ?? 1.5;
 
+    /*
+     * Dos montones: posición reciente y posición vieja.
+     *
+     * Una posición vieja no sirve para prometer un ETA (§5.2), así que los
+     * recientes van primero y, habiendo alguno, los viejos no se usan.
+     *
+     * Pero antes los viejos se descartaban del todo, y eso dejaba carreras
+     * sin nadie: la PWA no puede reportar con el teléfono tapado —Android
+     * congela la pestaña—, así que un conductor en turno y disponible se
+     * volvía invisible al minuto de guardar el celular. Entre ofrecerle la
+     * carrera con su última posición conocida y no ofrecérsela a nadie, lo
+     * primero es mejor: el aviso le llega igual (Web Push funciona con la
+     * aplicación cerrada) y él decide si le sirve.
+     *
+     * La distancia sale del GEOSEARCH, o sea de esa última posición
+     * guardada: es la mejor que hay, no una inventada.
+     */
     const candidates: Candidate[] = [];
-    for (const row of rows) {
-      // Una posición vieja no sirve para prometer un ETA (§5.2).
-      const age = await this.positionAgeSeconds(row.driverId);
-      if (age === null || age > this.env.POSITION_MAX_AGE_SECONDS) continue;
+    const conPosicionVieja: Candidate[] = [];
 
+    for (const row of rows) {
       const distanceKm = distanceByDriver.get(row.driverId) ?? 0;
-      candidates.push({
+      const candidate: Candidate = {
         driverId: row.driverId,
         name: row.name,
         code: row.code,
@@ -547,7 +570,23 @@ export class FleetService {
         plate: row.plate,
         distanceKm: Math.round(distanceKm * 100) / 100,
         etaMinutes: estimateEtaMinutes(distanceKm, tortuosity),
-      });
+      };
+
+      const age = await this.positionAgeSeconds(row.driverId);
+      const reciente = age !== null && age <= this.env.POSITION_MAX_AGE_SECONDS;
+      (reciente ? candidates : conPosicionVieja).push(candidate);
+    }
+
+    if (candidates.length === 0 && conPosicionVieja.length > 0) {
+      // Queda en el registro: el ETA de esa oleada vale menos de lo normal.
+      this.logger.warn(
+        {
+          candidatos: conPosicionVieja.length,
+          maxEdadSegundos: this.env.POSITION_MAX_AGE_SECONDS,
+        },
+        'Nadie con posición reciente: se ofrece con la última conocida',
+      );
+      candidates.push(...conPosicionVieja);
     }
 
     // Se ordena por ETA, no por distancia: en vereda, dos kilómetros de

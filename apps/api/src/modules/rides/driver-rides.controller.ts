@@ -69,9 +69,23 @@ export class DriverRidesController {
       driver: { id: driver.id, code: driver.code, name: driver.name },
       shift,
       totals,
-      // La PWA bloquea «Finalizar» estos minutos. Viene de aquí para que
-      // cambiar la regla en la API no deje a la PWA contando otra cosa.
-      rules: { minRideMinutes: this.env.MIN_DURACION_CARRERA_MIN },
+      /*
+       * Las reglas que la PWA necesita para comportarse igual que el
+       * servidor. Vienen de aquí para que cambiarlas en el entorno de la API
+       * no deje a la PWA haciendo otra cosa ni obligue a recompilarla:
+       *
+       *  - `minRideMinutes`: los minutos que tiene bloqueado «Finalizar».
+       *  - `positionSeconds`: cada cuánto manda la posición, en carrera y en
+       *    espera. Es lo que marca cada cuánto se mueve su taxi en el mapa
+       *    de la oficina, porque cada envío se reparte por el socket.
+       */
+      rules: {
+        minRideMinutes: this.env.MIN_DURACION_CARRERA_MIN,
+        positionSeconds: {
+          ride: this.env.POSITION_REPORT_RIDE_SECONDS,
+          idle: this.env.POSITION_REPORT_IDLE_SECONDS,
+        },
+      },
       ...session,
     };
   }

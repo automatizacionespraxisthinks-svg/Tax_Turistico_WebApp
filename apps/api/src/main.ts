@@ -72,8 +72,12 @@ async function bootstrap(): Promise<void> {
       const apiKey = request.headers['x-api-key'] as string | undefined;
       return apiKey ? `k:${sha256Hex(apiKey)}` : request.ip;
     },
-    // La PWA del conductor manda posición cada 10 s; no puede chocar con el
-    // límite pensado para el agente.
+    /*
+     * La PWA del conductor manda posición cada `POSITION_REPORT_*` —dos
+     * segundos por defecto, 30 peticiones por minuto y conductor—, y todos
+     * los taxis de una misma red salen con la misma IP. No puede chocar con
+     * el límite, que está pensado para el agente.
+     */
     allowList: (request) => request.url === '/v1/driver/position',
   });
 

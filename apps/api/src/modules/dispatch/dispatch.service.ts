@@ -331,6 +331,16 @@ export class DispatchService {
       return;
     }
 
+    /*
+     * Las que nadie contestó quedan como «No contestó», que es lo que el
+     * panel muestra en la pestaña de oleadas: el registro tiene que decir a
+     * quién se le ofreció y qué hizo, no solo quién aceptó.
+     *
+     * Acotado al intento en curso. Al relanzar, `redispatch` revoca las
+     * ofertas vivas del intento anterior, así que hoy no quedan pendientes
+     * de otro lanzamiento; si por lo que sea quedara una, este vencimiento
+     * no es quien debe cerrarla.
+     */
     await this.db
       .update(rideOffers)
       .set({ response: 'expired' })
@@ -338,6 +348,7 @@ export class DispatchService {
         and(
           eq(rideOffers.rideId, rideId),
           eq(rideOffers.wave, wave),
+          eq(rideOffers.intento, ride.intentoDespacho),
           eq(rideOffers.response, 'pending'),
         ),
       );
