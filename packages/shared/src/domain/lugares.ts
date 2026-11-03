@@ -125,6 +125,8 @@ const oleadaSchema = z.object({
 export const cambiosZonaSchema = z
   .object({
     tortuosity: z.number().min(1).max(3).optional(),
+    /** Hacerla el punto de partida de las carreras sin ubicar. Solo se pone: quitarla es elegir otra. */
+    esReferencia: z.literal(true).optional(),
     waves: z
       .array(oleadaSchema)
       .length(3)
@@ -138,5 +140,8 @@ export const cambiosZonaSchema = z
       )
       .optional(),
   })
-  .refine((v) => v.tortuosity !== undefined || v.waves !== undefined, 'No hay nada que cambiar');
+  .refine(
+    (v) => v.tortuosity !== undefined || v.waves !== undefined || v.esReferencia !== undefined,
+    'No hay nada que cambiar',
+  );
 export type CambiosZona = z.infer<typeof cambiosZonaSchema>;

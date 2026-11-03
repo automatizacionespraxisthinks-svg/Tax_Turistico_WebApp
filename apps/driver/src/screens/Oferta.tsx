@@ -31,10 +31,18 @@ export function Oferta({
   onReject: () => void;
   onExpire: () => void;
 }) {
-  const total = 45;
   const [remaining, setRemaining] = useState(() =>
     Math.max(0, Math.round((offer.expiresAt - Date.now()) / 1000)),
   );
+  /*
+   * El aro se mide contra el plazo que quedaba al llegar la oferta, y vuelve
+   * a llenarse cuando la oleada siguiente lo alarga. Antes era un 45 fijo,
+   * que no cuadraba con oleadas de 30 o de 90 segundos.
+   */
+  const [total, setTotal] = useState(() => Math.max(1, remaining));
+  useEffect(() => {
+    setTotal(Math.max(1, Math.round((offer.expiresAt - Date.now()) / 1000)));
+  }, [offer.expiresAt]);
 
   useEffect(() => {
     // Vibration API: patrón corto-largo, distinto de una notificación normal.

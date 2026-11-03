@@ -159,7 +159,16 @@ export function sessionReducer(state: SessionState, action: SessionAction): Sess
       return { ...state, phase: 'available' };
 
     case 'offer_received':
-      return state.phase === 'available' ? { ...state, phase: 'offer', offer: action.offer } : state;
+      if (state.phase === 'available') return { ...state, phase: 'offer', offer: action.offer };
+      /*
+       * La misma carrera otra vez: es la oleada siguiente, que la mantiene
+       * abierta para quien no contestó. Se alarga la cuenta atrás sin soltar
+       * la pantalla de la oferta.
+       */
+      if (state.phase === 'offer' && state.offer?.rideId === action.offer.rideId) {
+        return { ...state, offer: { ...state.offer, expiresAt: action.offer.expiresAt, wave: action.offer.wave } };
+      }
+      return state;
 
     case 'offer_accepted':
       return {

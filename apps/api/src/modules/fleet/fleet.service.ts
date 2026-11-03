@@ -541,18 +541,20 @@ export class FleetService {
     const tortuosity = zone?.tortuosity ?? 1.5;
 
     /*
-     * Dos montones: posición reciente y posición vieja.
+     * Dos montones: posición reciente y posición vieja. Entran los dos.
      *
-     * Una posición vieja no sirve para prometer un ETA (§5.2), así que los
-     * recientes van primero y, habiendo alguno, los viejos no se usan.
+     * Una posición vieja sirve menos para prometer un ETA (§5.2), así que si
+     * el cupo de la oleada no alcanza para todos, los recientes van primero.
+     * Pero no se descarta a nadie que esté en el radio: la PWA no puede
+     * reportar con el teléfono bloqueado —Android congela la pestaña—, y un
+     * conductor en turno y disponible no puede quedarse sin la carrera por
+     * haber guardado el celular. El aviso le llega igual (Web Push funciona
+     * con la aplicación cerrada) y él decide si le sirve.
      *
-     * Pero antes los viejos se descartaban del todo, y eso dejaba carreras
-     * sin nadie: la PWA no puede reportar con el teléfono tapado —Android
-     * congela la pestaña—, así que un conductor en turno y disponible se
-     * volvía invisible al minuto de guardar el celular. Entre ofrecerle la
-     * carrera con su última posición conocida y no ofrecérsela a nadie, lo
-     * primero es mejor: el aviso le llega igual (Web Push funciona con la
-     * aplicación cerrada) y él decide si le sirve.
+     * Antes, habiendo un solo conductor con GPS reciente, los demás se
+     * descartaban. En la prueba de producción del 3 de noviembre, con cuatro
+     * taxis en el mismo punto, la oleada 2 avisó a uno solo y la 3 a los
+     * otros tres: los que tenían el teléfono bloqueado.
      *
      * La distancia sale del GEOSEARCH, o sea de esa última posición
      * guardada: es la mejor que hay, no una inventada.
@@ -577,21 +579,21 @@ export class FleetService {
       (reciente ? candidates : conPosicionVieja).push(candidate);
     }
 
-    if (candidates.length === 0 && conPosicionVieja.length > 0) {
-      // Queda en el registro: el ETA de esa oleada vale menos de lo normal.
-      this.logger.warn(
+    if (conPosicionVieja.length > 0) {
+      // Queda en el registro: el ETA de esos conductores vale menos de lo normal.
+      this.logger.log(
         {
-          candidatos: conPosicionVieja.length,
+          conPosicionVieja: conPosicionVieja.length,
           maxEdadSegundos: this.env.POSITION_MAX_AGE_SECONDS,
         },
-        'Nadie con posición reciente: se ofrece con la última conocida',
+        'Candidatos con la última posición conocida',
       );
-      candidates.push(...conPosicionVieja);
     }
 
     // Se ordena por ETA, no por distancia: en vereda, dos kilómetros de
     // destapado pesan más que tres de pavimento.
-    return candidates.sort((a, b) => a.etaMinutes - b.etaMinutes).slice(0, limit);
+    const porEta = (a: Candidate, b: Candidate) => a.etaMinutes - b.etaMinutes;
+    return [...candidates.sort(porEta), ...conPosicionVieja.sort(porEta)].slice(0, limit);
   }
 
   /**

@@ -134,6 +134,13 @@
       "when": 1793387306242,
       "tag": "0018_roles_y_permisos",
       "breakpoints": true
+    },
+    {
+      "idx": 19,
+      "version": "7",
+      "when": 1793745447837,
+      "tag": "0019_zona_de_referencia",
+      "breakpoints": true
     }
   ]
 }

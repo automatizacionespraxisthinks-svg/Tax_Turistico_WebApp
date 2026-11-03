@@ -45,15 +45,20 @@ export function enlaceDeMapaValido(enlace: string | null | undefined): string | 
 
 const LAT = '(-?\\d{1,2}\\.\\d{3,})';
 const LNG = '(-?\\d{1,3}\\.\\d{3,})';
+// Entre las dos: coma (o %2C) y, a veces, un espacio escrito como «+» o %20.
+// Google comparte así las coordenadas buscadas: `5.7791,+-73.1133`.
+const SEP = '\\s*(?:,|%2C)(?:\\s|\\+|%20)*';
 const PATRONES = [
-  // ?q=5.77,-73.10  ?query=  ?ll=  ?destination=  ?daddr=  (también con %2C)
-  new RegExp(`[?&](?:q|query|ll|sll|destination|daddr|center)=(?:loc:)?\\s*${LAT}\\s*(?:,|%2C)\\s*${LNG}`, 'i'),
+  // ?q=5.77,-73.10  ?query=  ?ll=  ?destination=  ?daddr=
+  new RegExp(`[?&](?:q|query|ll|sll|destination|daddr|center)=(?:loc:)?(?:\\s|\\+|%20)*${LAT}${SEP}${LNG}`, 'i'),
   // /@5.77,-73.10,17z
   new RegExp(`@${LAT},${LNG}`),
   // !3d5.77!4d-73.10 (el punto marcado de un lugar de Google)
   new RegExp(`!3d${LAT}!4d${LNG}`),
   // geo:5.77,-73.10
   new RegExp(`geo:${LAT},${LNG}`, 'i'),
+  // /maps/search/5.77,+-73.10 y /maps/place/5.77,-73.10: un pin soltado a mano
+  new RegExp(`/maps/(?:search|place)/${LAT}${SEP}${LNG}`, 'i'),
 ];
 
 /**
@@ -62,9 +67,10 @@ const PATRONES = [
  */
 export function puntoDeEnlace(enlace: string | null | undefined): Point | null {
   if (!enlace) return null;
-  // `!3d…!4d…` es el punto exacto; `@` es el centro de la vista. Si vienen
-  // los dos, manda el primero.
-  const ordenados = [PATRONES[2]!, PATRONES[0]!, PATRONES[1]!, PATRONES[3]!];
+  // `!3d…!4d…` es el punto exacto; `@` es el centro de la vista, y va el
+  // último porque solo dice qué se estaba mirando. Si vienen varios, manda
+  // el primero de esta lista.
+  const ordenados = [PATRONES[2]!, PATRONES[0]!, PATRONES[4]!, PATRONES[3]!, PATRONES[1]!];
   for (const re of ordenados) {
     const m = enlace.match(re);
     if (!m) continue;

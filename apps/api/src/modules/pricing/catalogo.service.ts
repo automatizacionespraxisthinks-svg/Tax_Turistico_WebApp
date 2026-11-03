@@ -114,7 +114,7 @@ export class CatalogoService {
   /** Las oleadas y el factor de tortuosidad de una zona. */
   async cambiarZona(zoneId: string, cambios: CambiosZona, actor: ActorDelPanel) {
     const [antes] = await this.db
-      .select({ name: zones.name, tortuosity: zones.tortuosity, waves: zones.waves })
+      .select({ name: zones.name, tortuosity: zones.tortuosity, waves: zones.waves, esReferencia: zones.esReferencia })
       .from(zones)
       .where(eq(zones.id, zoneId))
       .limit(1);
@@ -126,6 +126,35 @@ export class CatalogoService {
     };
 
     await this.db.transaction(async (tx) => {
+      /*
+       * Punto de partida de las carreras sin ubicar: una sola zona. Se quita
+       * de la que lo tenía y se pone en esta en la misma transacción; el
+       * índice `zones_una_referencia` impide que queden dos.
+       */
+      if (cambios.esReferencia && !antes.esReferencia) {
+        const [anterior] = await tx
+          .update(zones)
+          .set({ esReferencia: false, updatedAt: new Date() })
+          .where(eq(zones.esReferencia, true))
+          .returning({ name: zones.name });
+        await tx.update(zones).set({ esReferencia: true, updatedAt: new Date() }).where(eq(zones.id, zoneId));
+        await this.audit.record(
+          {
+            actorId: actor.id,
+            actorName: actor.name,
+            role: actor.role,
+            action: 'Cambió el punto de partida de las carreras sin ubicar',
+            entity: 'zones',
+            entityId: antes.name,
+            before: { zona: anterior?.name ?? null },
+            after: { zona: antes.name },
+            ip: actor.ip,
+          },
+          tx as unknown as Database,
+        );
+      }
+      if (cambios.tortuosity === undefined && cambios.waves === undefined) return;
+
       await tx.update(zones).set({ ...despues, updatedAt: new Date() }).where(eq(zones.id, zoneId));
       await this.audit.record(
         {
@@ -144,7 +173,7 @@ export class CatalogoService {
     });
 
     await this.zonas.reload();
-    return { id: zoneId, ...despues };
+    return { id: zoneId, ...despues, esReferencia: Boolean(cambios.esReferencia) || antes.esReferencia };
   }
 
   /* ------------------------------------------------------------ lugares --- */

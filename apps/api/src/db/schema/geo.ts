@@ -10,6 +10,7 @@ import {
   uniqueIndex,
   uuid,
 } from 'drizzle-orm/pg-core';
+import { sql } from 'drizzle-orm';
 import { zoneKind } from './enums';
 import type { WaveConfig } from '@tax/shared';
 
@@ -33,11 +34,23 @@ export const zones = pgTable(
     /** Radio, candidatos y vencimiento de cada oleada, editables desde el
         panel (§5.2). */
     waves: jsonb('waves').$type<WaveConfig[]>().notNull(),
+    /**
+     * El punto de partida de las carreras que no se pudieron ubicar: su
+     * centro es donde arrancan las oleadas cuando no hay dirección ni
+     * ubicación que sirva. Una sola zona, elegida en el panel. Antes se
+     * tomaba «la primera zona urbana», en el orden en que la base las
+     * devolviera, y en producción salía Lago Sochagota en vez del Centro.
+     */
+    esReferencia: boolean('es_referencia').notNull().default(false),
     active: boolean('active').notNull().default(true),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
   },
-  (table) => [uniqueIndex('zones_name_key').on(table.name)],
+  (table) => [
+    uniqueIndex('zones_name_key').on(table.name),
+    // A lo sumo una: el índice lo garantiza aunque dos personas la cambien a la vez.
+    uniqueIndex('zones_una_referencia').on(table.esReferencia).where(sql`${table.esReferencia}`),
+  ],
 );
 
 /**

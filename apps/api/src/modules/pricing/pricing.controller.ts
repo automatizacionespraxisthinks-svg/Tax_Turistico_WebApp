@@ -108,6 +108,7 @@ export class AdminPricingController {
       tortuosity: zone.tortuosity,
       waves: zone.waves,
       polygon: zone.polygon,
+      esReferencia: zone.esReferencia,
     }));
   }
 

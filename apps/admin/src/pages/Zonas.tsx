@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { AnimatePresence, motion } from 'motion/react';
-import { MapPin, Plus, Radar, Save } from 'lucide-react';
+import { Crosshair, MapPin, Plus, Radar, Save } from 'lucide-react';
 import type { Place, WaveConfig, Zone } from '@tax/shared';
 import { cambiosZonaSchema } from '@tax/shared';
 import {
@@ -147,6 +147,26 @@ function TarjetaZona({
   const [waves, setWaves] = useState<WaveConfig[]>(zone.waves);
   const [guardando, setGuardando] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [marcando, setMarcando] = useState(false);
+
+  /** Hace de esta zona el punto de partida de las carreras que no se ubican. */
+  const usarDePartida = async () => {
+    setMarcando(true);
+    setError(null);
+    try {
+      await api.patch(`/v1/admin/zones/${zone.id}`, { esReferencia: true });
+      await actions.refreshZones();
+      push({
+        tone: 'positive',
+        title: `${zone.name} es el punto de partida`,
+        description: 'Las carreras que no se puedan ubicar se despachan desde su centro.',
+      });
+    } catch (causa) {
+      setError(causa instanceof ApiError ? causa.message : 'No se pudo cambiar.');
+    } finally {
+      setMarcando(false);
+    }
+  };
 
   const update = (wave: 1 | 2 | 3, patch: Partial<WaveConfig>) =>
     setWaves((actuales) => actuales.map((w) => (w.wave === wave ? { ...w, ...patch } : w)));
@@ -191,6 +211,13 @@ function TarjetaZona({
         subtitle={`Factor de tortuosidad ${zone.tortuosity.toFixed(2)} · ${zone.activeDrivers} conductores habituales`}
         actions={
           <>
+            {zone.esReferencia ? (
+              <span title="Las carreras que no se pueden ubicar se despachan desde el centro de esta zona">
+                <StatusPill tone="accent" dot={false}>
+                  <Crosshair className="size-3" /> punto de partida
+                </StatusPill>
+              </span>
+            ) : null}
             <StatusPill tone={zone.kind === 'urbano' ? 'info' : 'positive'} dot={false}>
               {zone.kind === 'urbano' ? 'urbano' : 'vereda'}
             </StatusPill>
@@ -259,9 +286,32 @@ function TarjetaZona({
 
               {error ? <p className="text-caption text-[var(--t-critical-ink)]">{error}</p> : null}
 
+              <div className="flex items-center justify-between gap-3 rounded-md border border-line px-3 py-2.5">
+                <div className="min-w-0">
+                  <p className="text-base text-ink">Punto de partida de las carreras sin ubicar</p>
+                  <p className="text-micro text-ink-muted">
+                    Cuando no se encuentra la dirección ni hay ubicación, las oleadas arrancan desde el
+                    centro de esta zona y el conductor llega leyendo la dirección. Solo una zona lo es.
+                  </p>
+                </div>
+                {zone.esReferencia ? (
+                  <span className="shrink-0 text-caption font-medium text-ink-secondary">Es esta</span>
+                ) : (
+                  <Button
+                    size="sm"
+                    className="shrink-0 whitespace-nowrap"
+                    loading={marcando}
+                    onClick={() => void usarDePartida()}
+                  >
+                    Usar esta
+                  </Button>
+                )}
+              </div>
+
               <div className="flex items-center justify-between gap-3">
                 <p className="text-micro text-ink-muted">
-                  Cada oleada busca más lejos que la anterior. El cambio queda en la bitácora de auditoría.
+                  Cada oleada busca más lejos que la anterior y suma candidatos nuevos: quien no contestó
+                  sigue con la oferta. El cambio queda en la bitácora de auditoría.
                 </p>
                 <Button
                   variant="primary"

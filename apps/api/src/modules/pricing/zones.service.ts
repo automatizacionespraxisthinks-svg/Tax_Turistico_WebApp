@@ -1,5 +1,5 @@
 import { Inject, Injectable, Logger, type OnModuleInit } from '@nestjs/common';
-import { eq } from 'drizzle-orm';
+import { asc, eq } from 'drizzle-orm';
 import booleanPointInPolygon from '@turf/boolean-point-in-polygon';
 import type { Point, WaveConfig } from '@tax/shared';
 import { DB, type Database } from '../../db/db.module';
@@ -14,6 +14,8 @@ export interface LoadedZone {
   tortuosity: number;
   waves: WaveConfig[];
   polygon: GeoJsonPolygon;
+  /** El punto de partida de las carreras que no se pudieron ubicar. */
+  esReferencia: boolean;
 }
 
 /**
@@ -36,7 +38,9 @@ export class ZonesService implements OnModuleInit {
   }
 
   async reload(): Promise<void> {
-    const rows = await this.db.select().from(zones).where(eq(zones.active, true));
+    // En orden de creación: sin él, «la primera» dependía de cómo la base
+    // devolviera las filas ese día.
+    const rows = await this.db.select().from(zones).where(eq(zones.active, true)).orderBy(asc(zones.createdAt));
 
     this.cache = rows
       .filter((row) => row.kind === 'urbano' || row.kind === 'rural')
@@ -47,6 +51,7 @@ export class ZonesService implements OnModuleInit {
         tortuosity: row.tortuosity,
         waves: row.waves,
         polygon: row.polygon,
+        esReferencia: row.esReferencia,
       }));
 
     this.logger.log(`Zonas cargadas en memoria: ${this.cache.length}`);
@@ -111,17 +116,27 @@ export class ZonesService implements OnModuleInit {
    * El cliente da una direccion y el conductor la lee: esa parte no necesita
    * coordenadas. Pero el despacho si, porque las oleadas son radios, y un
    * radio necesita un centro. Antes de rechazar la carrera se usa el centro
-   * de la zona urbana: desde ahi la oleada 1 cubre el casco, y el conductor
-   * llega leyendo la direccion, como siempre se ha hecho.
+   * de la zona marcada como punto de partida —el Centro, salvo que la
+   * oficina elija otra—: desde ahi las oleadas cubren el casco, y el
+   * conductor llega leyendo la direccion, como siempre se ha hecho.
+   *
+   * Antes era «la primera zona urbana» sin orden fijo, y con dos urbanas en
+   * producción las carreras sin ubicar caían en Lago Sochagota.
    */
   puntoDeReferencia(): Point | undefined {
-    const urbana = this.cache.find((z) => z.kind === 'urbano') ?? this.cache[0];
-    if (!urbana) return undefined;
+    const zona =
+      this.cache.find((z) => z.esReferencia) ?? this.cache.find((z) => z.kind === 'urbano') ?? this.cache[0];
+    if (!zona) return undefined;
 
-    const puntos = urbana.polygon.coordinates.flat();
-    const lat = puntos.reduce((suma, [, y]) => suma + y, 0) / puntos.length;
-    const lng = puntos.reduce((suma, [x]) => suma + x, 0) / puntos.length;
-    return { lat, lng };
+    // El centro del rectángulo que la envuelve: en un círculo es el centro
+    // exacto, y el promedio de vértices contaba dos veces el de cierre.
+    const puntos = zona.polygon.coordinates.flat();
+    const lats = puntos.map(([, y]) => y);
+    const lngs = puntos.map(([x]) => x);
+    return {
+      lat: (Math.min(...lats) + Math.max(...lats)) / 2,
+      lng: (Math.min(...lngs) + Math.max(...lngs)) / 2,
+    };
   }
 
   /** Parámetros de la oleada N para una zona, con respaldo razonable. */

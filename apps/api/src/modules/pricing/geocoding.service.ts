@@ -124,21 +124,65 @@ export class GeocodingService {
       return null;
     }
 
-    const candidato = cuerpo.results?.[0];
-    if (!candidato?.geometry?.location) return null;
+    // El primero que sirva, no el primero a secas: con una dirección a medias
+    // Google suele poner delante el municipio entero.
+    for (const candidato of cuerpo.results ?? []) {
+      const point = this.comprobar(consulta, candidato, caja);
+      if (point) {
+        return {
+          point,
+          formatted: candidato.formatted_address ?? consulta,
+          exacta: candidato.geometry?.location_type === 'ROOFTOP',
+        };
+      }
+    }
+    return null;
+  }
 
-    const point: Point = {
-      lat: candidato.geometry.location.lat,
-      lng: candidato.geometry.location.lng,
-    };
+  /**
+   * El punto de un resultado de Google, si de verdad es lo que se pidió.
+   *
+   * Google responde con mucha seguridad a cosas que no son la dirección del
+   * cliente. En la prueba de producción del 3 de noviembre, «Carrera 19 #
+   * 47 20», que no existe en Paipa, acabó con un punto en el mapa. Lo que no
+   * vale, aunque caiga dentro de la cobertura:
+   *
+   *  - `partial_match`: Google no encontró todo lo pedido y devuelve lo que
+   *    se le pareció, casi siempre la calle o el municipio;
+   *  - un resultado que es una zona y no un sitio —el municipio, un barrio,
+   *    la calle entera—: su punto es el centro de algo que puede medir
+   *    kilómetros, y el taxi llegaría a ese centro;
+   *  - otra vía: si el cliente escribió «Carrera 19» y Google contesta con la
+   *    «Calle 19», es otra dirección.
+   *
+   * Devolver `null` deja la carrera «sin ubicar» y el agente le pide la
+   * ubicación al cliente, que además es más precisa.
+   */
+  private comprobar(consulta: string, candidato: GoogleResultado, caja: ReturnType<ZonesService['boundingBox']>): Point | null {
+    if (!candidato.geometry?.location) return null;
+    const point: Point = { lat: candidato.geometry.location.lat, lng: candidato.geometry.location.lng };
+    const tipos = candidato.types ?? [];
 
-    const caja2 = caja;
-    if (caja2) {
+    if (candidato.partial_match) {
+      this.logger.warn({ consulta, tipos }, 'El geocodificador solo encontró una parte de la dirección');
+      return null;
+    }
+    if (!tipos.some((tipo) => TIPOS_PRECISOS.has(tipo))) {
+      this.logger.warn({ consulta, tipos }, 'El geocodificador devolvió una zona, no un sitio');
+      return null;
+    }
+
+    const pedida = viaDe(consulta);
+    const ruta = candidato.address_components?.find((c) => c.types?.includes('route'));
+    const hallada = ruta ? (viaDe(ruta.long_name ?? '') ?? viaDe(ruta.short_name ?? '')) : null;
+    if (pedida && hallada && !mismaVia(pedida, hallada)) {
+      this.logger.warn({ consulta, ruta: ruta?.long_name }, 'El geocodificador devolvió otra vía');
+      return null;
+    }
+
+    if (caja) {
       const dentroDeCaja =
-        point.lat >= caja2.south &&
-        point.lat <= caja2.north &&
-        point.lng >= caja2.west &&
-        point.lng <= caja2.east;
+        point.lat >= caja.south && point.lat <= caja.north && point.lng >= caja.west && point.lng <= caja.east;
       if (!dentroDeCaja) {
         // `bounds` solo sesga la búsqueda, no la limita: Google puede
         // devolver una calle del mismo nombre en otro municipio.
@@ -154,11 +198,7 @@ export class GeocodingService {
       return null;
     }
 
-    return {
-      point,
-      formatted: candidato.formatted_address ?? consulta,
-      exacta: candidato.geometry.location_type === 'ROOFTOP',
-    };
+    return point;
   }
 
   private async leerDeCache(consulta: string): Promise<DireccionResuelta | null | undefined> {
@@ -186,11 +226,64 @@ export class GeocodingService {
   }
 }
 
+/**
+ * Los tipos de resultado que son un sitio y no una zona: una dirección con
+ * número, un cruce, un edificio o un lugar con nombre (un hotel, el parque,
+ * la terminal). Fuera quedan `route` (la calle entera), `neighborhood`,
+ * `locality` y demás divisiones: su punto es el centro de un área.
+ */
+const TIPOS_PRECISOS = new Set([
+  'street_address',
+  'premise',
+  'subpremise',
+  'intersection',
+  'establishment',
+  'point_of_interest',
+]);
+
+interface Via {
+  tipo: 'calle' | 'carrera' | 'diagonal' | 'transversal' | 'avenida';
+  numero: string;
+  letra?: string;
+}
+
+const TIPOS_DE_VIA: Record<string, Via['tipo']> = {
+  calle: 'calle', cll: 'calle', cl: 'calle', clle: 'calle',
+  carrera: 'carrera', carera: 'carrera', cra: 'carrera', kra: 'carrera', kr: 'carrera', cr: 'carrera', crr: 'carrera',
+  diagonal: 'diagonal', dg: 'diagonal', diag: 'diagonal',
+  transversal: 'transversal', tv: 'transversal', tr: 'transversal', trans: 'transversal',
+  avenida: 'avenida', av: 'avenida', avda: 'avenida',
+};
+
+/** «Cra. 12A # 31B-14» → carrera 12 A. La primera vía que nombra el texto. */
+export function viaDe(texto: string): Via | null {
+  const normal = texto
+    .normalize('NFD')
+    .replace(/[̀-ͯ]/g, '')
+    .toLowerCase();
+  const hallada = /\b(calle|clle|cll|cl|carrera|carera|crr|cra|kra|kr|cr|diagonal|diag|dg|transversal|trans|tv|tr|avenida|avda|av)\b\.?\s*(\d+)\s*([a-z])?\b/.exec(
+    normal,
+  );
+  if (!hallada) return null;
+  return { tipo: TIPOS_DE_VIA[hallada[1]!]!, numero: hallada[2]!, ...(hallada[3] ? { letra: hallada[3] } : {}) };
+}
+
+/** Misma vía: mismo tipo y número, y la misma letra si el cliente la dio. */
+function mismaVia(pedida: Via, hallada: Via): boolean {
+  if (pedida.tipo !== hallada.tipo || Number(pedida.numero) !== Number(hallada.numero)) return false;
+  return !pedida.letra || pedida.letra === hallada.letra;
+}
+
+interface GoogleResultado {
+  formatted_address?: string;
+  types?: string[];
+  partial_match?: boolean;
+  address_components?: { long_name?: string; short_name?: string; types?: string[] }[];
+  geometry?: { location?: { lat: number; lng: number }; location_type?: string };
+}
+
 interface GoogleRespuesta {
   status: string;
   error_message?: string;
-  results?: {
-    formatted_address?: string;
-    geometry?: { location?: { lat: number; lng: number }; location_type?: string };
-  }[];
+  results?: GoogleResultado[];
 }

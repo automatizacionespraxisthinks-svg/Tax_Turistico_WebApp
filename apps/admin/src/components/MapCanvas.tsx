@@ -106,7 +106,10 @@ function ridesToGeoJson(rides: Ride[], selectedId?: string | null): FeatureColle
   return {
     type: 'FeatureCollection',
     features: rides
-      .filter((ride) => ride.pickup.point)
+      // Una carrera sin ubicar tiene punto —el de partida del pueblo, desde
+      // donde se despacha—, pero no es donde está el cliente: pintarla ahí
+      // es lo que hacía creer que la dirección se había ubicado mal.
+      .filter((ride) => ride.pickup.point && ride.pickupSource !== 'sin_ubicar')
       .map((ride) => ({
         type: 'Feature' as const,
         id: ride.id,
@@ -460,7 +463,7 @@ export function MapCanvas({ rides, selectedRideId, onSelectRide, className }: Ma
     const ride = rides.find((r) => r.id === selectedRideId);
     const driver = ride?.driverId ? drivers.find((d) => d.id === ride.driverId) : undefined;
 
-    if (!ride?.pickup.point || !driver?.position) {
+    if (!ride?.pickup.point || ride.pickupSource === 'sin_ubicar' || !driver?.position) {
       publish('ruta', EMPTY);
       return;
     }

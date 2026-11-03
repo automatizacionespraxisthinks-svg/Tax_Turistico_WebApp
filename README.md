@@ -135,7 +135,14 @@ El panel no inventa acciones: cada botón sale de la tabla de transiciones.
   las transiciones permitidas con su actor y su condición. `transitionsFrom()`
   es lo que decide qué acciones ve el operador.
 - **Oleadas**: radio, número de candidatos y vencimiento por zona, en
-  *Zonas*.
+  *Zonas*. **Suman, no reemplazan** (3/11/2026): quien recibió la carrera en
+  una oleada y no contestó la sigue teniendo en las siguientes, con el plazo
+  alargado; con dos candidatos en la 1 y tres en la 2, la oleada 2 son cinco.
+  Tras la tercera, la ronda final a todos los disponibles, con los de antes
+  dentro, y solo al agotarse vencen todas las ofertas juntas. Nadie en el
+  radio se queda fuera por tener el GPS viejo (teléfono bloqueado): entra
+  igual, y solo cuenta para el orden si el cupo no alcanza. Prueba:
+  `src/test/e2e-oleadas-acumuladas.ts`.
 - **ETA sin servidor de rutas**: distancia en línea recta × factor de
   tortuosidad de la zona, como fija el ADR-08.
 - **Sin precios**: la empresa no maneja tarifas desde el sistema. Ni la PWA,
@@ -173,6 +180,24 @@ El panel no inventa acciones: cada botón sale de la tabla de transiciones.
   («frente a la terminal») primero el catálogo, y queda con `pickup_source =
   'catalogo'`. Las oleadas de cada zona ya se guardan de verdad. Prueba:
   `src/test/e2e-catalogo.ts`.
+- **Ubicar la recogida** (revisado el 3/11/2026, migración 0019), por orden
+  de confianza:
+  1. *Ubicación o enlace de mapa*: el punto exacto. Se leen los enlaces de
+     Google (`?q=`, `!3d!4d`, `/maps/search/lat,+lng`, `@`), Waze, Apple y
+     `geo:`; los cortos de `maps.app.goo.gl` los abre n8n antes.
+  2. *Dirección escrita*: Google Geocoding, pero solo si encontró **el sitio**:
+     se rechaza la coincidencia parcial (una dirección que no existe tal
+     cual), la calle entera, el barrio o el municipio, y otra vía («Calle 19»
+     cuando se pidió «Carrera 19»). La caché pasó a `geo:q2:` para no
+     reutilizar respuestas del filtro viejo.
+  3. *Señas y palabras clave*: el catálogo de lugares. **Sin lugares en el
+     catálogo no reconoce ninguna seña.**
+  4. *Nada de lo anterior*: la carrera se crea `sin_ubicar` y se despacha
+     desde el centro de la zona marcada como **punto de partida** (el Centro
+     al migrar; se cambia en *Zonas › Editar*). Antes era «la primera zona
+     urbana» sin orden fijo, y en producción salía Lago Sochagota. El panel
+     no la pinta en el mapa y la ficha lo avisa, y el agente de n8n le pide
+     la ubicación al cliente (flujo «Actualizados 2026-11-03»).
 - **Listado maestro**: `cli/importar-listado-maestro.ts` carga el Excel de la
   empresa (hoja «Taxis»): móviles con su número interno, ficha y propietario
   (cédula cifrada), conductores y relevadores con licencia y restricción, y

@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { AnimatePresence, motion } from 'motion/react';
-import { Ban, Banknote, Camera, Car, CreditCard, ExternalLink, MessageSquare, RefreshCw } from 'lucide-react';
+import { Ban, Banknote, Camera, Car, CreditCard, ExternalLink, MapPin, MapPinOff, MessageSquare, RefreshCw } from 'lucide-react';
 import type { Driver, Ride, RideOffer, WaveLogEntry } from '@tax/shared';
 import {
   ACTOR_LABEL,
@@ -16,6 +16,7 @@ import {
   transitionsFrom,
 } from '@tax/shared';
 import {
+  Banner,
   Button,
   Field,
   Meta,
@@ -162,6 +163,8 @@ function Resumen({ ride, driver }: { ride: Ride; driver?: Driver }) {
         ) : null}
       </div>
 
+      <OrigenDelPunto ride={ride} />
+
       {enlaceDeMapaValido(ride.pickupLink) ? (
         // El mismo enlace que abre el conductor con «Ir con Maps».
         <a
@@ -222,6 +225,32 @@ function Resumen({ ride, driver }: { ride: Ride; driver?: Driver }) {
 
       <RideActions ride={ride} />
     </div>
+  );
+}
+
+/**
+ * De dónde salió el punto del mapa. Sin esto, una carrera que no se pudo
+ * ubicar se veía con su punto como cualquier otra, y la oficina no sabía que
+ * ese punto era el de partida del pueblo y no el del cliente.
+ */
+function OrigenDelPunto({ ride }: { ride: Ride }) {
+  if (!ride.pickupSource || ride.pickupSource === 'compartida') return null;
+  if (ride.pickupSource === 'sin_ubicar') {
+    return (
+      <Banner tone="warning" icon={<MapPinOff className="size-4" />}>
+        No se pudo ubicar la dirección, así que no sale en el mapa: se despachó desde el punto de
+        partida del pueblo y el conductor llega leyendo la dirección. Pídele al cliente su ubicación
+        por WhatsApp.
+      </Banner>
+    );
+  }
+  return (
+    <p className="flex items-center gap-1.5 text-caption text-ink-muted">
+      <MapPin className="size-3.5 shrink-0" />
+      {ride.pickupSource === 'catalogo'
+        ? 'Ubicada por un lugar del catálogo que nombró el cliente.'
+        : 'Ubicada por la dirección escrita: el cliente no compartió ubicación.'}
+    </p>
   );
 }
 
@@ -518,6 +547,8 @@ function Oleadas({ ride }: { ride: Ride }) {
     entrada.candidates === 0
       ? []
       : ride.offers.filter((o) => o.wave === entrada.wave && o.intento === (entrada.intento ?? 1));
+  const aceptadaEn = (intento: number | undefined) =>
+    ride.offers.some((o) => o.intento === (intento ?? 1) && o.response === 'accepted');
 
   // Carreras de antes de que existiera el registro: solo hay ofertas, así
   // que se agrupan por oleada como se hacía siempre.
@@ -536,8 +567,8 @@ function Oleadas({ ride }: { ride: Ride }) {
   return (
     <div className="space-y-4">
       <p className="text-caption text-ink-muted">
-        Cada oleada busca más lejos y espera más. Si no encuentra a nadie, pasa a la siguiente sin
-        esperar el reloj.
+        Cada oleada busca más lejos y espera más, y quien no contestó sigue con la oferta en las
+        siguientes. Si no hay nadie a quien esperar, pasa a la siguiente sin esperar el reloj.
       </p>
 
       {grupos.map((grupo, g) => (
@@ -547,7 +578,7 @@ function Oleadas({ ride }: { ride: Ride }) {
             <SectionLabel>{g === 0 ? 'Primer lanzamiento' : `Relanzamiento ${g}`}</SectionLabel>
           ) : null}
           <ol className="space-y-3">
-            {grupo.map((entrada) => (
+            {grupo.map((entrada, i) => (
               <OleadaFila
                 key={`${entrada.wave}-${entrada.startedAt}`}
                 entrada={entrada}
@@ -556,6 +587,10 @@ function Oleadas({ ride }: { ride: Ride }) {
                 ahora={ahora}
                 esLaUltima={entrada === ultima}
                 estado={ride.status}
+                // Las entradas nuevas dicen cuántos siguieron; las de antes
+                // de que las oleadas sumaran, no.
+                siguioAbierta={grupo[i + 1]?.arrastrados !== undefined}
+                seAceptoAqui={i === grupo.length - 1 && aceptadaEn(entrada.intento)}
               />
             ))}
           </ol>
@@ -579,6 +614,8 @@ function OleadaFila({
   ahora,
   esLaUltima,
   estado,
+  siguioAbierta,
+  seAceptoAqui,
 }: {
   entrada: WaveLogEntry;
   ofertas: RideOffer[];
@@ -586,6 +623,10 @@ function OleadaFila({
   ahora: number;
   esLaUltima: boolean;
   estado: Ride['status'];
+  /** Sus ofertas pasaron vivas a la oleada siguiente. */
+  siguioAbierta: boolean;
+  /** Es la última del lanzamiento y alguien —de esta o de una anterior— aceptó. */
+  seAceptoAqui: boolean;
 }) {
   const aTodos = entrada.wave === OLEADA_A_TODOS;
   const titulo = aTodos ? 'Todos los disponibles' : `Oleada ${entrada.wave}`;
@@ -598,13 +639,19 @@ function OleadaFila({
   const fraccion = enCurso && fin > inicio ? Math.min(1, Math.max(0, restante / (fin - inicio))) : 0;
   const aceptada = ofertas.some((o) => o.response === 'accepted');
 
+  const arrastrados = entrada.arrastrados ?? 0;
+
   let lateral: string;
-  if (entrada.candidates === 0) lateral = 'Pasó al instante';
+  // Sin vencimiento es que no tuvo a quién esperar y escaló en el acto.
+  if (entrada.expiresAt === null) lateral = 'Pasó al instante';
   else if (aceptada) lateral = 'Aceptada';
   else if (enCurso) lateral = restante > 0 ? mmss(restante) : 'Pasando…';
   else if (esLaUltima && estado === 'NOTIFIED') lateral = 'Pasando…';
   // Si todos dijeron que no, la oleada no venció: la cerraron antes de tiempo.
   else if (ofertas.length > 0 && ofertas.every((o) => o.response === 'rejected')) lateral = 'Rechazada';
+  // La tomó alguien de una oleada anterior mientras corría esta.
+  else if (seAceptoAqui) lateral = 'Se aceptó';
+  else if (siguioAbierta) lateral = 'Siguió en la siguiente';
   else lateral = 'Venció';
 
   const disponiblesSinGps = entrada.sinGps ?? 0;
@@ -621,8 +668,13 @@ function OleadaFila({
             <time title={formatDateTime(entrada.startedAt)}>{formatTime(entrada.startedAt)}</time>
             {' · '}
             {entrada.candidates === 0
-              ? 'nadie disponible'
-              : `${entrada.candidates} ${entrada.candidates === 1 ? 'conductor' : 'conductores'}`}
+              ? arrastrados > 0
+                ? 'nadie nuevo'
+                : 'nadie disponible'
+              : `${entrada.candidates} ${entrada.candidates === 1 ? 'conductor' : 'conductores'}${arrastrados > 0 ? (entrada.candidates === 1 ? ' nuevo' : ' nuevos') : ''}`}
+            {arrastrados > 0
+              ? ` · ${arrastrados === 1 ? 'sigue 1' : `siguen ${arrastrados}`} de antes`
+              : ''}
             {disponiblesSinGps > 0
               ? ` · ${disponiblesSinGps} disponible${disponiblesSinGps === 1 ? '' : 's'} sin GPS`
               : ''}

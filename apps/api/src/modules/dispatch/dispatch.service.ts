@@ -1,7 +1,7 @@
 import { Inject, Injectable, Logger, forwardRef } from '@nestjs/common';
 import { InjectQueue } from '@nestjs/bullmq';
 import type { Queue } from 'bullmq';
-import { and, eq, isNull, or, sql } from 'drizzle-orm';
+import { and, eq, inArray, isNull, or, sql } from 'drizzle-orm';
 import { uuidv7 } from 'uuidv7';
 import { DB, type Database } from '../../db/db.module';
 import { AuditService } from '../audit/audit.service';
@@ -31,6 +31,17 @@ export interface WaveTimeoutJob {
 }
 
 const SYSTEM: Actor = { kind: 'system', name: 'Despacho', role: 'sistema' };
+
+/**
+ * Lo que una oferta vale de más sobre el fin de su oleada.
+ *
+ * Al vencer la oleada, sus ofertas se alargan a la siguiente. Si vencieran
+ * en el mismo instante en que corre el temporizador, un conductor que acepta
+ * justo entonces recibiría «la oferta venció» de una carrera que sigue
+ * abierta para él, y la PWA soltaría la oferta un momento antes de que le
+ * llegue el plazo nuevo. Con el margen, el plazo nuevo llega antes.
+ */
+const MARGEN_OFERTA_MS = 5_000;
 
 /**
  * Motor de despacho por oleadas (§5.2).
@@ -109,58 +120,74 @@ export class DispatchService {
     let candidates;
     let sinGps: number | undefined;
 
-    if (aTodos) {
-      /*
-       * Aqui si se le vuelve a ofrecer a quien no contesto antes: no
-       * contestar no es decir que no, y en pruebas con un solo telefono es
-       * justo el conductor al que se quiere ver recibir el aviso. Solo se
-       * excluye a quien rechazo la carrera de forma expresa, en cualquier
-       * intento: un «no» a esta carrera sigue valiendo si se relanza.
-       */
-      const rechazaron = await this.db
-        .select({ driverId: rideOffers.driverId })
-        .from(rideOffers)
-        .where(and(eq(rideOffers.rideId, rideId), eq(rideOffers.response, 'rejected')));
-
-      const todos = await this.fleet.findAllAvailable(
-        pickup,
-        rechazaron.map((row) => row.driverId),
-        ride.pagoElectronico,
+    /*
+     * Los nuevos de esta oleada son quienes todavía no la recibieron en este
+     * intento: los de oleadas anteriores ya la tienen, porque las oleadas
+     * suman (ver `vivas` más abajo). Entre intentos sí se repite: si la
+     * oficina relanza, es justo para volver a probar con quien no contestó.
+     * Quien la rechazó queda fuera siempre: un «no» a esta carrera sigue
+     * valiendo si se relanza.
+     */
+    const alreadyOffered = await this.db
+      .select({ driverId: rideOffers.driverId })
+      .from(rideOffers)
+      .where(
+        and(
+          eq(rideOffers.rideId, rideId),
+          or(eq(rideOffers.intento, intento), eq(rideOffers.response, 'rejected')),
+        ),
       );
+    const excluidos = alreadyOffered.map((row) => row.driverId);
+
+    if (aTodos) {
+      const todos = await this.fleet.findAllAvailable(pickup, excluidos, ride.pagoElectronico);
       candidates = todos.candidates;
       sinGps = todos.sinGps;
     } else {
-      /*
-       * Dentro de un intento no se repite conductor: si no contesto en la
-       * oleada 1, la 2 busca a otros. Pero entre intentos si: si la oficina
-       * relanza, es justo para volver a probar con quien no contesto. Antes
-       * se excluia a todo el que alguna vez la vio, y con pocos conductores
-       * relanzar no encontraba nunca a nadie. Quien la rechazo queda fuera
-       * siempre.
-       */
-      const alreadyOffered = await this.db
-        .select({ driverId: rideOffers.driverId })
-        .from(rideOffers)
-        .where(
-          and(
-            eq(rideOffers.rideId, rideId),
-            or(eq(rideOffers.intento, intento), eq(rideOffers.response, 'rejected')),
-          ),
-        );
-
       candidates = await this.fleet.findCandidates(
         pickup,
         config.radiusKm,
         ride.vehicleType,
         config.candidates,
-        alreadyOffered.map((row) => row.driverId),
+        excluidos,
         // Coexiste con las zonas: el radio y el tiempo de cada oleada son los
         // de siempre, solo que entre los que reciben pagos electrónicos.
         ride.pagoElectronico,
       );
     }
 
-    if (candidates.length === 0) {
+    /*
+     * Las oleadas suman, no reemplazan (decisión de la empresa, 3/11/2026).
+     *
+     * Quien recibió la carrera en una oleada anterior y no contestó la sigue
+     * teniendo en esta: con dos candidatos en la oleada 1 y tres en la 2, la
+     * oleada 2 son cinco. Antes la oferta vencía con su oleada y el conductor
+     * que tardó en sacar el teléfono se quedaba sin ella aunque nadie más la
+     * hubiera tomado. Las ofertas solo vencen de verdad al agotarse todas las
+     * oleadas, en `escalate`.
+     */
+    const vivas =
+      wave === 1
+        ? []
+        : await this.db
+            .select({
+              id: rideOffers.id,
+              driverId: rideOffers.driverId,
+              distanceKm: rideOffers.distanceKm,
+              etaMinutes: rideOffers.etaMinutes,
+            })
+            .from(rideOffers)
+            .where(
+              and(
+                eq(rideOffers.rideId, rideId),
+                eq(rideOffers.intento, intento),
+                eq(rideOffers.response, 'pending'),
+                isNull(rideOffers.revokedAt),
+              ),
+            );
+
+    // Sin nuevos y sin nadie esperando, no hay a quién darle tiempo.
+    if (candidates.length === 0 && vivas.length === 0) {
       this.logger.log({ rideId, wave }, 'Oleada sin candidatos: se escala de inmediato');
       await this.registrarOleada(rideId, {
         wave,
@@ -176,6 +203,8 @@ export class DispatchService {
     }
 
     const expiresAt = new Date(Date.now() + config.timeoutSeconds * 1000);
+    // La oferta vale unos segundos más que la oleada: ver `MARGEN_OFERTA_MS`.
+    const ofertaVence = new Date(expiresAt.getTime() + MARGEN_OFERTA_MS);
 
     /*
      * El temporizador va ANTES que las ofertas, no despues.
@@ -203,19 +232,37 @@ export class DispatchService {
       },
     );
 
-    await this.db.insert(rideOffers).values(
-      candidates.map((candidate) => ({
-        id: uuidv7(),
-        rideId,
-        driverId: candidate.driverId,
-        wave,
-        intento,
-        distanceKm: candidate.distanceKm,
-        etaMinutes: candidate.etaMinutes,
-        expiresAt,
-        response: 'pending' as const,
-      })),
-    );
+    if (candidates.length > 0) {
+      await this.db.insert(rideOffers).values(
+        candidates.map((candidate) => ({
+          id: uuidv7(),
+          rideId,
+          driverId: candidate.driverId,
+          wave,
+          intento,
+          distanceKm: candidate.distanceKm,
+          etaMinutes: candidate.etaMinutes,
+          expiresAt: ofertaVence,
+          response: 'pending' as const,
+        })),
+      );
+    }
+
+    // Las de antes siguen: se les alarga el plazo hasta el fin de esta oleada.
+    if (vivas.length > 0) {
+      await this.db
+        .update(rideOffers)
+        .set({ expiresAt: ofertaVence })
+        .where(
+          and(
+            inArray(
+              rideOffers.id,
+              vivas.map((v) => v.id),
+            ),
+            eq(rideOffers.response, 'pending'),
+          ),
+        );
+    }
 
     // La primera oleada es la que mueve la carrera a Notificada; las
     // siguientes solo cambian el número de oleada.
@@ -235,24 +282,37 @@ export class DispatchService {
       expiresAt: expiresAt.toISOString(),
       radiusKm: aTodos ? null : config.radiusKm,
       candidates: candidates.length,
+      ...(wave === 1 ? {} : { arrastrados: vivas.length }),
       ...(sinGps !== undefined ? { sinGps } : {}),
     });
 
     const zoneName = this.zones.byId(ride.zoneId)?.name;
+    const oferta = (c: { distanceKm: number; etaMinutes: number }) => ({
+      rideId,
+      code: ride.code,
+      pickupText: ride.pickupText,
+      pickupReference: ride.pickupReference,
+      pagoElectronico: ride.pagoElectronico,
+      passengers: ride.passengers,
+      distanceKm: c.distanceKm,
+      etaMinutes: c.etaMinutes,
+      expiresAt: ofertaVence.toISOString(),
+      wave,
+    });
+
+    /*
+     * A los que ya la tenían, solo por el socket: la PWA abierta alarga la
+     * cuenta atrás en vez de soltar la oferta. Sin push: su aviso de la
+     * oleada anterior sigue en la pantalla bloqueada —es `requireInteraction`
+     * y no se cierra solo— y al tocarlo la PWA pregunta por la oferta viva.
+     * Un aviso por oleada a la misma persona sería ruido.
+     */
+    for (const viva of vivas) {
+      this.realtime.offerToDriver(viva.driverId, oferta(viva));
+    }
 
     for (const candidate of candidates) {
-      this.realtime.offerToDriver(candidate.driverId, {
-        rideId,
-        code: ride.code,
-        pickupText: ride.pickupText,
-        pickupReference: ride.pickupReference,
-        pagoElectronico: ride.pagoElectronico,
-        passengers: ride.passengers,
-        distanceKm: candidate.distanceKm,
-        etaMinutes: candidate.etaMinutes,
-        expiresAt: expiresAt.toISOString(),
-        wave,
-      });
+      this.realtime.offerToDriver(candidate.driverId, oferta(candidate));
 
       /*
        * El push va además del socket, no en su lugar: con la aplicación
@@ -265,7 +325,7 @@ export class DispatchService {
           rideId,
           code: ride.code,
           zona: zoneName,
-          expiresAt: expiresAt.toISOString(),
+          expiresAt: ofertaVence.toISOString(),
         })
         .catch((error: unknown) => {
           this.logger.warn({ err: error, driverId: candidate.driverId }, 'Aviso no entregado');
@@ -273,7 +333,7 @@ export class DispatchService {
     }
 
     this.logger.log(
-      { rideId, wave, candidatos: candidates.length, radioKm: config.radiusKm },
+      { rideId, wave, candidatos: candidates.length, arrastrados: vivas.length, radioKm: config.radiusKm },
       'Oleada lanzada',
     );
   }
@@ -320,7 +380,10 @@ export class DispatchService {
     await this.startWave(rideId, 1);
   }
 
-  /** Vence la oleada: si nadie aceptó, amplía el radio o se da por agotada. */
+  /**
+   * Vence la oleada: si nadie aceptó, pasa a la siguiente —con los de esta
+   * todavía dentro— o se da por agotada.
+   */
   async expireWave(rideId: string, wave: Oleada, intento?: number): Promise<void> {
     const ride = await this.ridesService.byId(rideId);
     if (ride.status !== 'NOTIFIED') return;
@@ -332,27 +395,17 @@ export class DispatchService {
     }
 
     /*
-     * Las que nadie contestó quedan como «No contestó», que es lo que el
-     * panel muestra en la pestaña de oleadas: el registro tiene que decir a
-     * quién se le ofreció y qué hizo, no solo quién aceptó.
-     *
-     * Acotado al intento en curso. Al relanzar, `redispatch` revoca las
-     * ofertas vivas del intento anterior, así que hoy no quedan pendientes
-     * de otro lanzamiento; si por lo que sea quedara una, este vencimiento
-     * no es quien debe cerrarla.
+     * Ni el de una oleada que ya quedó atrás. Pasa cuando todos rechazan: se
+     * escala en el acto, y el temporizador de esa oleada sigue programado.
+     * Sin esto, al vencer lanzaba otra vez la oleada siguiente.
      */
-    await this.db
-      .update(rideOffers)
-      .set({ response: 'expired' })
-      .where(
-        and(
-          eq(rideOffers.rideId, rideId),
-          eq(rideOffers.wave, wave),
-          eq(rideOffers.intento, ride.intentoDespacho),
-          eq(rideOffers.response, 'pending'),
-        ),
-      );
+    if (ride.wave !== wave) {
+      this.logger.debug({ rideId, wave, actual: ride.wave }, 'Temporizador de una oleada ya pasada: se ignora');
+      return;
+    }
 
+    // Las ofertas no se tocan aquí: siguen vivas en la próxima oleada, y
+    // vencen todas juntas cuando se agoten (`escalate`).
     await this.escalate(rideId, wave);
   }
 
@@ -362,7 +415,12 @@ export class DispatchService {
       return;
     }
 
-    // Tras la tercera, la ronda a todos si esta encendida (solo para pruebas).
+    /*
+     * Tras la tercera, la ronda final a todos los conductores disponibles,
+     * sin mirar distancia, con los de las tres oleadas todavía dentro. La
+     * empresa la quiere siempre (3/11/2026); `OLEADA_FINAL_A_TODOS=false`
+     * la apaga.
+     */
     if (wave === 3 && this.env.OLEADA_FINAL_A_TODOS) {
       await this.startWave(rideId, OLEADA_A_TODOS);
       return;
@@ -376,6 +434,23 @@ export class DispatchService {
     // (ninguna oleada encontró candidatos). El segundo caso es el que deja a
     // la carrera muda si no se contempla.
     if (ride.status !== 'NOTIFIED' && ride.status !== 'PENDING') return;
+
+    /*
+     * Ahora sí vencen, todas a la vez: cada oleada las fue alargando. Quedan
+     * como «No contestó», que es lo que el panel muestra en la pestaña de
+     * oleadas: el registro tiene que decir a quién se le ofreció y qué hizo,
+     * no solo quién aceptó. Acotado al intento en curso.
+     */
+    await this.db
+      .update(rideOffers)
+      .set({ response: 'expired' })
+      .where(
+        and(
+          eq(rideOffers.rideId, rideId),
+          eq(rideOffers.intento, ride.intentoDespacho),
+          eq(rideOffers.response, 'pending'),
+        ),
+      );
 
     /*
      * La nota distingue «nadie la vio» de «la vieron y nadie la tomo»: son
@@ -635,17 +710,22 @@ export class DispatchService {
         ),
       );
 
+    const ride = await this.ridesService.byId(rideId);
     const [pending] = await this.db
       .select({ count: sql<number>`count(*)::int` })
       .from(rideOffers)
-      .where(and(eq(rideOffers.rideId, rideId), eq(rideOffers.response, 'pending')));
+      .where(
+        and(
+          eq(rideOffers.rideId, rideId),
+          eq(rideOffers.intento, ride.intentoDespacho),
+          eq(rideOffers.response, 'pending'),
+        ),
+      );
 
-    // Si era el último pendiente de la oleada, se escala ya.
-    if ((pending?.count ?? 0) === 0) {
-      const ride = await this.ridesService.byId(rideId);
-      if (ride.status === 'NOTIFIED') {
-        await this.escalate(rideId, (ride.wave ?? 1) as Oleada);
-      }
+    // Si era el último que la tenía —de esta oleada o de las anteriores, que
+    // siguen dentro—, se pasa a la siguiente ya.
+    if ((pending?.count ?? 0) === 0 && ride.status === 'NOTIFIED') {
+      await this.escalate(rideId, (ride.wave ?? 1) as Oleada);
     }
   }
 

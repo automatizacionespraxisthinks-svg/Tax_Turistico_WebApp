@@ -22,6 +22,28 @@ describe('enlace de ubicación del cliente', () => {
     expect(puntoDeEnlace('https://waze.com/ul?ll=5.7803,-73.1142&navigate=yes')).toEqual({ lat: 5.7803, lng: -73.1142 });
   });
 
+  it('entiende un pin soltado a mano y las coordenadas con «+» o espacio', () => {
+    // Así abre Google un enlace corto de un pin soltado, o unas coordenadas buscadas.
+    expect(puntoDeEnlace('https://www.google.com/maps/search/5.779100,+-73.113300?entry=tts')).toEqual({
+      lat: 5.7791,
+      lng: -73.1133,
+    });
+    expect(puntoDeEnlace('https://www.google.com/maps/place/5.7791,-73.1133/@5.7795,-73.1140,17z')).toEqual({
+      lat: 5.7791,
+      lng: -73.1133,
+    });
+    expect(puntoDeEnlace('https://maps.google.com/?q=5.7791,+-73.1133')).toEqual({ lat: 5.7791, lng: -73.1133 });
+    expect(puntoDeEnlace('https://maps.google.com/?q=5.7791,%20-73.1133')).toEqual({ lat: 5.7791, lng: -73.1133 });
+  });
+
+  it('el centro de la vista solo vale si no hay nada mejor', () => {
+    expect(puntoDeEnlace('https://www.google.com/maps/@5.7795,-73.1140,17z')).toEqual({ lat: 5.7795, lng: -73.114 });
+    expect(puntoDeEnlace('https://www.google.com/maps/search/5.7791,-73.1133/@5.7000,-73.2000,12z')).toEqual({
+      lat: 5.7791,
+      lng: -73.1133,
+    });
+  });
+
   it('un enlace corto no trae el punto hasta abrirlo', () => {
     expect(puntoDeEnlace('https://maps.app.goo.gl/AbCdEf123')).toBeNull();
   });

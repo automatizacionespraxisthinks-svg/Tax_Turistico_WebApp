@@ -53,6 +53,10 @@ export const redisKeys = {
   /**
    * Dirección ya resuelta. En un pueblo las mismas direcciones se repiten
    * mucho, y cada consulta al geocodificador se paga y se espera.
+   *
+   * `q2` desde que el filtro de resultados se endureció (3/11/2026): las
+   * respuestas guardadas con el filtro viejo pueden ser puntos equivocados,
+   * y con la clave nueva se vuelven a preguntar en vez de reutilizarse.
    */
-  geocode: (consulta: string) => `geo:q:${consulta}`,
+  geocode: (consulta: string) => `geo:q2:${consulta}`,
 } as const;

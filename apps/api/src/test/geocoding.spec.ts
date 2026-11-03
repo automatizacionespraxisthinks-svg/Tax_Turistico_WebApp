@@ -42,14 +42,24 @@ function respuestaDeGoogle(cuerpo: unknown, ok = true) {
   return vi.fn(async () => ({ ok, status: ok ? 200 : 500, json: async () => cuerpo })) as never;
 }
 
-const UN_RESULTADO = (lat: number, lng: number, tipo = 'ROOFTOP') => ({
+interface Extra {
+  types?: string[];
+  partial_match?: boolean;
+  /** La vía que Google dice haber encontrado («Carrera 19»). */
+  ruta?: string;
+}
+
+const RESULTADO = (lat: number, lng: number, tipo = 'ROOFTOP', extra: Extra = {}) => ({
+  formatted_address: 'Cra. 12 A # 31B-14, Paipa, Boyacá, Colombia',
+  types: extra.types ?? ['street_address'],
+  ...(extra.partial_match ? { partial_match: true } : {}),
+  ...(extra.ruta ? { address_components: [{ long_name: extra.ruta, short_name: extra.ruta, types: ['route'] }] } : {}),
+  geometry: { location: { lat, lng }, location_type: tipo },
+});
+
+const UN_RESULTADO = (lat: number, lng: number, tipo = 'ROOFTOP', extra: Extra = {}) => ({
   status: 'OK',
-  results: [
-    {
-      formatted_address: 'Cra. 12 A # 31B-14, Paipa, Boyacá, Colombia',
-      geometry: { location: { lat, lng }, location_type: tipo },
-    },
-  ],
+  results: [RESULTADO(lat, lng, tipo, extra)],
 });
 
 const fetchOriginal = globalThis.fetch;
@@ -75,15 +85,98 @@ describe('GeocodingService', () => {
     expect(r!.exacta).toBe(true);
   });
 
-  it('marca como no exacta la que se queda en la calle, sin el número', async () => {
+  it('marca como no exacta la que Google interpola entre dos números', async () => {
     globalThis.fetch = respuestaDeGoogle(
-      UN_RESULTADO(EN_EL_CENTRO.lat, EN_EL_CENTRO.lng, 'GEOMETRIC_CENTER'),
+      UN_RESULTADO(EN_EL_CENTRO.lat, EN_EL_CENTRO.lng, 'RANGE_INTERPOLATED'),
     );
     const servicio = new GeocodingService(hacerRedis(), hacerZonas());
 
-    const r = await servicio.resolve('Carrera 21');
+    const r = await servicio.resolve('Carrera 21 # 24-18');
 
     expect(r!.exacta).toBe(false);
+  });
+
+  /*
+   * Lo que pasó en producción el 3/11/2026: una dirección que no existe
+   * acabó con un punto en el mapa. Google no dice «no existe»: devuelve lo
+   * que se le parece y lo marca como coincidencia parcial.
+   */
+  it('rechaza una coincidencia parcial: la dirección no existe tal cual', async () => {
+    globalThis.fetch = respuestaDeGoogle(
+      UN_RESULTADO(EN_EL_CENTRO.lat, EN_EL_CENTRO.lng, 'GEOMETRIC_CENTER', {
+        types: ['route'],
+        partial_match: true,
+        ruta: 'Carrera 19',
+      }),
+    );
+    const servicio = new GeocodingService(hacerRedis(), hacerZonas());
+
+    expect(await servicio.resolve('Carrera 19 # 47 20')).toBeNull();
+  });
+
+  it('rechaza la calle entera: su punto es el centro de varios kilómetros de vía', async () => {
+    globalThis.fetch = respuestaDeGoogle(
+      UN_RESULTADO(EN_EL_CENTRO.lat, EN_EL_CENTRO.lng, 'GEOMETRIC_CENTER', { types: ['route'], ruta: 'Carrera 21' }),
+    );
+    const servicio = new GeocodingService(hacerRedis(), hacerZonas());
+
+    expect(await servicio.resolve('Carrera 21')).toBeNull();
+  });
+
+  it('rechaza el municipio o un barrio entero', async () => {
+    const servicio = new GeocodingService(hacerRedis(), hacerZonas());
+
+    globalThis.fetch = respuestaDeGoogle(
+      UN_RESULTADO(EN_EL_CENTRO.lat, EN_EL_CENTRO.lng, 'APPROXIMATE', { types: ['locality', 'political'] }),
+    );
+    expect(await servicio.resolve('donde la señora Rosa')).toBeNull();
+
+    globalThis.fetch = respuestaDeGoogle(
+      UN_RESULTADO(EN_EL_CENTRO.lat, EN_EL_CENTRO.lng, 'APPROXIMATE', { types: ['neighborhood', 'political'] }),
+    );
+    expect(await servicio.resolve('barrio el carmen')).toBeNull();
+  });
+
+  it('rechaza otra vía: «Carrera 19» no es la «Calle 19»', async () => {
+    globalThis.fetch = respuestaDeGoogle(
+      UN_RESULTADO(EN_EL_CENTRO.lat, EN_EL_CENTRO.lng, 'ROOFTOP', { ruta: 'Calle 19' }),
+    );
+    const servicio = new GeocodingService(hacerRedis(), hacerZonas());
+
+    expect(await servicio.resolve('Carrera 19 # 47-20')).toBeNull();
+  });
+
+  it('acepta la misma vía escrita de otra forma', async () => {
+    globalThis.fetch = respuestaDeGoogle(
+      UN_RESULTADO(EN_EL_CENTRO.lat, EN_EL_CENTRO.lng, 'ROOFTOP', { ruta: 'Carrera 12A' }),
+    );
+    const servicio = new GeocodingService(hacerRedis(), hacerZonas());
+
+    expect(await servicio.resolve('Kra 12 a # 31B-14')).not.toBeNull();
+  });
+
+  it('acepta un sitio con nombre aunque no tenga nomenclatura', async () => {
+    globalThis.fetch = respuestaDeGoogle(
+      UN_RESULTADO(EN_EL_CENTRO.lat, EN_EL_CENTRO.lng, 'GEOMETRIC_CENTER', {
+        types: ['lodging', 'establishment', 'point_of_interest'],
+      }),
+    );
+    const servicio = new GeocodingService(hacerRedis(), hacerZonas());
+
+    expect(await servicio.resolve('Hotel Lanceros')).not.toBeNull();
+  });
+
+  it('se queda con el primer resultado que sirva, no con el primero', async () => {
+    globalThis.fetch = respuestaDeGoogle({
+      status: 'OK',
+      results: [
+        RESULTADO(5.7787, -73.1171, 'APPROXIMATE', { types: ['locality', 'political'] }),
+        RESULTADO(EN_EL_CENTRO.lat, EN_EL_CENTRO.lng, 'ROOFTOP'),
+      ],
+    });
+    const servicio = new GeocodingService(hacerRedis(), hacerZonas());
+
+    expect((await servicio.resolve('Carrera 21 # 24-18'))!.point).toEqual(EN_EL_CENTRO);
   });
 
   it('rechaza un punto de otro municipio aunque Google lo dé por bueno', async () => {

@@ -52,6 +52,7 @@ export interface ApiRide {
   pickupPhotoAt: string | null;
   /** Ausente si la API todavía no se ha actualizado. */
   pickupLink?: string | null;
+  pickupSource?: Ride['pickupSource'] | null;
   driverId: string | null;
   line: string | null;
   chatwootConversationId: number | null;
@@ -125,6 +126,7 @@ export interface ApiZone {
   tortuosity: number;
   waves: Zone['waves'];
   polygon: { type: 'Polygon'; coordinates: [number, number][][] };
+  esReferencia?: boolean;
 }
 
 export interface ApiOutboxEvent {
@@ -188,6 +190,7 @@ export function toRide(row: ApiRide): Ride {
     dropoffSource: row.dropoffSource ?? undefined,
     pickupPhotoAt: row.pickupPhotoAt ?? undefined,
     pickupLink: row.pickupLink ?? undefined,
+    pickupSource: row.pickupSource ?? undefined,
     driverId: row.driverId ?? undefined,
     line: row.line ?? '—',
     chatwootConversationId: row.chatwootConversationId ?? undefined,
@@ -275,6 +278,7 @@ export function toZone(row: ApiZone): Zone {
     tortuosity: row.tortuosity,
     waves: row.waves,
     activeDrivers: 0,
+    esReferencia: row.esReferencia ?? false,
   };
 }
 

@@ -280,17 +280,21 @@ Tres cosas que se equivocan siempre:
   y no carga.
 - **`OLEADA_FINAL_A_TODOS`** añade, tras la tercera oleada, una ronda que
   avisa a **todos** los conductores disponibles sin mirar distancia, tipo de
-  vehículo ni antigüedad del GPS. Sirve para probar los avisos con pocos
-  conductores: con uno solo en turno lejos del punto, las oleadas por radio
-  no lo encuentran nunca. Viene encendida por defecto mientras se prueba;
-  para volver al despacho por radio, `false`. Un conductor en pausa no la
-  recibe, y quien rechazó la carrera tampoco.
+  vehículo ni antigüedad del GPS, y mantiene la oferta a los de las tres
+  oleadas que no contestaron. La empresa la quiere siempre (3/11/2026), así
+  que viene encendida; `false` la apaga y la carrera queda sin asignar al
+  vencer la tercera. Un conductor en pausa no la recibe, y quien rechazó la
+  carrera tampoco.
 - **`GOOGLE_GEOCODING_API_KEY`** convierte las direcciones que el cliente
   escribe por WhatsApp en coordenadas. Necesita la API de Geocoding
   habilitada en el proyecto de Google. **Es opcional**: sin ella la API no
   adivina direcciones y exige que la carrera llegue con coordenadas, así que
   el agente tendrá que pedirle la ubicación al cliente en todos los casos.
-  Conviene restringirla por IP a la del VPS.
+  Conviene restringirla por IP a la del VPS. **Si falta, toda dirección
+  escrita queda «sin ubicar»** y se despacha desde el punto de partida: es lo
+  primero que hay que mirar si las carreras con dirección aparecen en la
+  zona equivocada. En los registros de la API sale una vez al arrancar:
+  «Sin GOOGLE_GEOCODING_API_KEY».
 - **`WAHA_URL`** enciende el monitor de las líneas de WhatsApp: cada minuto
   le pregunta a WAHA por sus sesiones y, si una deja de atender, suena una
   alerta en el panel, queda un letrero rojo arriba hasta que vuelva y sale el

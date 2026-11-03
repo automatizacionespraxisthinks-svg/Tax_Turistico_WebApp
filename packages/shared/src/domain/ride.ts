@@ -248,7 +248,13 @@ export interface WaveLogEntry {
   expiresAt: string | null;
   /** Radio de búsqueda. Nulo en la ronda a todos, que no mira distancia. */
   radiusKm: number | null;
+  /** Conductores nuevos de esta oleada. */
   candidates: number;
+  /**
+   * Los de oleadas anteriores que no contestaron y siguen con la oferta: las
+   * oleadas suman, no reemplazan. Ausente en las entradas anteriores a eso.
+   */
+  arrastrados?: number;
   /**
    * Solo en la ronda a todos: conductores disponibles que no recibieron la
    * oferta porque nunca mandaron su posición. Sin esto el panel diría
@@ -301,6 +307,12 @@ export interface Ride {
   pickupPhotoAt?: string;
   /** El enlace de ubicación que mandó el cliente, si compartió ubicación. */
   pickupLink?: string;
+  /**
+   * De dónde salió el punto de recogida: la ubicación del cliente, un lugar
+   * del catálogo, el geocodificador, o ninguno (`sin_ubicar`: el punto es el
+   * de partida del pueblo, no el del cliente).
+   */
+  pickupSource?: 'compartida' | 'catalogo' | 'geocodificada' | 'sin_ubicar';
   driverId?: string;
   line: string;
   chatwootConversationId?: number;
