@@ -18,8 +18,16 @@ export function Acceso({
 }: {
   onSubmit: (code: string, plate: string, pin: string) => Promise<string | null>;
 }) {
-  const [code, setCode] = useState('101');
-  const [plate, setPlate] = useState('UBP472');
+  /*
+   * Vacíos, los tres.
+   *
+   * El código y la placa traían los del conductor de pruebas (101 / UBP472),
+   * sin guardia de desarrollo, así que en producción cada conductor abría la
+   * aplicación con los datos de otro ya escritos: el que no se fijaba
+   * intentaba entrar con un código que no era el suyo y el PIN no cuadraba.
+   */
+  const [code, setCode] = useState('');
+  const [plate, setPlate] = useState('');
   const [pin, setPin] = useState('');
   const [error, setError] = useState<string>();
   const [submitting, setSubmitting] = useState(false);

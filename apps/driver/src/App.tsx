@@ -162,8 +162,21 @@ export function App() {
       });
     } catch (error) {
       if (error instanceof ApiError && error.status === 401) {
-        storeToken(null);
+        /*
+         * El token NO se borra.
+         *
+         * Un 401 aquí casi nunca quiere decir «esta credencial ya no existe».
+         * Quiere decir que la oficina suspendió al conductor o lo desactivó, y
+         * el servidor deja de resolver su token mientras eso dure; el token
+         * sigue siendo bueno y vuelve a servir en cuanto lo habiliten.
+         *
+         * Borrándolo, una suspensión de media hora le costaba al conductor
+         * volver a entrar con código, placa y PIN. Y si de verdad le
+         * revocaron el celular, guardarlo no le da nada: el servidor no lo
+         * acepta nunca más y va a ver esta misma pantalla.
+         */
         dispatch({ type: 'logged_out' });
+        setNotice('Tu acceso está en pausa. Si ya te habilitaron, vuelve a abrir la aplicación.');
       }
     }
   }, []);
@@ -198,6 +211,24 @@ export function App() {
       window.removeEventListener('offline', marcar);
     };
   }, []);
+
+  /* --- acceso en pausa: se vuelve a intentar al volver a la aplicación ---- */
+  /*
+   * Token guardado y la pantalla de acceso delante significa suspendido o
+   * desactivado, no sin credencial. Se vuelve a preguntar cada vez que el
+   * conductor trae la aplicación al frente: así, en cuanto la oficina lo
+   * habilita, entra solo sin escribir nada.
+   */
+  useEffect(() => {
+    if (session.phase !== 'login' || !storedToken()) return;
+
+    const alVolver = () => {
+      if (document.visibilityState === 'visible') void restore();
+    };
+
+    document.addEventListener('visibilitychange', alVolver);
+    return () => document.removeEventListener('visibilitychange', alVolver);
+  }, [session.phase, restore]);
 
   /* --- socket: ofertas y cambios de la carrera propia ---------------------- */
 
