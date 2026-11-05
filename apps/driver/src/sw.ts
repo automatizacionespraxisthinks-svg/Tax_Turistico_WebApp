@@ -62,7 +62,6 @@ interface Aviso {
   rideId: string;
   titulo?: string;
   cuerpo?: string;
-  expiraEn?: string;
 }
 
 worker.addEventListener('push', ((event: PushEvent) => {

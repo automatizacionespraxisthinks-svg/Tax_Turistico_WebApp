@@ -50,20 +50,21 @@ export class PushService implements OnModuleInit {
    * ni el teléfono del cliente. Una notificación se ve en la pantalla
    * bloqueada de un taxi aparcado en la calle, y el detalle solo aparece
    * dentro de la aplicación, tras aceptar (§8.1, minimización del §7.2).
+   *
+   * Tampoco va la cuenta atrás, y es una decisión, no un olvido: una
+   * notificación es fija una vez mostrada, así que el número se congelaría y
+   * a los tres minutos diría un tiempo que ya no es. El reloj vivo está en la
+   * pantalla de la oferta, dentro de la aplicación.
    */
   async notifyOffer(
     driverId: string,
-    offer: { rideId: string; code: string; zona?: string; expiresAt: string },
+    offer: { rideId: string; code: string; zona?: string },
   ): Promise<void> {
     await this.send(driverId, {
       tipo: 'oferta',
       rideId: offer.rideId,
       titulo: 'Nueva carrera',
       cuerpo: offer.zona ? `En ${offer.zona}` : 'Toca para verla',
-      // El teléfono muestra la cuenta atrás con su propio reloj: si el aviso
-      // llega tarde, el conductor ve el tiempo que de verdad le queda.
-      expiraEn: offer.expiresAt,
-      urgente: true,
     });
   }
 

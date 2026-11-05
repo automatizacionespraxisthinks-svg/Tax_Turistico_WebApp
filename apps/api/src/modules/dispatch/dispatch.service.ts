@@ -325,7 +325,6 @@ export class DispatchService {
           rideId,
           code: ride.code,
           zona: zoneName,
-          expiresAt: ofertaVence.toISOString(),
         })
         .catch((error: unknown) => {
           this.logger.warn({ err: error, driverId: candidate.driverId }, 'Aviso no entregado');

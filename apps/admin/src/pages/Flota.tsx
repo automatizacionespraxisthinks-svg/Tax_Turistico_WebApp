@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react';
 import type { ReactNode } from 'react';
 import { AnimatePresence, motion } from 'motion/react';
-import { Ban, Car, CreditCard, Search, ShieldAlert, SignalLow } from 'lucide-react';
+import { Ban, Car, CreditCard, Search, ShieldAlert, SignalLow, UserX } from 'lucide-react';
 import type { Driver, MovilVinculado } from '@tax/shared';
 import {
   DRIVER_STATUS_LABEL,
@@ -217,13 +217,15 @@ function DriverCard({ driver, onClick }: { driver: Driver; onClick: () => void }
         ) : null}
       </div>
 
-      {(driver.suspendidoHasta ||
+      {(!driver.active ||
+        driver.suspendidoHasta ||
         driver.aceptaPagoElectronico ||
         stale ||
         !driver.deviceRegistered ||
         !driver.vehicle.active ||
         licencia.alerta) && (
         <div className="mt-2.5 flex flex-wrap gap-1.5">
+          {!driver.active ? <Desactivado /> : null}
           {driver.suspendidoHasta ? <Suspendido hasta={driver.suspendidoHasta} /> : null}
           {driver.aceptaPagoElectronico ? <PagoElectronico /> : null}
           {stale ? <Alert>Sin GPS reciente</Alert> : null}
@@ -233,6 +235,24 @@ function DriverCard({ driver, onClick }: { driver: Driver; onClick: () => void }
         </div>
       )}
     </motion.button>
+  );
+}
+
+/**
+ * Desactivado: fuera de la flota hasta que la oficina lo vuelva a activar.
+ *
+ * Va primero y en rojo porque es lo más fuerte que puede decir la tarjeta: el
+ * despacho lo excluye de toda oleada, así que no cuenta para nada. Y sin el
+ * tag no se notaba, porque su estado es «Fuera de turno» —no puede abrir
+ * turno—, el mismo que el de quien simplemente no ha entrado hoy: había que
+ * abrir la ficha para distinguirlos.
+ */
+function Desactivado() {
+  return (
+    <span className="tone-critical inline-flex items-center gap-1 rounded-full border border-[var(--tone-line)] bg-[var(--tone-bg)] px-2 py-0.5 text-micro font-medium text-[var(--tone-ink)]">
+      <UserX className="size-3" />
+      Desactivado
+    </span>
   );
 }
 
