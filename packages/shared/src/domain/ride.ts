@@ -22,6 +22,32 @@ export type RideStatus = (typeof RIDE_STATUSES)[number];
 /** Estados en los que el conductor tiene la carrera tomada (índice único parcial, §5.1). */
 export const ACTIVE_RIDE_STATUSES: RideStatus[] = ['ASSIGNED', 'DRIVER_ARRIVED', 'IN_PROGRESS'];
 
+/**
+ * Estados en los que la carrera sigue ocupando al cliente: desde que la pide
+ * hasta que termina o se cancela, «sin asignar» incluido.
+ *
+ * Tiene que decir lo mismo que el índice parcial
+ * `one_active_ride_per_customer` de la tabla. Si se separan, lo que cuenta el
+ * tope y lo que la base permite dejan de coincidir, y el desacuerdo sale como
+ * un error que nadie entiende.
+ */
+export const OPEN_RIDE_STATUSES: RideStatus[] = [
+  'PENDING',
+  'NOTIFIED',
+  'ASSIGNED',
+  'DRIVER_ARRIVED',
+  'IN_PROGRESS',
+  'UNASSIGNED',
+];
+
+/**
+ * Cuántos taxis puede tener a la vez un mismo teléfono.
+ *
+ * Lo cuenta la API, no el prompt del agente: un tope que vive solo en una
+ * instrucción de texto no es un tope.
+ */
+export const MAX_CARRERAS_ACTIVAS = 5;
+
 /** Estados terminales: ya no admiten transiciones. */
 export const TERMINAL_RIDE_STATUSES: RideStatus[] = ['COMPLETED', 'CANCELLED'];
 
@@ -192,6 +218,18 @@ export const createRideSchema = z.object({
   dropoff: rideAddressSchema.optional(),
   vehicleType: z.enum(VEHICLE_TYPES).default('sedan'),
   passengers: z.number().int().min(1).max(8).default(1),
+  /**
+   * Cuál de los taxis del pedido es este: 1 el primero, del 2 al 5 los demás.
+   *
+   * Es lo que separa «necesito tres taxis, somos siete» de «taxi» escrito
+   * tres veces por impaciencia, y las dos cosas tienen que convivir.
+   *
+   * El taxi 1 no se marca, así que choca contra el índice de una carrera
+   * activa por teléfono y un pedido repetido rebota con `RIDE_ALREADY_ACTIVE`.
+   * Del 2 en adelante la carrera se marca como concurrente y convive con las
+   * demás del pedido. El tope duro sigue siendo `MAX_CARRERAS_ACTIVAS`.
+   */
+  numeroEnPedido: z.coerce.number().int().min(1).max(MAX_CARRERAS_ACTIVAS).default(1),
   /**
    * El cliente va a pagar con pago electrónico (Nequi, transferencia,
    * datáfono). La carrera solo se les ofrece a conductores que lo aceptan;

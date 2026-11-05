@@ -3,6 +3,8 @@ import { and, desc, eq, gt, inArray, isNull, sql } from 'drizzle-orm';
 import { uuidv7 } from 'uuidv7';
 import type { CreateRideInput, Point, RideStatus, TransitionActor } from '@tax/shared';
 import {
+  MAX_CARRERAS_ACTIVAS,
+  OPEN_RIDE_STATUSES,
   canTransition,
   enlaceDeMapaValido,
   formatRideCode,
@@ -196,6 +198,27 @@ export class RidesService {
       .transaction(async (tx) => {
         const customerId = await this.upsertCustomer(tx, input.customerPhone, input.customerName);
 
+        /*
+         * Tope de taxis por teléfono.
+         *
+         * Se cuenta aquí dentro, con la fila del cliente ya bloqueada por
+         * `upsertCustomer`, así que dos pedidos del mismo número a la vez se
+         * ponen en fila en vez de contar los dos sobre el mismo estado y
+         * pasar los dos. Antes el tope solo existía como una línea en el
+         * prompt del agente, y una instrucción de texto no frena nada.
+         */
+        const [activas] = await tx
+          .select({ n: sql<number>`count(*)::int` })
+          .from(rides)
+          .where(and(eq(rides.customerId, customerId), inArray(rides.status, OPEN_RIDE_STATUSES)));
+
+        if ((activas?.n ?? 0) >= MAX_CARRERAS_ACTIVAS) {
+          throw new AppError(
+            'MAX_ACTIVE_RIDES',
+            `Este teléfono ya tiene ${MAX_CARRERAS_ACTIVAS} taxis activos`,
+          );
+        }
+
         // El código legible sale de una secuencia de la base: dos peticiones
         // simultáneas no pueden obtener el mismo número.
         // `execute` devuelve el QueryResult de pg, no un array de filas.
@@ -232,6 +255,14 @@ export class RidesService {
             zoneId: trayecto.originZoneId,
             vehicleType: input.vehicleType,
             passengers: input.passengers,
+            /*
+             * Del 2 en adelante el pedido es de varios taxis a la vez, así que
+             * la carrera se marca para que el índice
+             * `one_active_ride_per_customer` no la rechace. El taxi 1 nunca
+             * lleva la marca: por eso un cliente que repite el pedido sigue
+             * chocando contra el índice y recibe «ya tiene taxi pedido».
+             */
+            allowsConcurrent: input.numeroEnPedido > 1,
             pagoElectronico: input.pagoElectronico,
             etaMinutes: trayecto.etaMinutes,
             notes: input.notes,
@@ -331,10 +362,17 @@ export class RidesService {
   }
 
   private async upsertCustomer(tx: Tx, phone: string, name?: string): Promise<string> {
+    /*
+     * `for update` bloquea la fila del cliente hasta el final de la
+     * transacción, y es lo que hace exacta la cuenta del tope: sin él, dos
+     * pedidos simultáneos del mismo número cuentan los dos sobre el mismo
+     * estado y los dos se creen con cupo.
+     */
     const [existing] = await tx
       .select({ id: customers.id })
       .from(customers)
       .where(eq(customers.phone, phone))
+      .for('update')
       .limit(1);
 
     if (existing) {

@@ -46,6 +46,14 @@ export const API_ERROR_CODES = {
   MISSING_LOCATION: 'Falta la ubicación del punto de recogida',
   OUT_OF_COVERAGE: 'El punto está fuera del área de cobertura',
   RIDE_ALREADY_ACTIVE: 'El cliente ya tiene una carrera activa',
+  /**
+   * Llegó al tope de taxis a la vez (`MAX_CARRERAS_ACTIVAS`).
+   *
+   * Es distinto de `RIDE_ALREADY_ACTIVE`: ese dice «ya tiene uno y este no se
+   * pidió como adicional», o sea un pedido repetido; este dice «pidió otro
+   * más, de verdad, y ya no hay cupo». El agente los responde distinto.
+   */
+  MAX_ACTIVE_RIDES: 'El cliente llegó al tope de carreras activas',
 } as const;
 
 export type ApiErrorCode = keyof typeof API_ERROR_CODES;
