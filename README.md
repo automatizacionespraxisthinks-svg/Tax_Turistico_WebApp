@@ -191,7 +191,11 @@ El panel no inventa acciones: cada botón sale de la tabla de transiciones.
      cuando se pidió «Carrera 19»). La caché pasó a `geo:q2:` para no
      reutilizar respuestas del filtro viejo.
   3. *Señas y palabras clave*: el catálogo de lugares. **Sin lugares en el
-     catálogo no reconoce ninguna seña.**
+     catálogo no reconoce ninguna seña.** Una palabra clave con «el» también
+     vale con «al» y «del» («frente al parque»), y un nombre con paréntesis
+     también sin ellos («Lago Sochagota (malecón)»). Para cargar muchos de una
+     vez: `cli/generar-sql-lugares.ts` convierte un GeoJSON en un SQL con las
+     mismas reglas del panel (zona, palabras únicas) que se ejecuta en la base.
   4. *Nada de lo anterior*: la carrera se crea `sin_ubicar` y se despacha
      desde el centro de la zona marcada como **punto de partida** (el Centro
      al migrar; se cambia en *Zonas › Editar*). Antes era «la primera zona
@@ -239,6 +243,15 @@ El panel no inventa acciones: cada botón sale de la tabla de transiciones.
   su propio rol, siempre queda un administrador activo, y dar un rol o cambiar
   permisos pide el código del teléfono aunque la sesión esté abierta (cinco
   códigos mal cierran la sesión). Prueba: `src/test/e2e-roles-y-permisos.ts`.
+- **Geocodificador a la vista** (4/11/2026): una píldora arriba, junto a las
+  líneas de WhatsApp, dice si Google está ubicando direcciones («Direcciones ·
+  Google», «sin Google», «Google rechaza la clave»), con letrero rojo si deja
+  de funcionar y, al tocarla, la última prueba, lo de hoy y «Probar ahora»
+  (`GET /v1/admin/system/geocodificador`, `POST …/probar`). La API prueba la
+  clave al arrancar y cada carrera deja en el registro de dónde salió su punto
+  (`pickupSource`) y, si no se ubicó, por qué (`google: sin_clave`,
+  `rechazada`, `descartada`…). Un rechazo de Google ya no se guarda en la
+  caché como «no existe».
 - **Página de estado sin textos fijos**: PostgreSQL, Redis, los webhooks de
   n8n, WAHA y la clave de API se comprueban en cada consulta, y la memoria
   se compara con el límite real del contenedor.

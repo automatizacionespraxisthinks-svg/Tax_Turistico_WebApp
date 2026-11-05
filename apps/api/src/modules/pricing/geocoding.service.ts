@@ -1,6 +1,6 @@
-import { Inject, Injectable, Logger } from '@nestjs/common';
+import { Inject, Injectable, Logger, type OnModuleInit } from '@nestjs/common';
 import type Redis from 'ioredis';
-import type { Point } from '@tax/shared';
+import { ZONA_HORARIA_PAIPA, type Point } from '@tax/shared';
 import { REDIS, redisKeys } from '../../redis/redis.module';
 import { loadEnv } from '../../config/env';
 import { ZonesService } from './zones.service';
@@ -12,6 +12,73 @@ export interface DireccionResuelta {
   /** `true` cuando acertó el portal exacto; `false` si se quedó en la calle. */
   exacta: boolean;
 }
+
+/**
+ * Por qué una dirección se ubicó o no. Va a los registros de cada carrera:
+ * con eso se ve de un vistazo si Google está trabajando o no.
+ */
+export type MotivoGeocodificacion =
+  | 'sin_clave'
+  | 'corta'
+  | 'cache'
+  | 'google'
+  | 'sin_resultado'
+  | 'descartada'
+  | 'rechazada'
+  | 'sin_respuesta';
+
+export interface PruebaDelGeocodificador {
+  en: string;
+  direccion: string;
+  ms: number;
+  resultado: 'ubicada' | 'descartada' | 'sin_resultado' | 'rechazada' | 'sin_respuesta' | 'sin_clave';
+  formatted: string | null;
+  exacta: boolean | null;
+  /** El mensaje de Google o del error, tal cual. */
+  detalle: string | null;
+}
+
+/**
+ * Cómo está el geocodificador, para el panel: como las líneas de WhatsApp.
+ *
+ *  - `sin_clave`: falta `GOOGLE_GEOCODING_API_KEY`; ninguna dirección escrita
+ *    se ubica.
+ *  - `sin_verificar`: hay clave, pero Google todavía no ha respondido.
+ *  - `ok`: Google respondió la última vez, con o sin resultado.
+ *  - `rechazada`: Google rechazó la clave (restricción de IP, API sin
+ *    habilitar, facturación) o se pasó la cuota.
+ *  - `sin_respuesta`: no se pudo hablar con Google (red o tiempo).
+ */
+export interface EstadoGeocodificador {
+  estado: 'sin_clave' | 'sin_verificar' | 'ok' | 'rechazada' | 'sin_respuesta';
+  detalle: string | null;
+  /** La última vez que Google contestó algo, bien o mal. */
+  respondioEn: string | null;
+  ultimaPrueba: PruebaDelGeocodificador | null;
+  /** Lo de hoy en Paipa. Vive en memoria: vuelve a cero al reiniciar la API. */
+  hoy: {
+    dia: string;
+    consultasAGoogle: number;
+    ubicadas: number;
+    descartadas: number;
+    sinResultado: number;
+    desdeCache: number;
+    sinClave: number;
+    fallos: number;
+  };
+}
+
+/**
+ * La dirección con la que se prueba la clave: la de la Alcaldía, que Google
+ * y OpenStreetMap ubican en el mismo punto. Cada prueba es una consulta que
+ * Google cuenta dentro del cupo.
+ */
+const DIRECCION_DE_PRUEBA = 'Carrera 22 # 25-14';
+
+const diaEnPaipa = (fecha = new Date()) =>
+  new Intl.DateTimeFormat('en-CA', { timeZone: ZONA_HORARIA_PAIPA }).format(fecha);
+
+type Respuesta = { resuelta: DireccionResuelta | null; motivo: MotivoGeocodificacion; detalle?: string };
 
 /**
  * Direcciones a coordenadas.
@@ -36,9 +103,12 @@ export interface DireccionResuelta {
  * Si algo de eso falla, devuelve `null`. Nunca un punto «aproximado» ni el
  * centro del pueblo: es preferible pedirle la ubicación al cliente que
  * mandarle un taxi a una calle que no es la suya.
+ *
+ * Al arrancar prueba la clave con una dirección conocida, y cada consulta
+ * deja dicho en los registros si Google trabajó o no y por qué.
  */
 @Injectable()
-export class GeocodingService {
+export class GeocodingService implements OnModuleInit {
   private readonly logger = new Logger(GeocodingService.name);
   private readonly env = loadEnv();
   /** Un mes: una dirección no se mueve, y así no se paga dos veces. */
@@ -46,41 +116,155 @@ export class GeocodingService {
   /** Más de esto y se prefiere pedir la ubicación a hacer esperar al cliente. */
   private static readonly TIEMPO_LIMITE_MS = 4000;
 
-  private avisoDeClaveDado = false;
+  private actual: Pick<EstadoGeocodificador, 'estado' | 'detalle' | 'respondioEn'>;
+  private ultimaPrueba: PruebaDelGeocodificador | null = null;
+  private hoy: EstadoGeocodificador['hoy'] = GeocodingService.ceros();
 
   constructor(
     @Inject(REDIS) private readonly redis: Redis,
     private readonly zones: ZonesService,
-  ) {}
+  ) {
+    this.actual = {
+      estado: this.env.GOOGLE_GEOCODING_API_KEY ? 'sin_verificar' : 'sin_clave',
+      detalle: null,
+      respondioEn: null,
+    };
+  }
 
-  async resolve(direccion: string): Promise<DireccionResuelta | null> {
-    const consulta = direccion.trim().toLowerCase().replace(/\s+/g, ' ');
-    if (consulta.length < 4) return null;
-
+  /**
+   * Al arrancar, una línea que dice si las direcciones escritas se van a
+   * ubicar o no. La prueba no se espera: Google lento no puede retrasar el
+   * arranque de la API.
+   */
+  onModuleInit(): void {
     if (!this.env.GOOGLE_GEOCODING_API_KEY) {
-      // Una vez, no en cada carrera: si falta la clave es un problema de
-      // configuración, y repetirlo por cada petición solo tapa el resto.
-      if (!this.avisoDeClaveDado) {
-        this.logger.warn('Sin GOOGLE_GEOCODING_API_KEY: las carreras necesitarán coordenadas');
-        this.avisoDeClaveDado = true;
-      }
-      return null;
+      this.logger.warn(
+        'Geocodificador APAGADO: falta GOOGLE_GEOCODING_API_KEY. Las direcciones escritas quedan «sin ubicar» y se despachan desde el punto de partida.',
+      );
+      return;
+    }
+    void this.probar().catch((error: unknown) => this.logger.error({ error }, 'No se pudo probar el geocodificador'));
+  }
+
+  estado(): EstadoGeocodificador {
+    return { ...this.actual, ultimaPrueba: this.ultimaPrueba, hoy: this.contadores() };
+  }
+
+  /**
+   * Prueba la clave con una dirección conocida, sin pasar por la caché.
+   * Es lo que hace el botón «Probar ahora» del panel.
+   */
+  async probar(): Promise<PruebaDelGeocodificador> {
+    const en = new Date().toISOString();
+    if (!this.env.GOOGLE_GEOCODING_API_KEY) {
+      this.ultimaPrueba = {
+        en,
+        direccion: DIRECCION_DE_PRUEBA,
+        ms: 0,
+        resultado: 'sin_clave',
+        formatted: null,
+        exacta: null,
+        detalle: 'Falta GOOGLE_GEOCODING_API_KEY en la API',
+      };
+      return this.ultimaPrueba;
     }
 
-    const enCache = await this.leerDeCache(consulta);
-    if (enCache !== undefined) return enCache;
+    const inicio = performance.now();
+    const r = await this.preguntarAGoogle(DIRECCION_DE_PRUEBA.toLowerCase());
+    const ms = Math.round(performance.now() - inicio);
+    const resultado: PruebaDelGeocodificador['resultado'] =
+      r.motivo === 'google' ? 'ubicada' : (r.motivo as PruebaDelGeocodificador['resultado']);
 
-    const resuelta = await this.preguntarAGoogle(consulta);
+    this.ultimaPrueba = {
+      en,
+      direccion: DIRECCION_DE_PRUEBA,
+      ms,
+      resultado,
+      formatted: r.resuelta?.formatted ?? null,
+      exacta: r.resuelta?.exacta ?? null,
+      detalle: r.detalle ?? null,
+    };
 
-    // También se cachea el fallo. Si una dirección no existe hoy, tampoco
-    // existirá dentro de un minuto, y el cliente suele reenviarla igual.
-    await this.guardarEnCache(consulta, resuelta);
-    return resuelta;
+    if (r.motivo === 'rechazada' || r.motivo === 'sin_respuesta') {
+      this.logger.error(
+        { prueba: DIRECCION_DE_PRUEBA, ms, detalle: r.detalle },
+        `Geocodificador SIN SERVICIO: ${r.motivo === 'rechazada' ? 'Google rechazó la clave' : 'Google no respondió'}. Las direcciones escritas quedan «sin ubicar».`,
+      );
+    } else {
+      this.logger.log(
+        { prueba: DIRECCION_DE_PRUEBA, ms, resultado, formatted: r.resuelta?.formatted },
+        `Geocodificador ENCENDIDO: Google respondió en ${ms} ms`,
+      );
+    }
+    return this.ultimaPrueba;
+  }
+
+  async resolve(direccion: string): Promise<DireccionResuelta | null> {
+    return (await this.resolverConMotivo(direccion)).resuelta;
+  }
+
+  /** Como `resolve`, diciendo por qué. Deja una línea en el registro y cuenta. */
+  async resolverConMotivo(direccion: string): Promise<Respuesta> {
+    const r = await this.resolverSinContar(direccion);
+    this.contar(r.motivo);
+
+    const datos = { direccion, motivo: r.motivo, ...(r.detalle ? { detalle: r.detalle } : {}) };
+    switch (r.motivo) {
+      case 'sin_clave':
+        this.logger.log(datos, 'Dirección sin ubicar: no hay clave de Google, no se consultó');
+        break;
+      case 'cache':
+        this.logger.log(
+          { ...datos, ubicada: Boolean(r.resuelta) },
+          r.resuelta ? 'Dirección ubicada desde la caché (Google no se consultó)' : 'Dirección sin ubicar desde la caché: Google ya no la había encontrado',
+        );
+        break;
+      case 'google':
+        this.logger.log(
+          { ...datos, formatted: r.resuelta?.formatted, exacta: r.resuelta?.exacta },
+          'Dirección ubicada con Google',
+        );
+        break;
+      case 'sin_resultado':
+      case 'descartada':
+        this.logger.log(datos, r.motivo === 'descartada' ? 'Dirección sin ubicar: Google respondió, pero no con el sitio exacto' : 'Dirección sin ubicar: Google no la encontró');
+        break;
+      case 'rechazada':
+      case 'sin_respuesta':
+        this.logger.warn(datos, 'Dirección sin ubicar: Google no está trabajando');
+        break;
+      case 'corta':
+        break;
+    }
+    return r;
   }
 
   /* ----------------------------------------------------------- interno */
 
-  private async preguntarAGoogle(consulta: string): Promise<DireccionResuelta | null> {
+  private async resolverSinContar(direccion: string): Promise<Respuesta> {
+    const consulta = direccion.trim().toLowerCase().replace(/\s+/g, ' ');
+    if (consulta.length < 4) return { resuelta: null, motivo: 'corta' };
+    if (!this.env.GOOGLE_GEOCODING_API_KEY) return { resuelta: null, motivo: 'sin_clave' };
+
+    const enCache = await this.leerDeCache(consulta);
+    if (enCache !== undefined) return { resuelta: enCache, motivo: 'cache' };
+
+    const r = await this.preguntarAGoogle(consulta);
+
+    /*
+     * Se guarda lo que Google contestó, también «no existe»: si una dirección
+     * no existe hoy, tampoco existirá dentro de un minuto, y el cliente suele
+     * reenviarla igual. Pero NO un fallo de Google: con la clave mal puesta,
+     * cada dirección de ese rato quedaría un mes como «no existe», aunque la
+     * clave se arreglara a los cinco minutos.
+     */
+    if (r.motivo === 'google' || r.motivo === 'sin_resultado' || r.motivo === 'descartada') {
+      await this.guardarEnCache(consulta, r.resuelta);
+    }
+    return r;
+  }
+
+  private async preguntarAGoogle(consulta: string): Promise<Respuesta> {
     const caja = this.zones.boundingBox();
 
     const url = new URL('https://maps.googleapis.com/maps/api/geocode/json');
@@ -101,19 +285,25 @@ export class GeocodingService {
       const respuesta = await fetch(url, { signal: control.signal });
       if (!respuesta.ok) {
         this.logger.warn({ status: respuesta.status }, 'El geocodificador respondió mal');
-        return null;
+        return this.sinServicio('sin_respuesta', `Google respondió HTTP ${respuesta.status}`);
       }
       cuerpo = (await respuesta.json()) as GoogleRespuesta;
     } catch (error) {
       // Red caída o demasiado lento. No es motivo para que falle la carrera:
       // el agente pedirá la ubicación, que además es más precisa.
       this.logger.warn({ error }, 'No se pudo consultar el geocodificador');
-      return null;
+      return this.sinServicio(
+        'sin_respuesta',
+        control.signal.aborted ? `Sin respuesta en ${GeocodingService.TIEMPO_LIMITE_MS / 1000} s` : String(error),
+      );
     } finally {
       clearTimeout(temporizador);
     }
 
-    if (cuerpo.status === 'ZERO_RESULTS') return null;
+    if (cuerpo.status === 'ZERO_RESULTS') {
+      this.respondio();
+      return { resuelta: null, motivo: 'sin_resultado' };
+    }
     if (cuerpo.status !== 'OK') {
       // REQUEST_DENIED, OVER_QUERY_LIMIT: problemas de configuración o de
       // cuenta que hay que ver en los logs, no «no se encontró».
@@ -121,8 +311,9 @@ export class GeocodingService {
         { status: cuerpo.status, error: cuerpo.error_message },
         'El geocodificador rechazó la consulta',
       );
-      return null;
+      return this.sinServicio('rechazada', `${cuerpo.status}${cuerpo.error_message ? `: ${cuerpo.error_message}` : ''}`);
     }
+    this.respondio();
 
     // El primero que sirva, no el primero a secas: con una dirección a medias
     // Google suele poner delante el municipio entero.
@@ -130,13 +321,78 @@ export class GeocodingService {
       const point = this.comprobar(consulta, candidato, caja);
       if (point) {
         return {
-          point,
-          formatted: candidato.formatted_address ?? consulta,
-          exacta: candidato.geometry?.location_type === 'ROOFTOP',
+          resuelta: {
+            point,
+            formatted: candidato.formatted_address ?? consulta,
+            exacta: candidato.geometry?.location_type === 'ROOFTOP',
+          },
+          motivo: 'google',
         };
       }
     }
-    return null;
+    return { resuelta: null, motivo: 'descartada', detalle: cuerpo.results?.[0]?.formatted_address };
+  }
+
+  private respondio(): void {
+    this.actual = { estado: 'ok', detalle: null, respondioEn: new Date().toISOString() };
+  }
+
+  private sinServicio(motivo: 'rechazada' | 'sin_respuesta', detalle: string): Respuesta {
+    this.actual = {
+      estado: motivo,
+      detalle,
+      respondioEn: motivo === 'rechazada' ? new Date().toISOString() : this.actual.respondioEn,
+    };
+    return { resuelta: null, motivo, detalle };
+  }
+
+  private static ceros(): EstadoGeocodificador['hoy'] {
+    return {
+      dia: diaEnPaipa(),
+      consultasAGoogle: 0,
+      ubicadas: 0,
+      descartadas: 0,
+      sinResultado: 0,
+      desdeCache: 0,
+      sinClave: 0,
+      fallos: 0,
+    };
+  }
+
+  private contadores(): EstadoGeocodificador['hoy'] {
+    if (this.hoy.dia !== diaEnPaipa()) this.hoy = GeocodingService.ceros();
+    return { ...this.hoy };
+  }
+
+  private contar(motivo: MotivoGeocodificacion): void {
+    const hoy = (this.hoy = this.contadores());
+    switch (motivo) {
+      case 'sin_clave':
+        hoy.sinClave++;
+        break;
+      case 'cache':
+        hoy.desdeCache++;
+        break;
+      case 'google':
+        hoy.consultasAGoogle++;
+        hoy.ubicadas++;
+        break;
+      case 'sin_resultado':
+        hoy.consultasAGoogle++;
+        hoy.sinResultado++;
+        break;
+      case 'descartada':
+        hoy.consultasAGoogle++;
+        hoy.descartadas++;
+        break;
+      case 'rechazada':
+      case 'sin_respuesta':
+        hoy.consultasAGoogle++;
+        hoy.fallos++;
+        break;
+      case 'corta':
+        break;
+    }
   }
 
   /**

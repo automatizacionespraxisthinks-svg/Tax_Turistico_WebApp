@@ -43,6 +43,30 @@ export interface LugarBuscable {
 }
 
 /**
+ * Las formas en que puede aparecer una palabra clave en lo que escribe el
+ * cliente, ya normalizadas.
+ *
+ *  - «el parque» también es «al parque» y «del parque»: el artículo se
+ *    contrae con «a» y «de», y sin esto «frente al parque» no lo encontraba.
+ *    Con «la», «los» y «las» no hace falta: no se contraen.
+ *  - Un nombre con paréntesis también vale sin ellos: «Lago Sochagota
+ *    (malecón)» es «lago sochagota» para quien lo escribe.
+ */
+function formasDe(palabra: string): string[] {
+  const formas = new Set<string>();
+  for (const texto of [palabra, palabra.replace(/\s*\([^)]*\)\s*/g, ' ')]) {
+    const buscada = normalizarParaBuscar(texto);
+    if (buscada.length < 3) continue;
+    formas.add(buscada);
+    if (buscada.startsWith('el ')) {
+      formas.add(`al ${buscada.slice(3)}`);
+      formas.add(`del ${buscada.slice(3)}`);
+    }
+  }
+  return [...formas];
+}
+
+/**
  * El lugar del catálogo que nombra el texto, si alguno.
  *
  * Coincide el nombre o una palabra clave como palabras enteras: «parque» no
@@ -59,8 +83,8 @@ export function buscarLugar<T extends LugarBuscable>(
 
   for (const lugar of lugares) {
     for (const palabra of [lugar.name, ...lugar.aliases]) {
-      const buscada = normalizarParaBuscar(palabra);
-      if (buscada.length < 3 || !enTexto.includes(` ${buscada} `)) continue;
+      const buscada = formasDe(palabra).find((forma) => enTexto.includes(` ${forma} `));
+      if (!buscada) continue;
       if (
         !mejor ||
         buscada.length > mejor.largo ||

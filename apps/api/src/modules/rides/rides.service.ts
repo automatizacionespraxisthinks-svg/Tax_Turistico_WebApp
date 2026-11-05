@@ -25,13 +25,20 @@ import { AppError } from '../../common/problem';
 import { AuditService } from '../audit/audit.service';
 import { OutboxService } from '../integrations/outbox.service';
 import { TrayectosService } from '../pricing/trayectos.service';
-import { GeocodingService } from '../pricing/geocoding.service';
+import { GeocodingService, type MotivoGeocodificacion } from '../pricing/geocoding.service';
 import { ZonesService } from '../pricing/zones.service';
 import { CatalogoService } from '../pricing/catalogo.service';
 import { DispatchService } from '../dispatch/dispatch.service';
 import { isUniqueViolation } from '../../common/pg-errors';
 import { RealtimeGateway } from '../../realtime/realtime.gateway';
 import { FotosService } from './fotos.service';
+
+/** Cómo se dice en el registro de dónde salió el punto de recogida. */
+const ORIGEN_EN_PALABRAS = {
+  compartida: 'que compartió el cliente',
+  catalogo: 'de un lugar del catálogo',
+  geocodificada: 'ubicada con Google',
+} as const;
 
 export interface Actor {
   kind: TransitionActor;
@@ -116,13 +123,16 @@ export class RidesService {
      * el lugar.
      */
     type Hallazgo = { point: Point; source: 'catalogo' | 'geocodificada'; direccion: string };
+    // Para el registro: por qué Google no la ubicó, si no la ubicó.
+    let motivoDeGoogle: MotivoGeocodificacion | undefined;
     const delCatalogo = async (): Promise<Hallazgo | null> => {
       const texto = [input.pickup.text, input.pickup.reference].filter(Boolean).join('. ');
       const lugar = await this.catalogo.reconocer(texto);
       return lugar ? { point: lugar.point, source: 'catalogo', direccion: lugar.name } : null;
     };
     const delGeocodificador = async (): Promise<Hallazgo | null> => {
-      const hallada = await this.geocoding.resolve(input.pickup.text);
+      const { resuelta: hallada, motivo } = await this.geocoding.resolverConMotivo(input.pickup.text);
+      motivoDeGoogle = motivo;
       return hallada ? { point: hallada.point, source: 'geocodificada', direccion: hallada.formatted } : null;
     };
 
@@ -283,6 +293,24 @@ export class RidesService {
         }
         throw error;
       });
+
+    /*
+     * Una línea por carrera con de dónde salió el punto. Es lo que permite
+     * ver en los registros la diferencia entre tener la clave de Google o
+     * no: sin ella, toda dirección escrita sale «sin_ubicar» con
+     * `google: sin_clave`.
+     */
+    this.logger.log(
+      {
+        code: created.code,
+        pickupSource,
+        ...(motivoDeGoogle ? { google: motivoDeGoogle } : {}),
+        ...(direccionResuelta ? { ubicadaComo: direccionResuelta } : {}),
+      },
+      pickupSource === 'sin_ubicar'
+        ? 'Carrera creada sin ubicar: se despacha desde el punto de partida'
+        : `Carrera creada con la recogida ${ORIGEN_EN_PALABRAS[pickupSource]}`,
+    );
 
     // Fuera de la transacción: antes del commit el trabajador no vería la fila.
     await this.outbox.notify(pendingEvents);

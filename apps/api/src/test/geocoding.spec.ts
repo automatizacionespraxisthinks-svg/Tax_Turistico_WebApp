@@ -289,4 +289,62 @@ describe('GeocodingService', () => {
 
     expect(r!.point).toEqual(EN_EL_CENTRO);
   });
+
+  /*
+   * Con la clave mal restringida, Google responde REQUEST_DENIED. Si eso se
+   * guardara como «no existe», cada dirección de ese rato quedaría un mes sin
+   * ubicarse aunque la clave se arreglara enseguida.
+   */
+  it('no guarda en la caché un rechazo de Google: arreglada la clave, se vuelve a buscar', async () => {
+    const redis = hacerRedis();
+    globalThis.fetch = respuestaDeGoogle({ status: 'REQUEST_DENIED', error_message: 'This IP is not authorized' });
+    expect(await new GeocodingService(redis, hacerZonas()).resolve('Carrera 21 # 24-18')).toBeNull();
+
+    const llamadas = respuestaDeGoogle(UN_RESULTADO(EN_EL_CENTRO.lat, EN_EL_CENTRO.lng));
+    globalThis.fetch = llamadas;
+    const r = await new GeocodingService(redis, hacerZonas()).resolve('Carrera 21 # 24-18');
+
+    expect(llamadas).toHaveBeenCalledTimes(1);
+    expect(r!.point).toEqual(EN_EL_CENTRO);
+  });
+
+  it('el estado dice si Google trabaja, y por qué no', async () => {
+    const servicio = new GeocodingService(hacerRedis(), hacerZonas());
+    expect(servicio.estado().estado).toBe('sin_verificar');
+
+    globalThis.fetch = respuestaDeGoogle({ status: 'REQUEST_DENIED', error_message: 'This IP is not authorized' });
+    await servicio.resolve('Carrera 21 # 24-18');
+    expect(servicio.estado().estado).toBe('rechazada');
+    expect(servicio.estado().detalle).toContain('This IP is not authorized');
+
+    globalThis.fetch = respuestaDeGoogle(UN_RESULTADO(EN_EL_CENTRO.lat, EN_EL_CENTRO.lng));
+    await servicio.resolve('Carrera 22 # 25-14');
+    expect(servicio.estado().estado).toBe('ok');
+  });
+
+  it('cuenta lo de hoy: lo que fue a Google y lo que salió de la caché', async () => {
+    const servicio = new GeocodingService(hacerRedis(), hacerZonas());
+    globalThis.fetch = respuestaDeGoogle(UN_RESULTADO(EN_EL_CENTRO.lat, EN_EL_CENTRO.lng));
+
+    expect((await servicio.resolverConMotivo('Carrera 21 # 24-18')).motivo).toBe('google');
+    expect((await servicio.resolverConMotivo('carrera 21 # 24-18')).motivo).toBe('cache');
+
+    const hoy = servicio.estado().hoy;
+    expect(hoy.consultasAGoogle).toBe(1);
+    expect(hoy.ubicadas).toBe(1);
+    expect(hoy.desdeCache).toBe(1);
+  });
+
+  it('la prueba de la clave va a Google aunque la dirección esté en la caché', async () => {
+    const llamadas = respuestaDeGoogle(UN_RESULTADO(EN_EL_CENTRO.lat, EN_EL_CENTRO.lng));
+    globalThis.fetch = llamadas;
+    const servicio = new GeocodingService(hacerRedis(), hacerZonas());
+
+    await servicio.resolve('Carrera 22 # 25-14');
+    const prueba = await servicio.probar();
+
+    expect(llamadas).toHaveBeenCalledTimes(2);
+    expect(prueba.resultado).toBe('ubicada');
+    expect(servicio.estado().ultimaPrueba?.resultado).toBe('ubicada');
+  });
 });

@@ -23,6 +23,7 @@ import { actions, useLive, type AlertaRecibida } from '../live/store';
 import { api } from '../api/client';
 import { usePuede, useSesion } from '../api/queries';
 import { CambiarClave } from '../components/CambiarClave';
+import { GeocodificadorCaido, IndicadorDeDirecciones } from '../components/Geocodificador';
 import logo from '../assets/logo-tax-turistico.png';
 
 interface NavItem {
@@ -117,6 +118,7 @@ export function AppShell({ children, userName }: { children: ReactNode; userName
         ) : null}
 
         <LineasCaidas />
+        <GeocodificadorCaido />
         <AvisosSueltos />
 
         <main className="min-h-0 flex-1 overflow-y-auto">{children}</main>
@@ -443,6 +445,7 @@ function TopBar({ title }: { title: string }) {
               {session.label} · {WAHA_STATUS_LABEL[session.status]}
             </StatusPill>
           ))}
+          <IndicadorDeDirecciones />
         </div>
 
         {/* Sobre el azul: borde y texto blancos, y el punto en el verde que

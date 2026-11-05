@@ -26,6 +26,19 @@ describe('catálogo de lugares', () => {
     expect(buscarLugar('en la plaza', LUGARES)?.palabra).toBe('la plaza');
   });
 
+  it('«el parque» también es «al parque» y «del parque»', () => {
+    expect(buscarLugar('Estoy frente al parque', LUGARES)?.lugar.id).toBe('parque');
+    expect(buscarLugar('A una cuadra del parque', LUGARES)?.lugar.id).toBe('parque');
+    // «la» no se contrae: «a la terminal» ya contiene «la terminal».
+    expect(buscarLugar('voy saliendo de la terminal', LUGARES)?.lugar.id).toBe('terminal');
+  });
+
+  it('un nombre con paréntesis también se reconoce sin ellos', () => {
+    const lago = [{ id: 'lago', name: 'Lago Sochagota (malecón)', aliases: ['el lago'], uses: 0 }];
+    expect(buscarLugar('Estoy en el malecón del lago Sochagota', lago)?.lugar.id).toBe('lago');
+    expect(buscarLugar('recójanme en lago sochagota', lago)?.palabra).toBe('Lago Sochagota (malecón)');
+  });
+
   it('solo palabras enteras: «parque» no está en «parqueadero»', () => {
     expect(buscarLugar('en el parqueadero del hotel', LUGARES)).toBeNull();
   });

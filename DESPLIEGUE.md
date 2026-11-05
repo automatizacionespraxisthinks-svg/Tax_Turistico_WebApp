@@ -293,8 +293,12 @@ Tres cosas que se equivocan siempre:
   Conviene restringirla por IP a la del VPS. **Si falta, toda dirección
   escrita queda «sin ubicar»** y se despacha desde el punto de partida: es lo
   primero que hay que mirar si las carreras con dirección aparecen en la
-  zona equivocada. En los registros de la API sale una vez al arrancar:
-  «Sin GOOGLE_GEOCODING_API_KEY».
+  zona equivocada. Para saber si funciona, en el panel, arriba junto a las
+  líneas de WhatsApp: «Direcciones · Google» en verde es que sí; «sin
+  Google» es que falta la clave; en rojo, con letrero, es que Google la
+  rechaza (al tocarlo sale su mensaje y el botón «Probar ahora»). En los
+  registros de la API, al arrancar: «Geocodificador ENCENDIDO», «APAGADO» o
+  «SIN SERVICIO», y en cada carrera de dónde salió el punto de recogida.
 - **`WAHA_URL`** enciende el monitor de las líneas de WhatsApp: cada minuto
   le pregunta a WAHA por sus sesiones y, si una deja de atender, suena una
   alerta en el panel, queda un letrero rojo arriba hasta que vuelva y sale el
@@ -637,6 +641,23 @@ con cualquier placa dada de alta, no solo con la suya. El vínculo del listado
 maestro (conductor o relevador de un móvil) es lo que ve la oficina en
 *Flota*; no restringe con qué taxi se abre turno, salvo que el móvil esté
 inactivo.
+
+### 4.4.1 Carga el catálogo de lugares
+
+Las señas («frente al hospital», «la terminal») solo se reconocen si el lugar
+está en el catálogo. Se agregan uno a uno en *Zonas › Catálogo de lugares*, o
+muchos de una vez desde un GeoJSON de puntos, con `nombre` y `alias`:
+
+```bash
+node dist/cli/generar-sql-lugares.js puntos.geojson carga-lugares.sql
+```
+
+El SQL se ejecuta entero en la base «tax», como el del listado maestro, y
+cumple las reglas del panel: cada lugar entra en la zona donde cae y con su
+tipo, ningún nombre ni palabra clave se repite, y **lo que cae fuera de toda
+zona no se carga** (allí no se despacha). Al final dice qué pasó con cada uno.
+Se puede volver a ejecutar: lo que ya está se actualiza. Para probar sin
+guardar, se cambia el COMMIT del final por ROLLBACK.
 
 ### 4.5 Emite la clave de API para n8n
 

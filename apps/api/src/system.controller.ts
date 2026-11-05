@@ -7,8 +7,9 @@ import { formatRelative, type ServiceCheck, type SystemChecks } from '@tax/share
 import { DB, type Database } from './db/db.module';
 import { REDIS } from './redis/redis.module';
 import { loadEnv } from './config/env';
-import { SessionGuard } from './modules/identity/guards';
+import { RequierePermiso, SessionGuard } from './modules/identity/guards';
 import { WahaMonitorService } from './modules/integrations/waha-monitor.service';
+import { GeocodingService } from './modules/pricing/geocoding.service';
 
 /** Más que esto sin respuesta y el servicio cuenta como caído. */
 const TIEMPO_LIMITE_MS = 3_000;
@@ -39,6 +40,7 @@ export class SystemController {
     @Inject(DB) private readonly db: Database,
     @Inject(REDIS) private readonly redis: Redis,
     private readonly monitor: WahaMonitorService,
+    private readonly geocoding: GeocodingService,
   ) {}
 
   @Get()
@@ -72,6 +74,29 @@ export class SystemController {
       throw new ConflictException('Falta WAHA_URL en la API: el monitor de líneas está apagado');
     }
     return this.monitor.revisar();
+  }
+
+  /**
+   * Cómo está el geocodificador de Google: si hay clave, si la última vez
+   * respondió, la última prueba y lo de hoy. No consulta a Google: es lo que
+   * la API ya sabe. Lo pinta el panel junto a las líneas de WhatsApp.
+   */
+  @Get('geocodificador')
+  estadoDelGeocodificador() {
+    return this.geocoding.estado();
+  }
+
+  /**
+   * Prueba la clave ahora, con una dirección conocida y sin caché. Cada
+   * prueba es una consulta que Google cuenta en el cupo, por eso pide el
+   * permiso de tareas técnicas.
+   */
+  @Post('geocodificador/probar')
+  @HttpCode(200)
+  @RequierePermiso('sistema.tecnico')
+  async probarGeocodificador() {
+    const prueba = await this.geocoding.probar();
+    return { prueba, estado: this.geocoding.estado() };
   }
 
   /* ---------------------------------------------------------- servicios */
