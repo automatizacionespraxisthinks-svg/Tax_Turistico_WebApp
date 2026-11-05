@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   buscarLugar,
+  nucleoDe,
   nuevoLugarSchema,
   normalizarParaBuscar,
   poligonoCircular,
@@ -37,6 +38,60 @@ describe('catálogo de lugares', () => {
     const lago = [{ id: 'lago', name: 'Lago Sochagota (malecón)', aliases: ['el lago'], uses: 0 }];
     expect(buscarLugar('Estoy en el malecón del lago Sochagota', lago)?.lugar.id).toBe('lago');
     expect(buscarLugar('recójanme en lago sochagota', lago)?.palabra).toBe('Lago Sochagota (malecón)');
+  });
+
+  /* --------------------------------------------- sin ser estricto (5/11) --- */
+
+  const TERMINAL_PAIPA = [
+    {
+      id: 'terminal',
+      name: 'Terminal de Transportes de Paipa',
+      aliases: ['el terminal', 'la terminal', 'terminal de buses'],
+      uses: 0,
+    },
+    { id: 'hospital', name: 'E.S.E. Hospital San Vicente de Paúl', aliases: ['el hospital', 'urgencias'], uses: 0 },
+    { id: 'alcaldia', name: 'Alcaldía de Paipa', aliases: ['la alcaldía'], uses: 0 },
+    { id: 'lago', name: 'Lago Sochagota (malecón)', aliases: ['el lago'], uses: 0 },
+    { id: 'colonial', name: 'Hotel Colonial Colsubsidio', aliases: ['el Colonial'], uses: 0 },
+    { id: 'd1', name: 'D1 Paipa Centro', aliases: ['el D1 del centro'], uses: 0 },
+  ];
+  const id = (texto: string) => buscarLugar(texto, TERMINAL_PAIPA)?.lugar.id ?? null;
+
+  it('la palabra sola, sin el artículo de la palabra clave (el caso de producción)', () => {
+    // El agente mandó `pickup.text: "terminal"` y la palabra clave era «el terminal».
+    expect(id('terminal')).toBe('terminal');
+    expect(id('Terminal')).toBe('terminal');
+    expect(id('voy al terminal')).toBe('terminal');
+    expect(id('a la salida del terminal')).toBe('terminal');
+  });
+
+  it('las preposiciones del medio no cuentan: «terminal de buses» es «terminal buses»', () => {
+    expect(buscarLugar('estoy en terminal buses', TERMINAL_PAIPA)?.palabra).toBe('terminal de buses');
+  });
+
+  it('perdona un error de escritura en las palabras largas', () => {
+    expect(id('frente al terminl')).toBe('terminal');
+    expect(id('en el hopital')).toBe('hospital');
+    expect(id('al lado de la alcadia')).toBe('alcaldia');
+  });
+
+  it('pero no confunde palabras distintas', () => {
+    // Cortas: tienen que ser exactas. «lago» y «largo» están a una letra.
+    expect(id('por un camino largo')).toBeNull();
+    // Misma raíz no es un error de escritura.
+    expect(id('donde termina la calle')).toBeNull();
+    expect(id('barrio la colonia')).toBeNull();
+    // Dos letras en una de ocho ya es otra palabra.
+    expect(id('el hostal de la esquina')).toBeNull();
+    // Con números, exactas: «D2» no es «D1».
+    expect(id('frente al D2 del centro')).toBeNull();
+    expect(id('frente al D1 del centro')).toBe('d1');
+  });
+
+  it('el núcleo de una palabra clave no lleva artículos ni preposiciones', () => {
+    expect(nucleoDe('La Terminal')).toBe('terminal');
+    expect(nucleoDe('el terminal')).toBe(nucleoDe('terminal'));
+    expect(nucleoDe('terminal de buses')).toBe('terminal buses');
   });
 
   it('solo palabras enteras: «parque» no está en «parqueadero»', () => {

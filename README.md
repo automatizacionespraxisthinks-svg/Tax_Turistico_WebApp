@@ -191,9 +191,15 @@ El panel no inventa acciones: cada botón sale de la tabla de transiciones.
      cuando se pidió «Carrera 19»). La caché pasó a `geo:q2:` para no
      reutilizar respuestas del filtro viejo.
   3. *Señas y palabras clave*: el catálogo de lugares. **Sin lugares en el
-     catálogo no reconoce ninguna seña.** Una palabra clave con «el» también
-     vale con «al» y «del» («frente al parque»), y un nombre con paréntesis
-     también sin ellos («Lago Sochagota (malecón)»). Para cargar muchos de una
+     catálogo no reconoce ninguna seña.** La búsqueda no es estricta
+     (5/11/2026): compara palabra por palabra sin artículos ni preposiciones
+     («terminal» a secas encuentra «el terminal»; «terminal buses», «terminal
+     de buses»), perdona un error de escritura en las palabras de 5 a 9 letras
+     y dos desde 10, siempre con la primera y la última letra iguales
+     («terminl», «hopital»; no «termina» ni «hostal»), y un nombre con
+     paréntesis vale sin ellos. Las palabras de 4 letras o menos y las que
+     llevan números tienen que ser exactas. Por eso dos palabras clave con el
+     mismo núcleo («la terminal» y «terminal») no pueden ser de dos lugares. Para cargar muchos de una
      vez: `cli/generar-sql-lugares.ts` convierte un GeoJSON en un SQL con las
      mismas reglas del panel (zona, palabras únicas) que se ejecuta en la base.
   4. *Nada de lo anterior*: la carrera se crea `sin_ubicar` y se despacha

@@ -8,6 +8,7 @@ import {
   ZONA_POR_DEFECTO,
   buscarLugar,
   normalizarParaBuscar,
+  nucleoDe,
   nuevaZonaSchema,
   nuevoLugarSchema,
   pointInPolygon,
@@ -230,15 +231,16 @@ export function FormularioLugar({
   const ocupadas = new Map<string, string>();
   for (const otro of lugares) {
     if (otro.id === lugar?.id) continue;
-    for (const p of [otro.name, ...otro.aliases]) ocupadas.set(normalizarParaBuscar(p), otro.name);
+    // Por núcleo, como compara la API: «la terminal» y «terminal» chocan.
+    for (const p of [otro.name, ...otro.aliases]) ocupadas.set(nucleoDe(p), otro.name);
   }
 
   const agregar = () => {
     const palabra = borrador.trim().replace(/\s+/g, ' ');
-    const clave = normalizarParaBuscar(palabra);
-    if (!clave) return;
-    if (clave.length < 3) return setAvisoPalabra('Necesita al menos 3 letras.');
-    if (palabras.some((p) => normalizarParaBuscar(p) === clave)) return setAvisoPalabra('Ya está en la lista.');
+    if (!normalizarParaBuscar(palabra)) return;
+    if (normalizarParaBuscar(palabra).length < 3) return setAvisoPalabra('Necesita al menos 3 letras.');
+    const clave = nucleoDe(palabra);
+    if (palabras.some((p) => nucleoDe(p) === clave)) return setAvisoPalabra('Ya está en la lista, con otras palabras.');
     const dueno = ocupadas.get(clave);
     if (dueno) return setAvisoPalabra(`«${palabra}» ya es de «${dueno}»: dos lugares no pueden compartirla.`);
     if (palabras.length >= MAX_PALABRAS_CLAVE) return setAvisoPalabra(`Hasta ${MAX_PALABRAS_CLAVE} palabras clave.`);
@@ -263,8 +265,8 @@ export function FormularioLugar({
     ? 'Toca el mapa para poner el punto del lugar'
     : !zona
       ? 'El punto queda fuera de las zonas con servicio'
-      : ocupadas.get(normalizarParaBuscar(nombre))
-        ? `«${nombre.trim()}» ya está en el catálogo como «${ocupadas.get(normalizarParaBuscar(nombre))}»`
+      : ocupadas.get(nucleoDe(nombre))
+        ? `«${nombre.trim()}» ya está en el catálogo como «${ocupadas.get(nucleoDe(nombre))}»`
         : primerError(nuevoLugarSchema.safeParse(entrada));
 
   const reconocido = prueba.trim()

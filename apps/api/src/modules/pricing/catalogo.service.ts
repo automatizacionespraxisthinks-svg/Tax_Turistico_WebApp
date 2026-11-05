@@ -6,7 +6,7 @@ import {
   ZONA_POR_DEFECTO,
   buscarLugar,
   haversineKm,
-  normalizarParaBuscar,
+  nucleoDe,
   poligonoCircular,
   poligonosSeTocan,
 } from '@tax/shared';
@@ -33,7 +33,8 @@ function sinRepetidas(palabras: string[]): string[] {
   return palabras
     .map((p) => p.trim().replace(/\s+/g, ' '))
     .filter((p) => {
-      const clave = normalizarParaBuscar(p);
+      // «la terminal» y «el terminal» son la misma para el buscador.
+      const clave = nucleoDe(p);
       if (!clave || vistas.has(clave)) return false;
       vistas.add(clave);
       return true;
@@ -318,7 +319,9 @@ export class CatalogoService {
 
   /**
    * Ningún nombre ni palabra clave puede ser de dos lugares a la vez: «el
-   * parque» en dos sitios haría que el taxi fuera a uno al azar.
+   * parque» en dos sitios haría que el taxi fuera a uno al azar. Se compara
+   * el núcleo, como busca el buscador: «la terminal» en un lugar y
+   * «terminal» en otro también chocan.
    */
   private async comprobarPalabras(nombre: string, aliases: string[], excepto?: string) {
     const otros = await this.db
@@ -328,15 +331,15 @@ export class CatalogoService {
 
     const ocupadas = new Map<string, string>();
     for (const otro of otros) {
-      for (const palabra of [otro.name, ...otro.aliases]) ocupadas.set(normalizarParaBuscar(palabra), otro.name);
+      for (const palabra of [otro.name, ...otro.aliases]) ocupadas.set(nucleoDe(palabra), otro.name);
     }
 
-    const duenoDelNombre = ocupadas.get(normalizarParaBuscar(nombre));
+    const duenoDelNombre = ocupadas.get(nucleoDe(nombre));
     if (duenoDelNombre) {
       throw new AppError('NAME_TAKEN', `«${nombre.trim()}» ya está en el catálogo como «${duenoDelNombre}»`);
     }
     for (const palabra of aliases) {
-      const dueno = ocupadas.get(normalizarParaBuscar(palabra));
+      const dueno = ocupadas.get(nucleoDe(palabra));
       if (dueno) throw new AppError('KEYWORD_TAKEN', `«${palabra}» ya es palabra clave de «${dueno}»`);
     }
   }

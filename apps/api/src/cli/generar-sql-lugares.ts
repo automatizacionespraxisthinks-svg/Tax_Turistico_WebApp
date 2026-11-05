@@ -1,6 +1,6 @@
 import { readFileSync, writeFileSync } from 'node:fs';
 import { basename } from 'node:path';
-import { normalizarParaBuscar, nuevoLugarSchema } from '@tax/shared';
+import { nucleoDe, nuevoLugarSchema } from '@tax/shared';
 
 /**
  * Convierte un GeoJSON de puntos de referencia en un script SQL que carga el
@@ -68,7 +68,7 @@ function main(): void {
     }
     const { name, aliases } = valido.data;
     for (const palabra of [name, ...aliases]) {
-      const clave = normalizarParaBuscar(palabra);
+      const clave = nucleoDe(palabra);
       const otra = duenas.get(clave);
       if (otra && otra !== name) errores.push(`«${palabra}» está en «${otra}» y en «${name}»`);
       duenas.set(clave, name);
@@ -113,11 +113,15 @@ function main(): void {
 
 begin;
 
--- Igual que normalizarParaBuscar() de la app: minúsculas, sin tildes ni signos.
+-- Igual que nucleoDe() de la app: minúsculas, sin tildes ni signos, y sin
+-- artículos ni preposiciones («la terminal» y «terminal» son la misma).
 create function pg_temp.clave(t text) returns text language sql immutable as $$
-  select btrim(regexp_replace(
-    translate(lower(t), 'áàäâãåāéèëêēíìïîīóòöôõōúùüûūñç', 'aaaaaaaeeeeeiiiiioooooouuuuunc'),
-    '[^a-z0-9]+', ' ', 'g'))
+  select btrim(regexp_replace(regexp_replace(
+    ' ' || regexp_replace(
+      translate(lower(t), 'áàäâãåāéèëêēíìïîīóòöôõōúùüûūñç', 'aaaaaaaeeeeeiiiiioooooouuuuunc'),
+      '[^a-z0-9]+', ' ', 'g') || ' ',
+    ' ((el|la|los|las|lo|al|del|de|a|en|y|un|una|unos|unas) )+', ' ', 'g'),
+    ' +', ' ', 'g'))
 $$;
 
 -- Si un punto cae dentro del polígono de una zona. Mismo cálculo (rayo) que

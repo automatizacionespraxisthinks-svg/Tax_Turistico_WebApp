@@ -43,55 +43,144 @@ export interface LugarBuscable {
 }
 
 /**
- * Las formas en que puede aparecer una palabra clave en lo que escribe el
- * cliente, ya normalizadas.
- *
- *  - «el parque» también es «al parque» y «del parque»: el artículo se
- *    contrae con «a» y «de», y sin esto «frente al parque» no lo encontraba.
- *    Con «la», «los» y «las» no hace falta: no se contraen.
- *  - Un nombre con paréntesis también vale sin ellos: «Lago Sochagota
- *    (malecón)» es «lago sochagota» para quien lo escribe.
+ * Palabras que no distinguen un lugar de otro: artículos, contracciones y
+ * preposiciones. «el terminal», «la terminal», «al terminal» y «terminal» son
+ * el mismo sitio, y «terminal de buses» es «terminal buses».
  */
-function formasDe(palabra: string): string[] {
-  const formas = new Set<string>();
-  for (const texto of [palabra, palabra.replace(/\s*\([^)]*\)\s*/g, ' ')]) {
-    const buscada = normalizarParaBuscar(texto);
-    if (buscada.length < 3) continue;
-    formas.add(buscada);
-    if (buscada.startsWith('el ')) {
-      formas.add(`al ${buscada.slice(3)}`);
-      formas.add(`del ${buscada.slice(3)}`);
+export const PALABRAS_VACIAS = new Set([
+  'el', 'la', 'los', 'las', 'lo', 'al', 'del', 'de', 'a', 'en', 'y', 'un', 'una', 'unos', 'unas',
+]);
+
+/** Las palabras que cuentan de un texto, normalizadas y sin las vacías. */
+function palabrasQueCuentan(texto: string): string[] {
+  return normalizarParaBuscar(texto)
+    .split(' ')
+    .filter((p) => p && !PALABRAS_VACIAS.has(p));
+}
+
+/**
+ * Lo que identifica a una palabra clave: normalizada y sin artículos ni
+ * preposiciones. Dos palabras clave con el mismo núcleo son la misma para el
+ * buscador —«la terminal» y «terminal»—, así que no pueden ser de dos lugares.
+ */
+export function nucleoDe(palabra: string): string {
+  return palabrasQueCuentan(palabra).join(' ') || normalizarParaBuscar(palabra);
+}
+
+/**
+ * Cuántas letras de diferencia se le perdonan a una palabra del cliente,
+ * según lo larga que sea la palabra clave. Las cortas tienen que ser exactas:
+ * «lago» y «largo» están a una letra y no son lo mismo. Las que llevan
+ * números, también: «D1» no es «D2». Dos letras solo desde diez: con ocho,
+ * «hospital» ya sería «hostal».
+ */
+function erroresPermitidos(palabra: string): number {
+  if (/\d/.test(palabra) || palabra.length <= 4) return 0;
+  return palabra.length >= 10 ? 2 : 1;
+}
+
+/**
+ * Si dos palabras pueden ser la misma con un error de escritura: dentro de
+ * las letras permitidas, y con la primera y la última iguales. Lo segundo
+ * deja fuera las palabras de la misma raíz, que no son errores: «termina» no
+ * es «terminal», ni «colonia» es «colonial».
+ */
+function parecidas(buscada: string, escrita: string): number | null {
+  if (buscada === escrita) return 0;
+  const max = erroresPermitidos(buscada);
+  if (max === 0 || buscada[0] !== escrita[0] || buscada.at(-1) !== escrita.at(-1)) return null;
+  const d = distancia(buscada, escrita, max);
+  return d <= max ? d : null;
+}
+
+/** Letras de diferencia (Levenshtein), o `max + 1` en cuanto se pasa. */
+function distancia(a: string, b: string, max: number): number {
+  if (Math.abs(a.length - b.length) > max) return max + 1;
+  let previa = Array.from({ length: b.length + 1 }, (_, j) => j);
+  for (let i = 1; i <= a.length; i++) {
+    const actual = [i];
+    let menor = i;
+    for (let j = 1; j <= b.length; j++) {
+      actual[j] = Math.min(previa[j]! + 1, actual[j - 1]! + 1, previa[j - 1]! + (a[i - 1] === b[j - 1] ? 0 : 1));
+      menor = Math.min(menor, actual[j]!);
     }
+    if (menor > max) return max + 1;
+    previa = actual;
   }
-  return [...formas];
+  return previa[b.length]!;
+}
+
+/**
+ * Dónde aparece `buscadas` seguidas dentro de `texto`, palabra por palabra,
+ * con las letras de diferencia que se perdonan a cada una. Devuelve cuántas
+ * letras hubo que perdonar en total, o `null` si no aparece.
+ */
+function aparece(buscadas: string[], texto: string[]): number | null {
+  let mejor: number | null = null;
+  for (let inicio = 0; inicio + buscadas.length <= texto.length; inicio++) {
+    let errores = 0;
+    let vale = true;
+    for (let k = 0; k < buscadas.length && vale; k++) {
+      const d = parecidas(buscadas[k]!, texto[inicio + k]!);
+      if (d === null) vale = false;
+      else errores += d;
+    }
+    if (vale && (mejor === null || errores < mejor)) mejor = errores;
+  }
+  return mejor;
 }
 
 /**
  * El lugar del catálogo que nombra el texto, si alguno.
  *
- * Coincide el nombre o una palabra clave como palabras enteras: «parque» no
- * se encuentra en «parqueadero». Si varias coinciden gana la más larga, que
- * es la más precisa —«terminal de Duitama» antes que «terminal»—, y a igual
- * largo, el lugar más usado.
+ * No es estricto, a propósito. El agente de n8n resume lo que dijo el cliente
+ * y el cliente escribe como habla, así que se compara palabra por palabra:
+ *
+ *  - Sin artículos ni preposiciones: «el terminal», «la terminal», «al
+ *    terminal», «del terminal» y «terminal» a secas son lo mismo. Antes
+ *    «terminal» solo no encontraba la palabra clave «el terminal».
+ *  - Con errores de escritura en las palabras largas: «terminl», «hopital»,
+ *    «alcadia». Una letra en las de 5 a 9, dos en las de 10 o más, siempre
+ *    con la primera y la última iguales. Las de cuatro letras o menos, y las
+ *    que llevan números, tienen que ser exactas.
+ *  - Un nombre con paréntesis vale también sin ellos: «Lago Sochagota
+ *    (malecón)» es «lago sochagota».
+ *  - Siempre palabras enteras: «parque» no está en «parqueadero».
+ *
+ * Si varias coinciden, gana la que nombra más palabras —«terminal de
+ * Duitama» antes que «terminal»—, luego la que necesitó menos correcciones,
+ * luego la más larga y, al final, el lugar más usado.
  */
 export function buscarLugar<T extends LugarBuscable>(
   texto: string,
   lugares: T[],
 ): { lugar: T; palabra: string } | null {
-  const enTexto = ` ${normalizarParaBuscar(texto)} `;
-  let mejor: { lugar: T; palabra: string; largo: number } | null = null;
+  const enTexto = palabrasQueCuentan(texto);
+  type Candidato = { lugar: T; palabra: string; palabras: number; errores: number; letras: number };
+  let mejor: Candidato | null = null;
+  const esMejor = (a: Candidato, b: Candidato | null) =>
+    !b ||
+    a.palabras > b.palabras ||
+    (a.palabras === b.palabras && a.errores < b.errores) ||
+    (a.palabras === b.palabras && a.errores === b.errores && a.letras > b.letras) ||
+    (a.palabras === b.palabras && a.errores === b.errores && a.letras === b.letras && a.lugar.uses > b.lugar.uses);
 
   for (const lugar of lugares) {
-    for (const palabra of [lugar.name, ...lugar.aliases]) {
-      const buscada = formasDe(palabra).find((forma) => enTexto.includes(` ${forma} `));
-      if (!buscada) continue;
-      if (
-        !mejor ||
-        buscada.length > mejor.largo ||
-        (buscada.length === mejor.largo && lugar.uses > mejor.lugar.uses)
-      ) {
-        mejor = { lugar, palabra, largo: buscada.length };
-      }
+    const formas = [lugar.name, lugar.name.replace(/\s*\([^)]*\)\s*/g, ' '), ...lugar.aliases];
+    for (const palabra of formas) {
+      const buscadas = palabrasQueCuentan(palabra);
+      if (buscadas.join('').length < 3) continue;
+      const errores = aparece(buscadas, enTexto);
+      if (errores === null) continue;
+      const candidato: Candidato = {
+        lugar,
+        // Para decir con qué se reconoció: la palabra clave o el nombre tal cual.
+        palabra: palabra === formas[1] ? lugar.name : palabra,
+        palabras: buscadas.length,
+        errores,
+        letras: buscadas.join(' ').length,
+      };
+      if (esMejor(candidato, mejor)) mejor = candidato;
     }
   }
   return mejor ? { lugar: mejor.lugar, palabra: mejor.palabra } : null;
