@@ -21,7 +21,7 @@ import {
 import { ApiError, api } from '../api/client';
 import { usePlaces, usePuede } from '../api/queries';
 import { actions, useLive } from '../live/store';
-import { FormularioLugar, FormularioZona } from '../components/FormulariosCatalogo';
+import { FormularioLugar, FormularioMoverZona, FormularioZona } from '../components/FormulariosCatalogo';
 
 type Tab = 'zonas' | 'lugares';
 
@@ -148,6 +148,7 @@ function TarjetaZona({
   const [guardando, setGuardando] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [marcando, setMarcando] = useState(false);
+  const [moviendo, setMoviendo] = useState(false);
 
   /** Hace de esta zona el punto de partida de las carreras que no se ubican. */
   const usarDePartida = async () => {
@@ -222,6 +223,11 @@ function TarjetaZona({
               {zone.kind === 'urbano' ? 'urbano' : 'vereda'}
             </StatusPill>
             {editable ? (
+              <Button size="sm" variant="ghost" onClick={() => setMoviendo(true)}>
+                Mover
+              </Button>
+            ) : null}
+            {editable ? (
               <Button size="sm" onClick={abrirOCerrar}>
                 {open ? 'Cerrar' : 'Editar'}
               </Button>
@@ -229,6 +235,8 @@ function TarjetaZona({
           </>
         }
       />
+
+      <FormularioMoverZona zona={zone} open={moviendo} onClose={() => setMoviendo(false)} />
 
       <div className="grid grid-cols-3 gap-2">
         {vistas.map((wave) => (

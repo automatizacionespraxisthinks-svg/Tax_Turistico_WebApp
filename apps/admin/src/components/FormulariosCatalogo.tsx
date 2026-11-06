@@ -2,11 +2,13 @@ import { useEffect, useState } from 'react';
 import type { KeyboardEvent } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { AlertTriangle, CheckCircle2, MessageSquareQuote, Plus, Trash2, X } from 'lucide-react';
-import type { Place, Point } from '@tax/shared';
+import type { Place, Point, Zone } from '@tax/shared';
 import {
   MAX_PALABRAS_CLAVE,
   ZONA_POR_DEFECTO,
   buscarLugar,
+  cambiosZonaSchema,
+  centroYRadioDe,
   normalizarParaBuscar,
   nucleoDe,
   nuevaZonaSchema,
@@ -175,6 +177,143 @@ export function FormularioZona({ open, onClose }: { open: boolean; onClose: () =
           zonas={zonas}
           radioKm={radio}
           tipoVistaPrevia={tipo}
+          className="min-h-96"
+        />
+      </div>
+    </Modal>
+  );
+}
+
+/* --------------------------------------------- mover o cambiar tamaño --- */
+
+/**
+ * Mover una zona o cambiarle el tamaño.
+ *
+ * El centro y el radio no se guardan en la tabla —solo queda el polígono—, así
+ * que se vuelven a sacar de él con `centroYRadioDe` para rellenar el
+ * formulario. Antes la ficha de la zona solo dejaba cambiar las oleadas: para
+ * corregir un círculo mal puesto había que borrar la zona y crearla otra vez,
+ * con los lugares y las carreras que colgaban de ella.
+ */
+export function FormularioMoverZona({
+  zona,
+  open,
+  onClose,
+}: {
+  zona: Zone | null;
+  open: boolean;
+  onClose: () => void;
+}) {
+  const zonas = useLive((s) => s.zones);
+  const toast = useToast();
+  const [radio, setRadio] = useState(0);
+  const [centro, setCentro] = useState<Point>();
+  const [guardando, setGuardando] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!open || !zona) return;
+    const actual = centroYRadioDe(zona.polygon);
+    setCentro(actual.center);
+    setRadio(actual.radiusKm);
+    setError(null);
+  }, [open, zona]);
+
+  // Contra las demás, no contra todas: una zona siempre se toca consigo misma.
+  const otras = zona ? zonas.filter((z) => z.id !== zona.id) : zonas;
+  const encima =
+    centro && radio > 0
+      ? otras.find((z) =>
+          poligonosSeTocan(
+            poligonoCircular(centro.lat, centro.lng, radio).coordinates[0]!.map(([lng, lat]) => ({ lat, lng })),
+            z.polygon,
+          ),
+        )
+      : undefined;
+
+  const cambios = { center: centro, radiusKm: radio };
+  const invalido = centro
+    ? primerError(cambiosZonaSchema.safeParse(cambios))
+    : 'Toca el mapa para poner el centro';
+
+  const guardar = async () => {
+    if (!zona || invalido || encima) return;
+    setGuardando(true);
+    setError(null);
+    try {
+      await api.patch(`/v1/admin/zones/${zona.id}`, cambios);
+      await actions.refreshZones();
+      toast.push({
+        tone: 'positive',
+        title: 'Zona actualizada',
+        description: `${zona.name}: las carreras que entren de ahora en adelante se despachan con el círculo nuevo.`,
+      });
+      onClose();
+    } catch (causa) {
+      setError(mensajeDe(causa));
+    } finally {
+      setGuardando(false);
+    }
+  };
+
+  return (
+    <Modal
+      open={open}
+      onClose={onClose}
+      width="lg"
+      title={zona ? `Mover ${zona.name}` : 'Mover la zona'}
+      subtitle="El centro y el tamaño del círculo. Las carreras ya creadas conservan la zona que tenían."
+      footer={
+        <>
+          <Button variant="ghost" onClick={onClose}>
+            Cancelar
+          </Button>
+          <Button
+            variant="primary"
+            loading={guardando}
+            disabled={Boolean(invalido || encima)}
+            onClick={() => void guardar()}
+          >
+            Guardar
+          </Button>
+        </>
+      }
+    >
+      <div className="grid gap-5 md:grid-cols-[minmax(0,1fr)_minmax(0,1.35fr)]">
+        <div className="space-y-4">
+          <Field label="Radio (km)" required hint="De 0,3 a 15 km. El círculo punteado del mapa es la zona.">
+            <Input
+              type="number"
+              step="0.1"
+              min="0.3"
+              max="15"
+              value={Number.isFinite(radio) ? radio : ''}
+              onChange={(e) => setRadio(Number(e.target.value))}
+            />
+          </Field>
+
+          <p className="text-caption text-ink-muted">
+            Toca el mapa, o pega un enlace de Google Maps, para mover el centro.
+          </p>
+
+          {encima ? (
+            <Banner tone="critical" icon={<AlertTriangle className="size-4" />}>
+              Se monta sobre «{encima.name}». Mueve el centro o achica el radio.
+            </Banner>
+          ) : null}
+          {error ? (
+            <Banner tone="critical" icon={<AlertTriangle className="size-4" />}>
+              {error}
+            </Banner>
+          ) : null}
+        </div>
+
+        <SelectorDePunto
+          valor={centro}
+          onCambiar={setCentro}
+          zonas={otras}
+          radioKm={radio}
+          tipoVistaPrevia={zona?.kind ?? 'urbano'}
           className="min-h-96"
         />
       </div>

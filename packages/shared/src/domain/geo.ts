@@ -82,6 +82,34 @@ export function poligonoCircular(lat: number, lng: number, radioKm: number, lado
 }
 
 /**
+ * El centro y el radio de una zona, leídos de su propio polígono.
+ *
+ * Las zonas se dibujan como círculos con `poligonoCircular`, pero en la tabla
+ * solo queda el polígono: el centro y el radio con los que se crearon no se
+ * guardan en ninguna parte. Para poder moverlas o cambiarles el tamaño hay
+ * que volver a sacar esos dos números de los vértices.
+ *
+ * Es exacto mientras el polígono venga de `poligonoCircular`, que es el único
+ * camino por el que se crean. El radio sale del vértice más lejano, así que
+ * no depende del orden en que estén.
+ */
+export function centroYRadioDe(poligono: Point[]): { center: Point; radiusKm: number } {
+  if (poligono.length === 0) return { center: { lat: 0, lng: 0 }, radiusKm: 0 };
+
+  const lats = poligono.map((p) => p.lat);
+  const lngs = poligono.map((p) => p.lng);
+  const center = {
+    lat: (Math.min(...lats) + Math.max(...lats)) / 2,
+    lng: (Math.min(...lngs) + Math.max(...lngs)) / 2,
+  };
+
+  const radio = poligono.reduce((lejos, p) => Math.max(lejos, haversineKm(center, p)), 0);
+  // Dos decimales: es la precisión que el panel deja escribir, y así el campo
+  // no aparece con un 1,9999999 que nadie escribió.
+  return { center, radiusKm: Math.round(radio * 100) / 100 };
+}
+
+/**
  * Si dos polígonos se tocan: algún vértice de uno cae dentro del otro. Con
  * zonas circulares de 64 lados basta para no dejar crear una zona encima de
  * otra, que haría ambiguo en cuál cae un punto.

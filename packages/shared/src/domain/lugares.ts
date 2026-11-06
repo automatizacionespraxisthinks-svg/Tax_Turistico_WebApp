@@ -252,9 +252,30 @@ export const cambiosZonaSchema = z
         'Cada oleada busca más lejos que la anterior',
       )
       .optional(),
+    /*
+     * Mover la zona o cambiarle el tamaño.
+     *
+     * Van juntos a propósito: el polígono se vuelve a generar entero con los
+     * dos, así que mandar uno solo dejaría el otro a medias. Los límites son
+     * los mismos que al crearla.
+     */
+    center: pointSchema.optional(),
+    radiusKm: z
+      .number()
+      .min(0.3, 'El radio mínimo es 0,3 km')
+      .max(15, 'El radio máximo es 15 km')
+      .optional(),
   })
   .refine(
-    (v) => v.tortuosity !== undefined || v.waves !== undefined || v.esReferencia !== undefined,
+    (v) => (v.center === undefined) === (v.radiusKm === undefined),
+    'El centro y el radio se cambian juntos',
+  )
+  .refine(
+    (v) =>
+      v.tortuosity !== undefined ||
+      v.waves !== undefined ||
+      v.esReferencia !== undefined ||
+      v.center !== undefined,
     'No hay nada que cambiar',
   );
 export type CambiosZona = z.infer<typeof cambiosZonaSchema>;

@@ -5,6 +5,7 @@ import type { CambiosLugar, CambiosZona, NuevaZona, NuevoLugar, Point } from '@t
 import {
   ZONA_POR_DEFECTO,
   buscarLugar,
+  centroYRadioDe,
   haversineKm,
   nucleoDe,
   poligonoCircular,
@@ -115,15 +116,51 @@ export class CatalogoService {
   /** Las oleadas y el factor de tortuosidad de una zona. */
   async cambiarZona(zoneId: string, cambios: CambiosZona, actor: ActorDelPanel) {
     const [antes] = await this.db
-      .select({ name: zones.name, tortuosity: zones.tortuosity, waves: zones.waves, esReferencia: zones.esReferencia })
+      .select({
+        name: zones.name,
+        tortuosity: zones.tortuosity,
+        waves: zones.waves,
+        esReferencia: zones.esReferencia,
+        polygon: zones.polygon,
+      })
       .from(zones)
       .where(eq(zones.id, zoneId))
       .limit(1);
     if (!antes) throw new AppError('NOT_FOUND', 'Esa zona no existe');
 
+    /*
+     * Mover la zona o cambiarle el tamaño.
+     *
+     * El polígono se vuelve a generar con la misma función que al crearla, y
+     * se comprueba igual que no se monte sobre otra, excluyéndose a sí misma:
+     * por supuesto que se toca con su propio sitio.
+     *
+     * Las carreras ya creadas conservan la zona que tenían, que es dato
+     * histórico; el cambio manda sobre las que entren de aquí en adelante.
+     */
+    const geometria =
+      cambios.center && cambios.radiusKm
+        ? poligonoCircular(cambios.center.lat, cambios.center.lng, cambios.radiusKm)
+        : undefined;
+
+    if (geometria) {
+      const nueva = comoPuntos(geometria.coordinates[0]!);
+      const encima = this.zonas
+        .all()
+        .filter((z) => z.id !== zoneId)
+        .find((z) => poligonosSeTocan(nueva, comoPuntos(z.polygon.coordinates[0] ?? [])));
+      if (encima) {
+        throw new AppError(
+          'ZONE_OVERLAP',
+          `Se monta sobre «${encima.name}». Mueve el centro o achica el radio.`,
+        );
+      }
+    }
+
     const despues = {
       tortuosity: cambios.tortuosity ?? antes.tortuosity,
       waves: cambios.waves ? [...cambios.waves].sort((a, b) => a.wave - b.wave) : antes.waves,
+      ...(geometria ? { polygon: geometria } : {}),
     };
 
     await this.db.transaction(async (tx) => {
@@ -154,7 +191,7 @@ export class CatalogoService {
           tx as unknown as Database,
         );
       }
-      if (cambios.tortuosity === undefined && cambios.waves === undefined) return;
+      if (cambios.tortuosity === undefined && cambios.waves === undefined && !geometria) return;
 
       await tx.update(zones).set({ ...despues, updatedAt: new Date() }).where(eq(zones.id, zoneId));
       await this.audit.record(
@@ -162,11 +199,27 @@ export class CatalogoService {
           actorId: actor.id,
           actorName: actor.name,
           role: actor.role,
-          action: 'Cambió las oleadas de una zona',
+          action: geometria ? 'Movió o cambió el tamaño de una zona' : 'Cambió las oleadas de una zona',
           entity: 'zones',
           entityId: antes.name,
-          before: { tortuosity: antes.tortuosity, waves: antes.waves },
-          after: despues,
+          /*
+           * En la bitácora va el centro y el radio, no el polígono: son los
+           * dos números que alguien escribió, y 64 vértices por cambio
+           * dejarían el registro ilegible.
+           */
+          before: {
+            tortuosity: antes.tortuosity,
+            waves: antes.waves,
+            ...(geometria ? centroYRadioDe(comoPuntos(antes.polygon.coordinates[0] ?? [])) : {}),
+          },
+          after: geometria
+            ? {
+                tortuosity: despues.tortuosity,
+                waves: despues.waves,
+                center: cambios.center,
+                radiusKm: cambios.radiusKm,
+              }
+            : despues,
           ip: actor.ip,
         },
         tx as unknown as Database,
