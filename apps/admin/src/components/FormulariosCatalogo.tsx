@@ -308,12 +308,15 @@ export function FormularioMoverZona({
           ) : null}
         </div>
 
+        {/* `ZoneKind` también admite «vereda», que el selector no conoce: para
+            la vista previa cuenta como rural, igual que la etiqueta «Vereda»
+            del formulario de creación. */}
         <SelectorDePunto
           valor={centro}
           onCambiar={setCentro}
           zonas={otras}
           radioKm={radio}
-          tipoVistaPrevia={zona?.kind ?? 'urbano'}
+          tipoVistaPrevia={zona?.kind === 'urbano' ? 'urbano' : 'rural'}
           className="min-h-96"
         />
       </div>
