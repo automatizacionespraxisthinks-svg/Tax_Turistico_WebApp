@@ -163,6 +163,13 @@ export const rides = pgTable(
      */
     intentoDespacho: integer('intento_despacho').notNull().default(0),
     cancelReason: text('cancel_reason'),
+    /**
+     * Quién la canceló y, si fue el conductor, la clave del motivo
+     * (`MOTIVOS_CANCELACION_CONDUCTOR`). Con esto Reportes cuenta las
+     * cancelaciones por quién y por conductor sin leer la bitácora entera.
+     */
+    cancelledBy: transitionActor('cancelled_by'),
+    cancelCode: text('cancel_code'),
 
     /**
      * El operador autorizó una segunda carrera simultánea para este cliente.

@@ -885,13 +885,28 @@ export class RidesService {
     return updated;
   }
 
-  async cancel(rideId: string, reason: string, actor: Actor) {
+  /**
+   * Cancela la carrera. Queda dicho quién lo hizo (`cancelledBy`) y, si fue
+   * el conductor, la clave del motivo (`cancelCode`): Reportes cuenta con
+   * eso. El evento a n8n lleva lo mismo, para que el aviso al cliente pueda
+   * distinguir quién la canceló.
+   */
+  async cancel(rideId: string, reason: string, actor: Actor, opciones: { code?: string; at?: Point } = {}) {
     const ride = await this.byId(rideId);
 
     const updated = await this.transition(rideId, 'CANCELLED', actor, {
       note: reason,
-      patch: { cancelReason: reason, finishedAt: new Date() },
-      event: { type: 'ride.cancelled', payload: { reason } },
+      at: opciones.at,
+      patch: {
+        cancelReason: reason,
+        cancelledBy: actor.kind,
+        cancelCode: opciones.code ?? null,
+        finishedAt: new Date(),
+      },
+      event: {
+        type: 'ride.cancelled',
+        payload: { reason, cancelledBy: actor.kind, ...(opciones.code ? { code: opciones.code } : {}) },
+      },
     });
 
     // Las ofertas vivas dejan de tener sentido y el conductor queda libre.

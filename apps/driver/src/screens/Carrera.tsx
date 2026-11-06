@@ -1,13 +1,14 @@
 import { useEffect, useState } from 'react';
 import { AnimatePresence, motion } from 'motion/react';
 import { Camera, Flag, LocateFixed, Lock, Navigation, Phone, UserCheck, X } from 'lucide-react';
-import type { RideStatus } from '@tax/shared';
+import type { MotivoCancelacionConductor, RideStatus } from '@tax/shared';
 import { RIDE_STATUS_LABEL, formatDistance } from '@tax/shared';
 import { BANDA_DE_ESTADO, StatusPill, cn, transition } from '@tax/ui';
 import { BotonDeEtapa, tonoDeEtapa } from '../components/BotonDeEtapa';
 import { ActionBar, AddressBlock, Screen } from '../components/Chrome';
 import { MedioDePago } from '../components/MedioDePago';
 import { AvisoDeUbicacion, IrConMapas } from '../components/IrConMapas';
+import { CancelarCarrera } from '../components/CancelarCarrera';
 import { api } from '../api/client';
 import type { OfferedRide } from '../state/session';
 
@@ -42,6 +43,7 @@ export function Carrera({
   onArrived,
   onBoard,
   onFinish,
+  onCancel,
 }: {
   offer: OfferedRide;
   status: ActiveStatus;
@@ -50,6 +52,8 @@ export function Carrera({
   onArrived: () => void;
   onBoard: () => void;
   onFinish: () => void;
+  /** Cancelar por causa mayor; devuelve el error o `null`. */
+  onCancel: (motivo: MotivoCancelacionConductor, detalle?: string) => Promise<string | null>;
 }) {
   // Sin punto (carrera sin ubicar) no hay distancia que medir: el conductor
   // se guía por la dirección y marca «Llegué» cuando lo encuentre.
@@ -205,6 +209,9 @@ export function Carrera({
             Una carrera dura al menos {minRideMinutes} minutos desde que sube el pasajero.
           </p>
         ) : null}
+
+        {/* Solo antes de recoger al cliente: con él a bordo, se termina. */}
+        {status !== 'IN_PROGRESS' ? <CancelarCarrera code={offer.code} onConfirmar={onCancel} /> : null}
       </ActionBar>
     </>
   );

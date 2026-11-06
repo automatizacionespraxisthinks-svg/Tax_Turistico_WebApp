@@ -748,6 +748,15 @@ cópialo directo a las credenciales de n8n.
 - **`MIN_DURACION_CARRERA_MIN`** (10 por defecto): minutos con el pasajero a
   bordo antes de poder finalizar. **`PHOTO_RETENTION_DAYS`** (30): cuánto se
   guarda la foto del lugar; se borra con la purga de madrugada.
+- **El conductor puede cancelar (migración `0020_cancelacion_del_conductor`).**
+  Añade `cancelled_by` y `cancel_code` a `rides` y llena `cancelled_by` de las
+  canceladas viejas desde la bitácora; no hay que hacer nada a mano. Cuando
+  cancela el conductor, `ride.cancelled` llega a n8n con `data.cancelledBy:
+  "driver"`, `data.code` (la clave del motivo) y `data.reason` (el motivo en
+  palabras). El flujo de avisos solo distingue hoy si la canceló el cliente:
+  en este caso le manda al cliente el aviso genérico de cancelación. Si se
+  quiere otro mensaje («el conductor tuvo un imprevisto, ¿le buscamos otro
+  taxi?»), hace falta una rama que mire `cancelledBy`.
 - **Las exportaciones no necesitan volumen.** Los Excel y PDF se guardan en
   la tabla `report_exports` (migración `0011_exportaciones`) y se borran solos
   a los siete días. Llevan nombres y teléfonos de clientes, así que viajan con

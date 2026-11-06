@@ -117,7 +117,12 @@ export function enPalabras(
   const abiertas = r.enCurso;
   const desglose = [
     r.finalizadas ? plural(r.finalizadas, 'terminada', 'terminadas') : '',
-    r.canceladas ? plural(r.canceladas, 'cancelada', 'canceladas') : '',
+    r.canceladas
+      ? plural(r.canceladas, 'cancelada', 'canceladas') +
+        (r.canceladasPorConductor
+          ? ` (${r.canceladasPorConductor} ${individual ? (r.canceladasPorConductor === 1 ? 'la canceló él' : 'las canceló él') : 'por el conductor'})`
+          : '')
+      : '',
     r.sinAsignar ? `${r.sinAsignar} ${r.sinAsignar === 1 ? 'se quedó' : 'se quedaron'} sin taxi` : '',
     abiertas ? `${abiertas} ${abiertas === 1 ? 'sigue abierta' : 'siguen abiertas'}` : '',
   ].filter(Boolean);

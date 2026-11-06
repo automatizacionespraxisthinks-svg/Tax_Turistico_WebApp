@@ -606,6 +606,30 @@ export function App() {
                     { at: positionWatcher.current?.last() },
                   )
                 }
+                onCancel={async (motivo, detalle) => {
+                  /*
+                   * Directo, sin la cola de sin conexión: cancelar más tarde,
+                   * cuando vuelva la señal, podría caer sobre una carrera que
+                   * ya cambió. Sin señal se le dice, y que llame a la oficina.
+                   */
+                  try {
+                    await api.post(`/v1/driver/rides/${rideId}/cancel`, {
+                      motivo,
+                      detalle,
+                      at: positionWatcher.current?.last(),
+                    });
+                    const code = session.offer?.code;
+                    dispatch({ type: 'back_to_available' });
+                    setNotice(`Cancelaste la carrera ${code ?? ''}. La oficina ya tiene el motivo.`);
+                    return null;
+                  } catch (error) {
+                    if (error instanceof ApiError && error.isOffline) {
+                      return 'Sin señal: no se pudo cancelar. Si es urgente, llama a la oficina.';
+                    }
+                    void restore();
+                    return error instanceof ApiError ? error.message : 'No se pudo cancelar. Inténtalo de nuevo.';
+                  }
+                }}
               />
             ) : null}
 

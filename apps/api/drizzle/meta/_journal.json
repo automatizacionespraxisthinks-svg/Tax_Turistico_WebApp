@@ -141,6 +141,13 @@
       "when": 1793745447837,
       "tag": "0019_zona_de_referencia",
       "breakpoints": true
+    },
+    {
+      "idx": 20,
+      "version": "7",
+      "when": 1793934930724,
+      "tag": "0020_cancelacion_del_conductor",
+      "breakpoints": true
     }
   ]
 }

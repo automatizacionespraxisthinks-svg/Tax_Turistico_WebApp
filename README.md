@@ -155,6 +155,18 @@ El panel no inventa acciones: cada botón sale de la tabla de transiciones.
   el entorno de la API: la PWA lo pide al abrir, así que cambiarlo no obliga a
   recompilarla, y con `0` la restricción queda desactivada. La oficina sí
   puede cerrar antes.
+- **El conductor cancela** (5/11/2026, migración 0020): por una causa
+  mayor y solo antes de recoger al cliente (asignada o con «Llegué»; con el
+  pasajero a bordo la API lo rechaza). La PWA pide confirmación y un motivo
+  de la lista (falla mecánica, accidente, emergencia, el cliente no aparece u
+  otro, y con «Otro» hay que escribir qué pasó). La carrera guarda quién la
+  canceló (`cancelled_by`, para todas, también las viejas desde la bitácora)
+  y la clave del motivo (`cancel_code`); la bitácora lleva su nombre y dónde
+  estaba, el panel recibe un aviso rojo con alarma, y Reportes, el Excel y el
+  PDF cuentan las canceladas por el conductor, en general y por cada uno, con
+  los motivos agrupados por quién canceló. El evento `ride.cancelled` lleva
+  `cancelledBy: 'driver'` y `code`. Prueba:
+  `src/test/e2e-cancelacion-del-conductor.ts`.
 - **Foto del lugar**: el cliente la manda por WhatsApp y n8n la entrega con la
   carrera (`pickupPhotoUrl`) o después (`POST /v1/rides/:id/photo`, el archivo
   o un enlace). El conductor la ve mientras va a recogerlo, la oficina en la

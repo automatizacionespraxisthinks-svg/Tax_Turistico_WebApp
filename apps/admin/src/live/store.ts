@@ -402,9 +402,9 @@ export function startLive(): () => void {
           ? state.alerts.filter((a) => !(a.kind === 'line_down' && a.lineId === alert.lineId))
           : state.alerts;
       emit({ alerts: [recibida, ...vigentes].slice(0, 5) });
-      // Suena lo que necesita a alguien ya: una línea que dejó de atender o
-      // una carrera que se quedó sin conductor.
-      if (alert.kind === 'line_down' || alert.kind === 'no_driver') sonarAlarma();
+      // Suena lo que necesita a alguien ya: una línea que dejó de atender, una
+      // carrera que se quedó sin conductor o una que el conductor canceló.
+      if (alert.kind === 'line_down' || alert.kind === 'no_driver' || alert.kind === 'driver_cancelled') sonarAlarma();
       if (alert.kind === 'line_down' || alert.kind === 'line_up') void loadWaha().catch(reportError);
     },
   });

@@ -1,10 +1,13 @@
 import { describe, expect, it } from 'vitest';
 import {
+  CANCELABLE_POR_EL_CONDUCTOR,
+  cancelacionConductorSchema,
   diasDelRango,
   fechasDelRango,
   filtrosDeInformeSchema,
   periodoDelRango,
   rangoDePeriodo,
+  textoDelMotivo,
   textoDelRango,
 } from '@tax/shared';
 import { resumir, type FilaCarrera } from '../modules/reports/exports.data';
@@ -49,6 +52,8 @@ function carrera(cambios: Partial<FilaCarrera> = {}): FilaCarrera {
     linea: 'Línea 1',
     intentos: 1,
     motivoCancelacion: null,
+    canceladaPor: null,
+    codigoCancelacion: null,
     finalizada: new Date('2026-10-22T13:40:00Z'),
     intervenida: false,
     ...cambios,
@@ -204,6 +209,54 @@ describe('agregados del tablero', () => {
     expect(r.porConductor).toEqual([
       expect.objectContaining({ id: 'c1', asignadas: 2, finalizadas: 1, canceladas: 1, km: 3 }),
     ]);
-    expect(r.cancelaciones).toEqual([{ motivo: 'Sin motivo escrito', carreras: 1 }]);
+    expect(r.cancelaciones).toEqual([{ quien: 'Sin dato', motivo: 'Sin motivo escrito', carreras: 1 }]);
+  });
+
+  it('separa las que canceló el conductor y las agrupa por el motivo de la lista', () => {
+    const r = resumir([
+      carrera(),
+      carrera({
+        estado: 'CANCELLED',
+        canceladaPor: 'driver',
+        codigoCancelacion: 'falla_mecanica',
+        motivoCancelacion: 'Falla mecánica o pinchazo: se pinchó la llanta',
+      }),
+      carrera({
+        estado: 'CANCELLED',
+        canceladaPor: 'driver',
+        codigoCancelacion: 'falla_mecanica',
+        motivoCancelacion: 'Falla mecánica o pinchazo: se recalentó',
+      }),
+      carrera({ estado: 'CANCELLED', canceladaPor: 'operator', motivoCancelacion: 'El cliente llamó a cancelar' }),
+    ]);
+    expect(r.canceladas).toBe(3);
+    expect(r.canceladasPorConductor).toBe(2);
+    expect(r.porConductor).toEqual([expect.objectContaining({ id: 'c1', canceladas: 3, canceladasPorEl: 2 })]);
+    expect(r.cancelaciones).toEqual([
+      { quien: 'Conductor', motivo: 'Falla mecánica o pinchazo', carreras: 2 },
+      { quien: 'Oficina', motivo: 'El cliente llamó a cancelar', carreras: 1 },
+    ]);
+  });
+});
+
+describe('cancelación del conductor', () => {
+  it('pide un motivo de la lista, y con «Otro», qué pasó', () => {
+    expect(cancelacionConductorSchema.safeParse({ motivo: 'accidente' }).success).toBe(true);
+    expect(cancelacionConductorSchema.safeParse({}).success).toBe(false);
+    expect(cancelacionConductorSchema.safeParse({ motivo: 'cansancio' }).success).toBe(false);
+    expect(cancelacionConductorSchema.safeParse({ motivo: 'otro' }).success).toBe(false);
+    expect(cancelacionConductorSchema.safeParse({ motivo: 'otro', detalle: '   ok  ' }).success).toBe(false);
+    expect(cancelacionConductorSchema.safeParse({ motivo: 'otro', detalle: 'Se varó el carro' }).success).toBe(true);
+    expect(cancelacionConductorSchema.safeParse({ motivo: 'accidente', detalle: 'x'.repeat(201) }).success).toBe(false);
+  });
+
+  it('escribe el motivo con el detalle, o solo lo que contó si fue «Otro»', () => {
+    expect(textoDelMotivo('falla_mecanica')).toBe('Falla mecánica o pinchazo');
+    expect(textoDelMotivo('falla_mecanica', 'se pinchó')).toBe('Falla mecánica o pinchazo: se pinchó');
+    expect(textoDelMotivo('otro', 'Se varó el carro')).toBe('Se varó el carro');
+  });
+
+  it('solo antes de recoger al cliente', () => {
+    expect([...CANCELABLE_POR_EL_CONDUCTOR]).toEqual(['ASSIGNED', 'DRIVER_ARRIVED']);
   });
 });

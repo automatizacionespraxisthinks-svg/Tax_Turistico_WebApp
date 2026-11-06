@@ -12,6 +12,7 @@ import {
   haversineKm,
   maskPhone,
   OLEADA_A_TODOS,
+  QUIEN_CANCELA,
   enlaceDeMapaValido,
   transitionsFrom,
 } from '@tax/shared';
@@ -145,6 +146,8 @@ function Resumen({ ride, driver }: { ride: Ride; driver?: Driver }) {
         </Meta>
       </div>
 
+      {ride.status === 'CANCELLED' ? <QuienCancelo ride={ride} /> : null}
+
       {ride.customerId ? <TelefonoDePrueba ride={ride} /> : null}
 
       <div className="rounded-md border border-line">
@@ -225,6 +228,29 @@ function Resumen({ ride, driver }: { ride: Ride; driver?: Driver }) {
 
       <RideActions ride={ride} />
     </div>
+  );
+}
+
+/**
+ * Quién canceló y por qué, arriba de todo. El nombre sale de la bitácora: el
+ * último paso a «Cancelada».
+ */
+function QuienCancelo({ ride }: { ride: Ride }) {
+  const paso = [...ride.history].reverse().find((h) => h.to === 'CANCELLED');
+  const quien = ride.cancelledBy ?? paso?.actor;
+  const nombre = paso && paso.actor !== 'system' ? paso.actorName : undefined;
+  const delConductor = quien === 'driver';
+  return (
+    <Banner tone={delConductor ? 'critical' : 'neutral'} icon={<Ban className="size-4" />}>
+      <span className="font-medium">
+        {delConductor
+          ? `La canceló el conductor${nombre ? ` ${nombre}` : ''}, antes de recoger al cliente.`
+          : quien
+            ? `Cancelada por: ${QUIEN_CANCELA[quien].toLowerCase()}${nombre ? ` (${nombre})` : ''}.`
+            : 'Cancelada.'}
+      </span>{' '}
+      {ride.cancelReason ? `Motivo: ${ride.cancelReason}` : 'Sin motivo registrado.'}
+    </Banner>
   );
 }
 

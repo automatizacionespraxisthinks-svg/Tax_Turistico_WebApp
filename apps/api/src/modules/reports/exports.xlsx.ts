@@ -1,5 +1,5 @@
 import ExcelJS from 'exceljs';
-import type { TableroInforme } from '@tax/shared';
+import { QUIEN_CANCELA, type TableroInforme } from '@tax/shared';
 import { comoTextoPlano } from './informes.texto';
 import {
   formatoFechaHora,
@@ -64,6 +64,7 @@ function hojaCarreras(libro: ExcelJS.Workbook, filas: FilaCarrera[]): void {
       { titulo: 'Línea', ancho: 12 },
       { titulo: 'Lanzamientos', ancho: 13 },
       { titulo: 'Con operador', ancho: 13 },
+      { titulo: 'Cancelada por', ancho: 14 },
       { titulo: 'Motivo de cancelación', ancho: 30 },
       { titulo: 'Finalizada', ancho: 17, formato: FECHA_HORA },
     ],
@@ -90,6 +91,7 @@ function hojaCarreras(libro: ExcelJS.Workbook, filas: FilaCarrera[]): void {
       f.linea ?? '',
       f.intentos,
       f.intervenida ? 'Sí' : 'No',
+      f.canceladaPor ? QUIEN_CANCELA[f.canceladaPor] : '',
       f.motivoCancelacion ?? '',
       f.finalizada ? paraExcel(f.finalizada) : null,
     ]),
@@ -130,6 +132,7 @@ function hojaResumen(
     ['Carreras creadas', r.creadas],
     ['Finalizadas', r.finalizadas],
     ['Canceladas', r.canceladas],
+    ['Canceladas por el conductor', r.canceladasPorConductor],
     ['Sin asignar', r.sinAsignar],
     ['En curso al generar', r.enCurso],
     ['Hora pico', r.horaPico ? `${r.horaPico.hora}:00 (${r.horaPico.carreras} carreras)` : null],
@@ -162,6 +165,7 @@ function hojasDeResumen(libro: ExcelJS.Workbook, periodo: Periodo, tablero?: Tab
         { titulo: 'Tomadas', ancho: 10 },
         { titulo: 'Finalizadas', ancho: 12 },
         { titulo: 'Canceladas', ancho: 12 },
+        { titulo: 'Las canceló él', ancho: 14 },
         { titulo: 'Ofertas', ancho: 10 },
         { titulo: 'Aceptadas', ancho: 11 },
         { titulo: 'Rechazadas', ancho: 12 },
@@ -180,6 +184,7 @@ function hojasDeResumen(libro: ExcelJS.Workbook, periodo: Periodo, tablero?: Tab
         c.asignadas,
         c.finalizadas,
         c.canceladas,
+        c.canceladasPorEl,
         c.ofertas,
         c.aceptadas,
         c.rechazadas,
@@ -224,6 +229,18 @@ function hojasDeResumen(libro: ExcelJS.Workbook, periodo: Periodo, tablero?: Tab
       { titulo: 'Canceladas', ancho: 12 },
     ],
     r.porZona.map((z) => [z.zona, z.tipo, z.carreras, z.finalizadas, z.canceladas]),
+  );
+
+  // Quién canceló y por qué: las del conductor, por el motivo de la lista.
+  hoja(
+    libro,
+    'Cancelaciones',
+    [
+      { titulo: 'Quién', ancho: 14 },
+      { titulo: 'Motivo', ancho: 44 },
+      { titulo: 'Carreras', ancho: 10 },
+    ],
+    r.cancelaciones.map((c) => [c.quien, c.motivo, c.carreras]),
   );
 
   hoja(

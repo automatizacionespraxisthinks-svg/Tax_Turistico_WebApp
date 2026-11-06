@@ -1,7 +1,13 @@
 import { Body, Controller, Get, Param, ParseUUIDPipe, Post, Req, Res, UseGuards } from '@nestjs/common';
 import type { FastifyReply, FastifyRequest } from 'fastify';
 import { z } from 'zod';
-import { pointSchema, haversineKm } from '@tax/shared';
+import {
+  CANCELABLE_POR_EL_CONDUCTOR,
+  cancelacionConductorSchema,
+  haversineKm,
+  pointSchema,
+  textoDelMotivo,
+} from '@tax/shared';
 import { zodBody } from '../../common/zod.pipe';
 import { AppError } from '../../common/problem';
 import { loadEnv } from '../../config/env';
@@ -10,8 +16,10 @@ import { RidesService, type Actor } from './rides.service';
 import { DispatchService } from '../dispatch/dispatch.service';
 import { FleetService } from '../fleet/fleet.service';
 import { FotosService } from './fotos.service';
+import { RealtimeGateway } from '../../realtime/realtime.gateway';
 
 const atSchema = z.object({ at: pointSchema.optional() });
+const cancelarSchema = cancelacionConductorSchema.and(atSchema);
 
 /**
  * Comandos del conductor sobre su carrera.
@@ -29,6 +37,7 @@ export class DriverRidesController {
     private readonly dispatch: DispatchService,
     private readonly fleet: FleetService,
     private readonly fotos: FotosService,
+    private readonly realtime: RealtimeGateway,
   ) {}
 
   /**
@@ -205,6 +214,51 @@ export class DriverRidesController {
   }
 
   /** Comprueba que la carrera es de este conductor antes de dejar tocarla. */
+  /**
+   * El conductor cancela su carrera por una causa mayor, con motivo.
+   *
+   * Solo antes de recoger al cliente: asignada o en el lugar. Con el pasajero
+   * a bordo ya no: la carrera se termina, o la oficina decide. La máquina de
+   * estados también lo impide; aquí se dice con palabras del conductor.
+   *
+   * Queda en la bitácora de la carrera (con dónde estaba el conductor), en la
+   * auditoría y en Reportes, y la oficina recibe una alerta: el cliente se
+   * quedó sin taxi y alguien tiene que ocuparse.
+   */
+  @Post(':rideId/cancel')
+  async cancel(
+    @Req() request: FastifyRequest,
+    @Param('rideId', ParseUUIDPipe) rideId: string,
+    @Body(zodBody(cancelarSchema)) body: z.infer<typeof cancelarSchema>,
+  ) {
+    const driver = requireDriver(request);
+    const ride = await this.ownRide(rideId, driver.id);
+    if (!(CANCELABLE_POR_EL_CONDUCTOR as readonly string[]).includes(ride.status)) {
+      throw new AppError(
+        'INVALID_TRANSITION',
+        ride.status === 'IN_PROGRESS'
+          ? 'Con el pasajero a bordo ya no se puede cancelar: termina la carrera o llama a la oficina.'
+          : 'Esta carrera ya no se puede cancelar.',
+      );
+    }
+
+    const motivo = textoDelMotivo(body.motivo, body.detalle);
+    // El motivo va solo: quién canceló ya queda en `cancelled_by` y en la
+    // bitácora, y así se lee igual en el panel, en Reportes y en n8n.
+    const cancelada = await this.rides.cancel(rideId, motivo, actorFrom(request), {
+      code: body.motivo,
+      at: body.at,
+    });
+
+    this.realtime.alertOffice({
+      kind: 'driver_cancelled',
+      rideId,
+      code: ride.code,
+      message: `${driver.name} (${driver.code}) canceló ${ride.code}: ${motivo}. El cliente se quedó sin taxi.`,
+    });
+    return cancelada;
+  }
+
   private async ownRide(rideId: string, driverId: string) {
     const ride = await this.rides.byId(rideId);
     if (ride.driverId !== driverId) {

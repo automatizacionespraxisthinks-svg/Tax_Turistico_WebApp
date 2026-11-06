@@ -1,5 +1,13 @@
 import { sql, type SQL } from 'drizzle-orm';
-import { RIDE_STATUS_LABEL, fechasDelRango, textoDelRango, type RideStatus } from '@tax/shared';
+import {
+  RIDE_STATUS_LABEL,
+  fechasDelRango,
+  textoDelRango,
+  type RideStatus,
+  QUIEN_CANCELA,
+  textoDelMotivo,
+  type TransitionActor,
+} from '@tax/shared';
 import type { Database } from '../../db/db.module';
 import type { ExportParams } from '../../db/schema';
 
@@ -38,6 +46,10 @@ export interface FilaCarrera {
   linea: string | null;
   intentos: number;
   motivoCancelacion: string | null;
+  /** Quién la canceló: cliente, oficina, conductor o sistema. */
+  canceladaPor: TransitionActor | null;
+  /** Si la canceló el conductor, la clave del motivo de la lista. */
+  codigoCancelacion: string | null;
   finalizada: Date | null;
   /** Algún paso lo dio un operador: no la resolvió el agente solo (§10.1). */
   intervenida: boolean;
@@ -151,6 +163,8 @@ export async function leerPeriodo(db: Database, params: ExportParams): Promise<P
     linea: string | null;
     intentos: number;
     motivo_cancelacion: string | null;
+    cancelada_por: TransitionActor | null;
+    codigo_cancelacion: string | null;
     finalizada: Date | null;
     intervenida: boolean;
   }>(sql`
@@ -178,6 +192,8 @@ export async function leerPeriodo(db: Database, params: ExportParams): Promise<P
            r.line as linea,
            r.intento_despacho as intentos,
            r.cancel_reason as motivo_cancelacion,
+           r.cancelled_by as cancelada_por,
+           r.cancel_code as codigo_cancelacion,
            r.finished_at as finalizada,
            exists (
              select 1 from ride_status_history h
@@ -230,6 +246,8 @@ export async function leerPeriodo(db: Database, params: ExportParams): Promise<P
       linea: f.linea,
       intentos: f.intentos,
       motivoCancelacion: f.motivo_cancelacion,
+      canceladaPor: f.cancelada_por,
+      codigoCancelacion: f.codigo_cancelacion,
       finalizada: f.finalizada ? new Date(f.finalizada) : null,
       intervenida: f.intervenida,
     })),
@@ -257,6 +275,8 @@ export interface ResumenConductor {
   asignadas: number;
   finalizadas: number;
   canceladas: number;
+  /** De las canceladas, las que canceló él mismo. */
+  canceladasPorEl: number;
   km: number;
   duracionP50: number | null;
   llegadaP50: number | null;
@@ -266,6 +286,8 @@ export interface Resumen {
   creadas: number;
   finalizadas: number;
   canceladas: number;
+  /** De las canceladas, las que canceló el conductor que la tenía. */
+  canceladasPorConductor: number;
   sinAsignar: number;
   enCurso: number;
   kmRecorridos: number;
@@ -297,7 +319,8 @@ export interface Resumen {
   /** Siete filas, de lunes a domingo, de 24 horas cada una. */
   calor: number[][];
   porLinea: { linea: string; carreras: number; finalizadas: number; sinIntervencion: number | null }[];
-  cancelaciones: { motivo: string; carreras: number }[];
+  /** Agrupadas por quién canceló y por motivo. */
+  cancelaciones: { quien: string; motivo: string; carreras: number }[];
 }
 
 const horaLocal = new Intl.DateTimeFormat('es-CO', { timeZone: ZONA_HORARIA, hour: '2-digit', hourCycle: 'h23' });
@@ -370,6 +393,7 @@ export function resumir(filas: FilaCarrera[], dias?: string[]): Resumen {
         asignadas: 0,
         finalizadas: 0,
         canceladas: 0,
+        canceladasPorEl: 0,
         km: 0,
         duracionP50: null,
         llegadaP50: null,
@@ -382,6 +406,7 @@ export function resumir(filas: FilaCarrera[], dias?: string[]): Resumen {
         c.km += f.distanciaKm ?? 0;
       }
       if (f.estado === 'CANCELLED') c.canceladas += 1;
+      if (f.estado === 'CANCELLED' && f.canceladaPor === 'driver') c.canceladasPorEl += 1;
       if (f.duracionMinutos !== null) c.duraciones.push(f.duracionMinutos);
       if (f.llegadaSegundos !== null) c.llegadas.push(f.llegadaSegundos);
       porConductor.set(f.conductorId, c);
@@ -417,8 +442,15 @@ export function resumir(filas: FilaCarrera[], dias?: string[]): Resumen {
     porLinea.set(linea, l);
 
     if (f.estado === 'CANCELLED') {
-      const motivo = f.motivoCancelacion?.trim() || SIN_MOTIVO;
-      cancelaciones.set(motivo, (cancelaciones.get(motivo) ?? 0) + 1);
+      const quien = f.canceladaPor ? QUIEN_CANCELA[f.canceladaPor] : 'Sin dato';
+      // Las del conductor se agrupan por el motivo de la lista, no por lo que
+      // escribió: «Falla mecánica» una vez, no una por cada explicación.
+      const motivo =
+        f.canceladaPor === 'driver' && f.codigoCancelacion
+          ? textoDelMotivo(f.codigoCancelacion, null)
+          : f.motivoCancelacion?.trim() || SIN_MOTIVO;
+      const clave = `${quien}\u0000${motivo}`;
+      cancelaciones.set(clave, (cancelaciones.get(clave) ?? 0) + 1);
     }
   }
 
@@ -435,6 +467,7 @@ export function resumir(filas: FilaCarrera[], dias?: string[]): Resumen {
     creadas: filas.length,
     finalizadas: finalizadas.length,
     canceladas: filas.filter((f) => f.estado === 'CANCELLED').length,
+    canceladasPorConductor: filas.filter((f) => f.estado === 'CANCELLED' && f.canceladaPor === 'driver').length,
     sinAsignar: filas.filter((f) => f.estado === 'UNASSIGNED').length,
     enCurso: filas.filter((f) => ABIERTA(f.estado)).length,
     kmRecorridos: Math.round(finalizadas.reduce((s, f) => s + (f.distanciaKm ?? 0), 0) * 10) / 10,
@@ -479,7 +512,10 @@ export function resumir(filas: FilaCarrera[], dias?: string[]): Resumen {
       }))
       .sort((a, b) => b.carreras - a.carreras),
     cancelaciones: [...cancelaciones.entries()]
-      .map(([motivo, carreras]) => ({ motivo, carreras }))
+      .map(([clave, carreras]) => {
+        const [quien, motivo] = clave.split('\u0000') as [string, string];
+        return { quien, motivo, carreras };
+      })
       .sort((a, b) => b.carreras - a.carreras),
   };
 }

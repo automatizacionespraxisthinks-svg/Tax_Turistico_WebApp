@@ -35,7 +35,7 @@ export interface DriverMovedEvent {
 }
 
 export interface OfficeAlert {
-  kind: 'no_driver' | 'line_down' | 'line_up' | 'outbox_stuck' | 'driver_no_gps';
+  kind: 'no_driver' | 'line_down' | 'line_up' | 'outbox_stuck' | 'driver_no_gps' | 'driver_cancelled';
   rideId?: string;
   code?: string;
   /** La línea de WhatsApp, en `line_down` y `line_up`. */

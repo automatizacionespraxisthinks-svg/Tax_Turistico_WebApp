@@ -363,6 +363,10 @@ export interface Ride {
   /** El recorrido completo de las oleadas, para seguirlo desde el panel. */
   waveLog?: WaveLogEntry[];
   cancelReason?: string;
+  /** Quién la canceló. Ausente si no está cancelada. */
+  cancelledBy?: TransitionActor;
+  /** Si la canceló el conductor, la clave del motivo que eligió. */
+  cancelCode?: string;
 }
 
 /** Código legible de carrera: R-AAAA-NNNNNN. */

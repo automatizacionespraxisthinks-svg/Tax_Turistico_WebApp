@@ -61,6 +61,9 @@ export interface ApiRide {
   wave: number | null;
   waveLog: WaveLogEntry[] | null;
   cancelReason: string | null;
+  /** Ausentes si la API todavía no se ha actualizado. */
+  cancelledBy?: RideStatusEntry['actor'] | null;
+  cancelCode?: string | null;
 }
 
 export interface ApiRideDetail extends ApiRide {
@@ -199,6 +202,8 @@ export function toRide(row: ApiRide): Ride {
     wave: (row.wave ?? undefined) as Ride['wave'],
     waveLog: row.waveLog ?? [],
     cancelReason: row.cancelReason ?? undefined,
+    cancelledBy: row.cancelledBy ?? undefined,
+    cancelCode: row.cancelCode ?? undefined,
     // El listado no trae historial ni ofertas: se piden al abrir el detalle.
     history: [],
     offers: [],

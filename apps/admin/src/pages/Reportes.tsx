@@ -475,7 +475,13 @@ function CifrasDelGrupo({ tablero }: { tablero: TableroInforme }) {
           value={c.canceladas}
           icon={<Ban className="size-3.5" />}
           iconTone="neutral"
-          hint={motivo ? `${pct(c.tasaCancelacion)} · la mayoría: «${motivo.motivo}»` : `${pct(c.tasaCancelacion)} de las carreras`}
+          hint={[
+            motivo ? pct(c.tasaCancelacion) : `${pct(c.tasaCancelacion)} de las carreras`,
+            c.canceladasPorConductor ? `${numero(c.canceladasPorConductor)} por el conductor` : null,
+            motivo ? `la mayoría: «${motivo.motivo}»` : null,
+          ]
+            .filter(Boolean)
+            .join(' · ')}
         />,
         <Stat
           key="a-bordo"
@@ -519,7 +525,9 @@ function CifrasIndividuales({ individual }: { individual: NonNullable<TableroInf
           value={f.asignadas}
           icon={<Car className="size-3.5" />}
           iconTone="neutral"
-          hint={`${numero(f.finalizadas)} terminadas · ${numero(f.canceladas)} canceladas`}
+          hint={`${numero(f.finalizadas)} terminadas · ${numero(f.canceladas)} canceladas${
+            f.canceladasPorEl ? ` (${numero(f.canceladasPorEl)} por él)` : ''
+          }`}
         />,
         <Stat
           key="aceptacion"
@@ -798,15 +806,20 @@ function Graficas({ tablero: t }: { tablero: TableroInforme }) {
 
       <ChartFrame
         title="Motivos de cancelación"
-        subtitle="Lo que escribió quien canceló; los motivos repetidos dicen qué arreglar"
-        table={<DataTable head={['Motivo', 'Carreras']} rows={t.cancelaciones.map((c) => [c.motivo, c.carreras])} />}
+        subtitle="Quién canceló y por qué; las del conductor, por el motivo que eligió en la app"
+        table={
+          <DataTable
+            head={['Quién', 'Motivo', 'Carreras']}
+            rows={t.cancelaciones.map((c) => [c.quien, c.motivo, c.carreras])}
+          />
+        }
       >
         {t.cancelaciones.length === 0 ? (
           <PocoDato texto="Ninguna carrera cancelada en el periodo." />
         ) : (
           <HorizontalBars
             color="var(--muted)"
-            data={t.cancelaciones.slice(0, 8).map((c) => ({ label: c.motivo, value: c.carreras }))}
+            data={t.cancelaciones.slice(0, 8).map((c) => ({ label: `${c.quien} · ${c.motivo}`, value: c.carreras }))}
           />
         )}
       </ChartFrame>
@@ -821,6 +834,7 @@ type Orden = keyof Pick<
   | 'asignadas'
   | 'finalizadas'
   | 'canceladas'
+  | 'canceladasPorEl'
   | 'tasaAceptacion'
   | 'llegadaP50'
   | 'duracionP50'
@@ -832,7 +846,8 @@ type Orden = keyof Pick<
 const COLUMNAS: { clave: Orden; titulo: string; ayuda: string; ver: (c: FilaConductorInforme) => string }[] = [
   { clave: 'asignadas', titulo: 'Tomadas', ayuda: 'Carreras que aceptó, terminaran como terminaran', ver: (c) => numero(c.asignadas) },
   { clave: 'finalizadas', titulo: 'Terminadas', ayuda: 'Carreras que finalizó', ver: (c) => numero(c.finalizadas) },
-  { clave: 'canceladas', titulo: 'Canceladas', ayuda: 'Se cancelaron después de que él la aceptara', ver: (c) => numero(c.canceladas) },
+  { clave: 'canceladas', titulo: 'Canceladas', ayuda: 'Se cancelaron después de que él la aceptara, la cancelara quien la cancelara', ver: (c) => numero(c.canceladas) },
+  { clave: 'canceladasPorEl', titulo: 'Las canceló él', ayuda: 'Las que canceló él mismo desde la app, antes de recoger al cliente', ver: (c) => numero(c.canceladasPorEl) },
   {
     clave: 'tasaAceptacion',
     titulo: 'Aceptación',

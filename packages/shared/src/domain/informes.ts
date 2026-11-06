@@ -180,6 +180,8 @@ export interface CifrasDelInforme {
   creadas: number;
   finalizadas: number;
   canceladas: number;
+  /** De las canceladas, las que canceló el conductor que la tenía asignada. */
+  canceladasPorConductor: number;
   sinAsignar: number;
   enCurso: number;
   /** Canceladas sobre creadas, de 0 a 1. */
@@ -208,8 +210,10 @@ export interface FilaConductorInforme {
   /** Carreras que tomó en el periodo, terminaran como terminaran. */
   asignadas: number;
   finalizadas: number;
-  /** Canceladas después de que él la aceptara. */
+  /** Canceladas después de que él la aceptara, la cancelara quien la cancelara. */
   canceladas: number;
+  /** De esas, las que canceló él mismo, por causa mayor. */
+  canceladasPorEl: number;
   ofertas: number;
   aceptadas: number;
   rechazadas: number;
@@ -247,7 +251,8 @@ export interface TableroInforme {
   calor: { dias: string[]; valores: number[][] };
   porZona: { zona: string; tipo: string; carreras: number; finalizadas: number; canceladas: number }[];
   porLinea: { linea: string; carreras: number; finalizadas: number; sinIntervencion: number | null }[];
-  cancelaciones: { motivo: string; carreras: number }[];
+  /** Por quién canceló (cliente, oficina, conductor) y por motivo. */
+  cancelaciones: { quien: string; motivo: string; carreras: number }[];
   /** Todos los conductores, con los mismos filtros salvo el de conductor. */
   conductores: FilaConductorInforme[];
   /** Solo con un conductor elegido: él frente al resto. */

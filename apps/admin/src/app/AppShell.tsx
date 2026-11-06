@@ -3,6 +3,7 @@ import type { ReactNode } from 'react';
 import { NavLink, useLocation } from 'react-router';
 import { AnimatePresence, motion } from 'motion/react';
 import {
+  Ban,
   BarChart3,
   CircleDot,
   LayoutGrid,
@@ -171,6 +172,8 @@ const TONO_AVISO: Record<AlertaRecibida['kind'], StatusTone> = {
   line_up: 'positive',
   outbox_stuck: 'warning',
   driver_no_gps: 'warning',
+  // El cliente se quedó sin taxi: alguien tiene que llamarlo o pedirle otro.
+  driver_cancelled: 'critical',
 };
 
 /** Una línea que vuelve se anuncia y el aviso se cierra solo. */
@@ -206,7 +209,15 @@ function AvisosSueltos() {
           <Banner
             key={alerta.id}
             tone={TONO_AVISO[alerta.kind]}
-            icon={alerta.kind === 'line_up' ? <Smartphone className="size-4" /> : <CircleDot className="size-4" />}
+            icon={
+              alerta.kind === 'line_up' ? (
+                <Smartphone className="size-4" />
+              ) : alerta.kind === 'driver_cancelled' ? (
+                <Ban className="size-4" />
+              ) : (
+                <CircleDot className="size-4" />
+              )
+            }
             action={
               <button
                 type="button"

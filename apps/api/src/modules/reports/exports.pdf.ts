@@ -214,7 +214,11 @@ export function generarPdf(
   cifras(doc, [
     { etiqueta: 'Carreras creadas', valor: String(r.creadas) },
     { etiqueta: 'Finalizadas', valor: String(r.finalizadas) },
-    { etiqueta: 'Canceladas', valor: String(r.canceladas) },
+    {
+      etiqueta: 'Canceladas',
+      valor: String(r.canceladas),
+      nota: r.canceladasPorConductor ? `${r.canceladasPorConductor} por el conductor` : undefined,
+    },
     { etiqueta: 'Sin asignar', valor: String(r.sinAsignar) },
     {
       etiqueta: 'Hora pico',
