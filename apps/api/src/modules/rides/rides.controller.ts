@@ -60,12 +60,20 @@ const pagoSchema = z.object({ pagoElectronico: z.boolean(), relanzar: z.boolean(
  * otro punto.
  */
 const huellaDePedido = (cuerpo: unknown) => {
-  const pedido = (cuerpo ?? {}) as { customerPhone?: unknown; pickup?: { point?: { lat?: unknown; lng?: unknown } } };
+  const pedido = (cuerpo ?? {}) as {
+    customerPhone?: unknown;
+    cantidad?: unknown;
+    pickup?: { point?: { lat?: unknown; lng?: unknown } };
+  };
   const punto = pedido.pickup?.point;
   const redondear = (n: unknown) => (typeof n === 'number' ? Math.round(n * 1e5) / 1e5 : null);
+  // La cantidad entra solo si es más de uno: así las huellas de los pedidos
+  // de un taxi no cambian, y la misma clave con otra cantidad es otro pedido.
+  const cantidad = Number(pedido.cantidad ?? 1);
   return {
     telefono: pedido.customerPhone ?? null,
     punto: punto ? [redondear(punto.lat), redondear(punto.lng)] : null,
+    ...(Number.isFinite(cantidad) && cantidad > 1 ? { cantidad } : {}),
   };
 };
 

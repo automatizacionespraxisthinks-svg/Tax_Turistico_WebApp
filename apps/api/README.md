@@ -125,6 +125,44 @@ peticiones.
 con otra redacción, dos a la vez, clave reutilizada, error que no se guarda y
 la misma clave en otra ruta.
 
+### Varios taxis en un pedido: `cantidad` (11/11/2026)
+
+`POST /v1/rides` acepta `cantidad` (1 a 5): cuántos taxis van a ese punto. La
+API los crea **en la misma transacción, o ninguno**: si no caben en el tope de
+5 por teléfono responde `MAX_ACTIVE_RIDES` con `errors: [{ path: 'cantidad',
+message: 'cupo: N' }]` y no deja ninguno a medias. Cada uno es una carrera
+completa (su código, su `ride.created`, su despacho, sus avisos) y lleva en
+las notas «Taxi i de N en el mismo punto.», puesta por la API. Se numeran
+desde `numeroEnPedido`, así que «dos en la terminal y uno en el hotel» son dos
+llamadas: `cantidad: 2, numeroEnPedido: 1` y `cantidad: 1, numeroEnPedido: 3`
+(`numeroEnPedido + cantidad - 1` no pasa de 5).
+
+La respuesta con `cantidad: 1` es la de siempre. Con más, es la primera
+carrera (para que quien lea `id` y `code` siga funcionando) más `cantidad` y
+`rides` con todas, en orden. La huella de idempotencia incluye la cantidad
+cuando es mayor que 1: la misma clave con otra cantidad es
+`IDEMPOTENCY_MISMATCH`.
+
+Antes el agente tenía que llamar cinco veces y numerar bien cada taxi. En
+producción (5/11/2026) acordó 5 taxis, olvidó el número dos turnos después y
+pidió uno. Los flujos de `Actualizados 2026-11-11` piden por cantidad y
+recuerdan el pedido entre turnos (ver el README de la raíz).
+
+`e2e-varios-taxis.ts` cubre el pedido de varios taxis en un mensaje: cinco
+bien numerados (clave `…-1` a `…-5` y `numeroEnPedido` 1 a 5) son cinco
+carreras, el sexto da `MAX_ACTIVE_RIDES`, y las cinco a la vez de un cliente
+nuevo también salen (antes, las que perdían al crear el cliente daban 500).
+Con `cantidad`: cinco en una llamada, el reintento, la cantidad distinta con
+la misma clave, el cupo que no alcanza sin crear a medias, el pedido mixto y
+la numeración que se pasa de 5. Deja escrito lo que pasa si el agente no
+numera: con la misma clave la API devuelve **la misma carrera** con 201 cada
+vez, y con claves distintas pero `numeroEnPedido: 1` las siguientes chocan
+con `RIDE_ALREADY_ACTIVE`.
+
+```bash
+pnpm --filter @tax/api exec tsx src/test/e2e-varios-taxis.ts <clave-de-api>
+```
+
 Una trampa al depurar esto: la respuesta repetida sale de una columna `jsonb`,
 y `jsonb` **reordena las claves** al guardarlas (por longitud y luego
 alfabéticamente). Puestas una al lado de la otra, las dos respuestas parecen

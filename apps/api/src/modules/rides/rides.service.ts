@@ -191,10 +191,30 @@ export class RidesService {
     }
 
     const trayecto = this.trayectos.medir(point, input.dropoff?.point);
-    const rideId = uuidv7();
     const pendingEvents: string[] = [];
 
-    const created = await this.db
+    /*
+     * Cuántos taxis van a este punto.
+     *
+     * «Necesito 5 taxis en la terminal» es UN pedido de cinco carreras, y se
+     * crea de una vez: antes el agente tenía que llamar cinco veces a
+     * `crear_carrera` y numerarlas bien, y en producción una vez llamó una
+     * sola y el cliente quedó esperando cinco. Ahora las cinco salen en la
+     * misma transacción —o ninguna—, cada una con su código, su despacho y
+     * sus avisos, y numeradas desde `numeroEnPedido`.
+     */
+    const cantidad = input.cantidad;
+    const numeros = Array.from({ length: cantidad }, (_, i) => input.numeroEnPedido + i);
+    const notasDe = (numero: number) => {
+      if (cantidad === 1) return input.notes;
+      // La nota del grupo la pone la API: la del agente puede traer otra
+      // cuenta («Taxi 1 de 5…») que aquí ya no vale.
+      const propia = (input.notes ?? '').replace(/taxi\s+\d+\s+de\s+\d+[^.;\n]*[.;]?\s*/gi, '').trim();
+      const grupo = `Taxi ${numero - input.numeroEnPedido + 1} de ${cantidad} en el mismo punto.`;
+      return `${grupo}${propia ? ` ${propia}` : ''}`.slice(0, 280);
+    };
+
+    const creadas = await this.db
       .transaction(async (tx) => {
         const customerId = await this.upsertCustomer(tx, input.customerPhone, input.customerName);
 
@@ -206,114 +226,128 @@ export class RidesService {
          * ponen en fila en vez de contar los dos sobre el mismo estado y
          * pasar los dos. Antes el tope solo existía como una línea en el
          * prompt del agente, y una instrucción de texto no frena nada.
+         *
+         * Un pedido de varios que no cabe entero no se crea a medias: el
+         * agente recibe cuántos caben y le pregunta al cliente.
          */
         const [activas] = await tx
           .select({ n: sql<number>`count(*)::int` })
           .from(rides)
           .where(and(eq(rides.customerId, customerId), inArray(rides.status, OPEN_RIDE_STATUSES)));
 
-        if ((activas?.n ?? 0) >= MAX_CARRERAS_ACTIVAS) {
+        const cupo = Math.max(0, MAX_CARRERAS_ACTIVAS - (activas?.n ?? 0));
+        if (cantidad > cupo) {
           throw new AppError(
             'MAX_ACTIVE_RIDES',
-            `Este teléfono ya tiene ${MAX_CARRERAS_ACTIVAS} taxis activos`,
+            cupo === 0
+              ? `Este teléfono ya tiene ${MAX_CARRERAS_ACTIVAS} taxis activos`
+              : `Este teléfono tiene cupo para ${cupo} taxi${cupo === 1 ? '' : 's'} más, no para ${cantidad}`,
+            [{ path: 'cantidad', message: `cupo: ${cupo}` }],
           );
         }
 
-        // El código legible sale de una secuencia de la base: dos peticiones
-        // simultáneas no pueden obtener el mismo número.
-        // `execute` devuelve el QueryResult de pg, no un array de filas.
-        const sequence = await tx.execute<{ next: string }>(
-          sql`select nextval('ride_code_seq') as next`,
-        );
-        const code = formatRideCode(
-          new Date().getFullYear(),
-          Number(sequence.rows[0]?.next ?? 0),
-        );
+        const filas: (typeof rides.$inferSelect)[] = [];
+        for (const numero of numeros) {
+          const rideId = uuidv7();
 
-        const [ride] = await tx
-          .insert(rides)
-          .values({
-            id: rideId,
-            code,
-            status: 'PENDING',
-            version: 1,
-            customerId,
-            pickupText,
-            pickupReference: input.pickup.reference,
-            pickupLat: point.lat,
-            pickupLng: point.lng,
-            pickupSource,
-            // Solo con ubicación compartida: un enlace que no llevó al punto
-            // no tiene por qué abrirse en el teléfono del conductor.
-            pickupLink: pickupSource === 'compartida' ? pickupLink : null,
-            dropoffText: input.dropoff?.text,
-            dropoffLat: input.dropoff?.point?.lat,
-            dropoffLng: input.dropoff?.point?.lng,
-            // Solo cuenta como dicho por el cliente si trae coordenadas: un
-            // destino en palabras no sirve para medir nada.
-            dropoffSource: input.dropoff?.point ? 'cliente' : undefined,
-            zoneId: trayecto.originZoneId,
-            vehicleType: input.vehicleType,
-            passengers: input.passengers,
-            /*
-             * Del 2 en adelante el pedido es de varios taxis a la vez, así que
-             * la carrera se marca para que el índice
-             * `one_active_ride_per_customer` no la rechace. El taxi 1 nunca
-             * lleva la marca: por eso un cliente que repite el pedido sigue
-             * chocando contra el índice y recibe «ya tiene taxi pedido».
-             */
-            allowsConcurrent: input.numeroEnPedido > 1,
-            pagoElectronico: input.pagoElectronico,
-            etaMinutes: trayecto.etaMinutes,
-            notes: input.notes,
-          })
-          .returning();
+          // El código legible sale de una secuencia de la base: dos peticiones
+          // simultáneas no pueden obtener el mismo número.
+          // `execute` devuelve el QueryResult de pg, no un array de filas.
+          const sequence = await tx.execute<{ next: string }>(
+            sql`select nextval('ride_code_seq') as next`,
+          );
+          const code = formatRideCode(
+            new Date().getFullYear(),
+            Number(sequence.rows[0]?.next ?? 0),
+          );
 
-        await tx.insert(rideStatusHistory).values({
-          id: uuidv7(),
-          rideId,
-          fromStatus: null,
-          toStatus: 'PENDING',
-          actor: actor.kind,
-          actorName: actor.name,
-          actorId: actor.id,
-        });
-
-        pendingEvents.push(
-          await this.outbox.enqueue(tx, {
-            type: 'ride.created',
-            rideId,
-            rideCode: code,
-            rideVersion: 1,
-            payload: {
+          const [ride] = await tx
+            .insert(rides)
+            .values({
+              id: rideId,
               code,
-              pickup: { ...input.pickup, text: pickupText, point },
+              status: 'PENDING',
+              version: 1,
+              customerId,
+              pickupText,
+              pickupReference: input.pickup.reference,
+              pickupLat: point.lat,
+              pickupLng: point.lng,
               pickupSource,
+              // Solo con ubicación compartida: un enlace que no llevó al punto
+              // no tiene por qué abrirse en el teléfono del conductor.
+              pickupLink: pickupSource === 'compartida' ? pickupLink : null,
+              dropoffText: input.dropoff?.text,
+              dropoffLat: input.dropoff?.point?.lat,
+              dropoffLng: input.dropoff?.point?.lng,
+              // Solo cuenta como dicho por el cliente si trae coordenadas: un
+              // destino en palabras no sirve para medir nada.
+              dropoffSource: input.dropoff?.point ? 'cliente' : undefined,
+              zoneId: trayecto.originZoneId,
+              vehicleType: input.vehicleType,
+              passengers: input.passengers,
+              /*
+               * Del 2 en adelante el pedido es de varios taxis a la vez, así que
+               * la carrera se marca para que el índice
+               * `one_active_ride_per_customer` no la rechace. El taxi 1 nunca
+               * lleva la marca: por eso un cliente que repite el pedido sigue
+               * chocando contra el índice y recibe «ya tiene taxi pedido».
+               */
+              allowsConcurrent: numero > 1,
               pagoElectronico: input.pagoElectronico,
-              // Para que el agente pueda confirmarle al cliente lo que se
-              // entendio, sin tener que geocodificar el por su cuenta.
-              direccionResuelta,
-              dropoff: input.dropoff,
-              zone: trayecto.originZoneName,
-            },
-          }),
-        );
+              etaMinutes: trayecto.etaMinutes,
+              notes: notasDe(numero),
+            })
+            .returning();
 
-        await this.audit.record(
-          {
-            actorId: actor.id,
+          await tx.insert(rideStatusHistory).values({
+            id: uuidv7(),
+            rideId,
+            fromStatus: null,
+            toStatus: 'PENDING',
+            actor: actor.kind,
             actorName: actor.name,
-            role: actor.role ?? actor.kind,
-            action: 'Creó carrera',
-            entity: 'rides',
-            entityId: code,
-            after: { code, status: 'PENDING' },
-            ip: actor.ip,
-          },
-          tx as unknown as Database,
-        );
+            actorId: actor.id,
+          });
 
-        return ride;
+          pendingEvents.push(
+            await this.outbox.enqueue(tx, {
+              type: 'ride.created',
+              rideId,
+              rideCode: code,
+              rideVersion: 1,
+              payload: {
+                code,
+                pickup: { ...input.pickup, text: pickupText, point },
+                pickupSource,
+                pagoElectronico: input.pagoElectronico,
+                // Para que el agente pueda confirmarle al cliente lo que se
+                // entendio, sin tener que geocodificar el por su cuenta.
+                direccionResuelta,
+                dropoff: input.dropoff,
+                zone: trayecto.originZoneName,
+                ...(cantidad > 1 ? { pedido: { numero: numero - input.numeroEnPedido + 1, de: cantidad } } : {}),
+              },
+            }),
+          );
+
+          await this.audit.record(
+            {
+              actorId: actor.id,
+              actorName: actor.name,
+              role: actor.role ?? actor.kind,
+              action: 'Creó carrera',
+              entity: 'rides',
+              entityId: code,
+              after: { code, status: 'PENDING', ...(cantidad > 1 ? { pedido: `${numero - input.numeroEnPedido + 1} de ${cantidad}` } : {}) },
+              ip: actor.ip,
+            },
+            tx as unknown as Database,
+          );
+
+          filas.push(ride!);
+        }
+        return filas;
       })
       .catch((error: unknown) => {
         if (isUniqueViolation(error, 'one_active_ride_per_customer')) {
@@ -333,8 +367,9 @@ export class RidesService {
      */
     this.logger.log(
       {
-        code: created.code,
+        code: creadas.map((c) => c.code).join(', '),
         pickupSource,
+        ...(cantidad > 1 ? { cantidad } : {}),
         ...(motivoDeGoogle ? { google: motivoDeGoogle } : {}),
         ...(direccionResuelta ? { ubicadaComo: direccionResuelta } : {}),
       },
@@ -345,44 +380,64 @@ export class RidesService {
 
     // Fuera de la transacción: antes del commit el trabajador no vería la fila.
     await this.outbox.notify(pendingEvents);
-    this.realtime.rideChanged(created);
+    for (const ride of creadas) {
+      this.realtime.rideChanged(ride);
 
-    // La foto del lugar baja después, sin que nadie la espere.
-    if (input.pickupPhotoUrl) {
-      this.fotos.enSegundoPlano(rideId, input.pickupPhotoUrl, actor, (ride) => this.realtime.rideChanged(ride));
+      // La foto del lugar baja después, sin que nadie la espere. Con varios
+      // taxis en el mismo punto, cada conductor ve la misma foto.
+      if (input.pickupPhotoUrl) {
+        this.fotos.enSegundoPlano(ride.id, input.pickupPhotoUrl, actor, (r) => this.realtime.rideChanged(r));
+      }
+
+      // El despacho arranca en segundo plano; crear la carrera no debe esperar
+      // a que se resuelva la primera oleada (objetivo: oferta visible < 3 s).
+      void this.dispatch.startWave(ride.id, 1).catch((error: unknown) => {
+        this.logger.error({ err: error, rideId: ride.id }, 'No se pudo lanzar la oleada 1');
+      });
     }
 
-    // El despacho arranca en segundo plano; crear la carrera no debe esperar
-    // a que se resuelva la primera oleada (objetivo: oferta visible < 3 s).
-    void this.dispatch.startWave(rideId, 1).catch((error: unknown) => {
-      this.logger.error({ err: error, rideId }, 'No se pudo lanzar la oleada 1');
-    });
-
-    return created;
+    /*
+     * Un taxi: la carrera, como siempre. Varios: la primera, para que quien
+     * lea `id` y `code` siga funcionando, más `rides` con todas en orden.
+     */
+    const [primera] = creadas;
+    return cantidad === 1 ? primera! : { ...primera!, cantidad, rides: creadas };
   }
 
   private async upsertCustomer(tx: Tx, phone: string, name?: string): Promise<string> {
     /*
+     * Primero se asegura que la fila exista, y después se bloquea.
+     *
+     * Un cliente nuevo que pide varios taxis en un mensaje llega con varias
+     * peticiones a la vez (el agente llama a `crear_carrera` en paralelo).
+     * Antes se buscaba y, si no estaba, se insertaba: todas lo buscaban a la
+     * vez, ninguna lo encontraba, todas insertaban y solo una ganaba; las
+     * demás reventaban con `customers_phone_key` y un 500, y de cinco taxis
+     * se creaban dos o tres. Con `on conflict do nothing` la segunda espera a
+     * que la primera confirme y no hace nada; el `select` que sigue ya la ve.
+     *
      * `for update` bloquea la fila del cliente hasta el final de la
      * transacción, y es lo que hace exacta la cuenta del tope: sin él, dos
      * pedidos simultáneos del mismo número cuentan los dos sobre el mismo
      * estado y los dos se creen con cupo.
      */
-    const [existing] = await tx
-      .select({ id: customers.id })
+    await tx
+      .insert(customers)
+      .values({ id: uuidv7(), phone, name })
+      .onConflictDoNothing({ target: customers.phone });
+
+    const [cliente] = await tx
+      .select({ id: customers.id, name: customers.name })
       .from(customers)
       .where(eq(customers.phone, phone))
       .for('update')
       .limit(1);
 
-    if (existing) {
-      if (name) await tx.update(customers).set({ name }).where(eq(customers.id, existing.id));
-      return existing.id;
+    if (!cliente) throw new Error(`No se pudo registrar el cliente ${phone}`);
+    if (name && cliente.name !== name) {
+      await tx.update(customers).set({ name }).where(eq(customers.id, cliente.id));
     }
-
-    const id = uuidv7();
-    await tx.insert(customers).values({ id, phone, name });
-    return id;
+    return cliente.id;
   }
 
   /* ---------------------------------------------------------- transición */

@@ -231,6 +231,18 @@ export const createRideSchema = z.object({
    */
   numeroEnPedido: z.coerce.number().int().min(1).max(MAX_CARRERAS_ACTIVAS).default(1),
   /**
+   * Cuántos taxis van a ESTE punto (11/11/2026).
+   *
+   * «Necesito 5 taxis en la terminal» se pide con una sola llamada y
+   * `cantidad: 5`: la API crea las cinco carreras en la misma transacción, o
+   * ninguna si no caben en el cupo (`MAX_ACTIVE_RIDES`, con el cupo que
+   * queda). Se numeran desde `numeroEnPedido`, así que «dos en la terminal y
+   * uno en el hotel» son dos llamadas: `cantidad: 2, numeroEnPedido: 1` y
+   * `cantidad: 1, numeroEnPedido: 3`. Con una, la respuesta es la carrera de
+   * siempre; con más, la primera carrera más `rides` con todas.
+   */
+  cantidad: z.coerce.number().int().min(1).max(MAX_CARRERAS_ACTIVAS).default(1),
+  /**
    * El cliente va a pagar con pago electrónico (Nequi, transferencia,
    * datáfono). La carrera solo se les ofrece a conductores que lo aceptan;
    * si en las oleadas no aparece ninguno, queda «sin asignar» como cualquier
@@ -245,6 +257,9 @@ export const createRideSchema = z.object({
    * con `POST /v1/rides/:id/photo`.
    */
   pickupPhotoUrl: z.string().url().max(2000).optional(),
+}).refine((pedido) => pedido.numeroEnPedido + pedido.cantidad - 1 <= MAX_CARRERAS_ACTIVAS, {
+  path: ['cantidad'],
+  message: `Un pedido llega hasta el taxi ${MAX_CARRERAS_ACTIVAS}: numeroEnPedido + cantidad - 1 no puede pasar de ${MAX_CARRERAS_ACTIVAS}`,
 });
 export type CreateRideInput = z.infer<typeof createRideSchema>;
 

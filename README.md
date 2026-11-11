@@ -155,6 +155,24 @@ El panel no inventa acciones: cada botón sale de la tabla de transiciones.
   el entorno de la API: la PWA lo pide al abrir, así que cambiarlo no obliga a
   recompilarla, y con `0` la restricción queda desactivada. La oficina sí
   puede cerrar antes.
+- **Varios taxis en un pedido** (11/11/2026): «5 taxis en la terminal» es
+  una sola llamada a `POST /v1/rides` con `cantidad: 5`, y la API crea las
+  cinco carreras juntas o ninguna si no caben en el tope de 5 por teléfono
+  (detalle en [apps/api/README.md](apps/api/README.md)). Los flujos de n8n de
+  `Flujos/Principales/Actualizados 2026-11-11` van con esto:
+  - *Atención*: `crear_carrera` pide por punto con `cantidad`; lo acordado y
+    aún sin pedir («5 taxis, efectivo, falta el punto») se guarda en Redis
+    (`tax:n8n:pedido:<conversación>`, una hora) y vuelve al agente como
+    «Pedido en curso», para que no lo olvide entre turnos; y si el mensaje
+    del agente dice un número de taxis distinto de los que de verdad se
+    crearon, se reemplaza por uno armado con las carreras creadas.
+  - *Avisos*: cada taxi del grupo se avisa por separado con su número
+    («Taxi 2 de 5 – terminal») al asignarse, al llegar, al cancelarse y al
+    terminar.
+
+  Hay que desplegar la API antes de importar los flujos: la API vieja ignora
+  `cantidad` y crearía un solo taxi. Prueba:
+  `src/test/e2e-varios-taxis.ts`.
 - **El conductor cancela** (5/11/2026, migración 0020): por una causa
   mayor y solo antes de recoger al cliente (asignada o con «Llegué»; con el
   pasajero a bordo la API lo rechaza). La PWA pide confirmación y un motivo
