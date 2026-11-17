@@ -7,6 +7,7 @@ import { ActionBar, DataRow, Screen } from '../components/Chrome';
 import type { SessionState } from '../state/session';
 import type { PushState } from '../api/push';
 import { Instalar } from '../components/Instalar';
+import { CambiosDelCelular } from '../components/CambiosDelCelular';
 
 /**
  * Tres estados de espera en una sola pantalla: fuera de turno, disponible y en
@@ -21,8 +22,19 @@ export function Turno({
   onEndShift,
   onPause,
   onResume,
+  conductor,
+  placaDelTurno,
+  onSwitchVehicle,
+  onChangeDriver,
 }: {
   session: SessionState;
+  /** Quién tiene la sesión en este celular: con un celular compartido, importa. */
+  conductor?: { code: string; name: string };
+  /** La placa del turno abierto, según la API. */
+  placaDelTurno?: string;
+  /** Devuelven el error para mostrarlo, o `null` si salió bien. */
+  onSwitchVehicle: (plate: string) => Promise<string | null>;
+  onChangeDriver: () => Promise<string | null>;
   /** Si el teléfono avisará con la aplicación cerrada (ADR-07). */
   push: PushState;
   onEnablePush: () => void;
@@ -54,6 +66,8 @@ export function Turno({
   const available = session.phase === 'available';
   const paused = session.phase === 'paused';
   const onShift = available || paused;
+  // Con turno abierto manda la placa del turno; sin él, la que se va a usar.
+  const placaVisible = onShift ? (placaDelTurno ?? plate) : plate;
 
   const shiftSeconds = session.shiftStartedAt
     ? Math.floor((Date.now() - session.shiftStartedAt) / 1000)
@@ -127,18 +141,21 @@ export function Turno({
         ) : null}
 
         <div className="rounded-lg border border-transparent bg-surface px-4 shadow-sm">
+          {conductor ? (
+            <DataRow label="Conductor" value={`${conductor.name} · ${conductor.code}`} />
+          ) : null}
           <DataRow
             label="Carreras de hoy"
             value={<span className="text-brand">{session.ridesToday}</span>}
           />
-          {plate ? (
+          {placaVisible ? (
             <DataRow
               label="Vehículo"
               value={
                 // Como la placa de verdad: amarilla con borde negro. El
                 // interlineado ajustado deja la fila con la misma altura.
                 <span className="rounded-sm border border-ink bg-plate px-1.5 leading-tight text-ink">
-                  {plate}
+                  {placaVisible}
                 </span>
               }
             />
@@ -185,6 +202,14 @@ export function Turno({
             Volver a estar disponible
           </Button>
         ) : null}
+
+        <CambiosDelCelular
+          enTurno={onShift}
+          placaActual={placaVisible || undefined}
+          conductor={conductor}
+          onCambiarCarro={onSwitchVehicle}
+          onCambiarConductor={onChangeDriver}
+        />
 
         {onShift ? (
           <Button

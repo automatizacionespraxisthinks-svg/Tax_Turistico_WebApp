@@ -56,7 +56,7 @@ pnpm dev
 Panel en <http://localhost:5173> y PWA en <http://localhost:5174>. Para una
 sola, `pnpm dev:admin` o `pnpm dev:driver`.
 
-El panel pide correo y contraseña; la PWA, código de conductor, placa y PIN.
+El panel pide correo y contraseña; la PWA, código de conductor y PIN (la placa se escribe al abrir el turno).
 Las credenciales de desarrollo las imprime el `seed`.
 
 ```bash
@@ -155,6 +155,38 @@ El panel no inventa acciones: cada botón sale de la tabla de transiciones.
   el entorno de la API: la PWA lo pide al abrir, así que cambiarlo no obliga a
   recompilarla, y con `0` la restricción queda desactivada. La oficina sí
   puede cerrar antes.
+- **Cambiar de carro o de conductor** (17/11/2026, migración 0021): un
+  carro lo manejan varios conductores y un conductor maneja varios carros,
+  muchas veces con el mismo celular.
+  - El acceso a la PWA es **código + PIN**: dice quién es. El carro se elige
+    al abrir el turno. (`POST /v1/auth/driver` acepta todavía `plate`, y la
+    ignora, para que una PWA vieja siga entrando.)
+  - **Cambiar carro** (`POST /v1/driver/shift/switch`): el mismo conductor,
+    con la misma sesión, cierra el turno del carro de antes y abre el del
+    nuevo. Lo que puede fallar se comprueba antes de cerrar nada.
+  - **Cambiar conductor** (`POST /v1/driver/logout`): se cierra el turno y la
+    sesión de ese celular y se le borra el push; el compañero entra con su
+    código y su PIN. Si entra sin que el primero haya salido, la sesión y el
+    push del primero en ese celular se revocan igual.
+  - Ninguno de los dos con una carrera asignada o en curso (`DRIVER_BUSY`).
+  - **Un conductor, un celular activo**: entrar en otro teléfono cierra la
+    sesión del anterior y le borra el push. El celular que se queda sin
+    sesión (por esto, porque otro conductor entró en él o porque la oficina
+    lo revocó) recibe `session:closed` por el socket, que además se corta, y
+    la PWA vuelve al acceso diciendo por qué. La migración 0021 deja a cada
+    conductor con el último celular que usó. En la ficha, «Celular activo» y
+    debajo los anteriores, en gris.
+  - La bitácora anota cada paso del conductor con la placa en el texto:
+    «Entró en un celular», «Abrió turno en el móvil UBP472», «Cambió de
+    carro: del móvil UBP472 al TQR118», «Cerró turno en el móvil TQR118».
+    El cierre por relevo (otro toma el carro con el turno abierto) no se
+    anota.
+  - Cualquier móvil activo sirve. Si el listado maestro no vincula al
+    conductor con ese móvil, el turno se abre igual con `fuera_de_listado`,
+    Flota lo muestra («Móvil fuera de su listado») y queda en la bitácora. Un
+    móvil sin nadie en el listado no se marca.
+
+  Prueba: `src/test/e2e-cambio-de-mano.ts`.
 - **Varios taxis en un pedido** (11/11/2026): «5 taxis en la terminal» es
   una sola llamada a `POST /v1/rides` con `cantidad: 5`, y la API crea las
   cinco carreras juntas o ninguna si no caben en el tope de 5 por teléfono

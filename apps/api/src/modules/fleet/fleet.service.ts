@@ -60,6 +60,8 @@ export interface DriverWithPosition {
   suspendidoHasta?: Date;
   motivoSuspension?: string;
   shiftStartedAt: Date | null;
+  /** El turno abierto es en un móvil que el listado no le asigna. */
+  fueraDeListado: boolean | null;
   plate: string | null;
   vehicleType: string | null;
   capacity: number | null;
@@ -101,7 +103,10 @@ export class FleetService {
 
   /* ------------------------------------------------------------- turnos */
 
-  async openShift(driverId: string, plate: string): Promise<{ shiftId: string }> {
+  async openShift(
+    driverId: string,
+    plate: string,
+  ): Promise<{ shiftId: string; plate: string; fueraDeListado: boolean }> {
     await this.exigirNoSuspendido(driverId);
 
     const [vehicle] = await this.db
@@ -115,13 +120,14 @@ export class FleetService {
     await this.relevar(vehicle.id, vehicle.plate, driverId);
 
     const shiftId = uuidv7();
+    const fueraDeListado = await this.fueraDelListado(vehicle.id, driverId);
 
     // Los índices parciales `one_open_shift_per_*` garantizan que no haya dos
     // turnos abiertos del mismo conductor ni del mismo vehículo; si los hay,
     // la base rechaza la inserción y aquí se traduce a un error legible.
     try {
       await this.db.transaction(async (tx) => {
-        await tx.insert(driverShifts).values({ id: shiftId, driverId, vehicleId: vehicle.id });
+        await tx.insert(driverShifts).values({ id: shiftId, driverId, vehicleId: vehicle.id, fueraDeListado });
         await tx.update(drivers).set({ status: 'AVAILABLE' }).where(eq(drivers.id, driverId));
       });
     } catch (error) {
@@ -131,7 +137,85 @@ export class FleetService {
       throw error;
     }
 
-    return { shiftId };
+    return { shiftId, plate: vehicle.plate, fueraDeListado };
+  }
+
+  /**
+   * El listado maestro no vincula a este conductor con este móvil.
+   *
+   * Un móvil sin nadie en el listado (todavía no se cargó, o se creó a mano
+   * en el panel) no tiene contra qué compararse y no se marca: marcar a
+   * todos los que lo manejan no le diría nada a la oficina.
+   */
+  private async fueraDelListado(vehicleId: string, driverId: string): Promise<boolean> {
+    const vinculados = await this.db
+      .select({ driverId: vehicleDrivers.driverId })
+      .from(vehicleDrivers)
+      .where(eq(vehicleDrivers.vehicleId, vehicleId));
+    return vinculados.length > 0 && !vinculados.some((fila) => fila.driverId === driverId);
+  }
+
+  /**
+   * Cambiar de carro: el mismo conductor, con su misma sesión, pasa a otro
+   * móvil (17/11/2026).
+   *
+   * Todo lo que puede fallar se comprueba ANTES de cerrar el turno actual:
+   * la placa, la suspensión, la carrera propia y que el otro carro no esté
+   * en una carrera con alguien. Si no, un error a medio camino dejaba al
+   * conductor fuera de turno sin haber pedido salir.
+   */
+  async switchVehicle(
+    driverId: string,
+    plate: string,
+  ): Promise<{ shiftId: string; plate: string; fueraDeListado: boolean }> {
+    await this.exigirNoSuspendido(driverId);
+
+    if (await this.tieneCarreraActiva(driverId)) {
+      throw new AppError('DRIVER_BUSY', 'Termina la carrera antes de cambiar de carro.');
+    }
+
+    const [vehicle] = await this.db
+      .select()
+      .from(vehicles)
+      .where(and(eq(vehicles.plate, plate.toUpperCase()), eq(vehicles.active, true)))
+      .limit(1);
+    if (!vehicle) throw new AppError('NOT_FOUND', `No hay un vehículo activo con placa ${plate}`);
+
+    const actual = await this.openShiftOf(driverId);
+    if (actual?.vehicleId === vehicle.id) {
+      throw new AppError('VALIDATION_FAILED', `Ya estás en el móvil ${vehicle.plate}.`);
+    }
+
+    // Quien tenga ahora ese carro lo suelta, salvo que vaya en carrera.
+    await this.relevar(vehicle.id, vehicle.plate, driverId);
+
+    if (actual) await this.closeShift(driverId);
+    return this.openShift(driverId, vehicle.plate);
+  }
+
+  /** La placa del turno abierto del conductor, o nulo si no tiene turno. */
+  async placaDelTurno(driverId: string): Promise<string | null> {
+    const [fila] = await this.db
+      .select({ plate: vehicles.plate })
+      .from(driverShifts)
+      .innerJoin(vehicles, eq(vehicles.id, driverShifts.vehicleId))
+      .where(and(eq(driverShifts.driverId, driverId), isNull(driverShifts.endedAt)))
+      .limit(1);
+    return fila?.plate ?? null;
+  }
+
+  /**
+   * Cambiar de conductor: quien entrega el celular sale de él (17/11/2026).
+   *
+   * Su turno se cierra —el carro queda libre para el que entra— y la sesión
+   * del celular la revoca Identidad. Con una carrera asignada o en curso no
+   * se puede: el carro y el cliente siguen siendo suyos.
+   */
+  async salirDelCelular(driverId: string): Promise<void> {
+    if (await this.tieneCarreraActiva(driverId)) {
+      throw new AppError('DRIVER_BUSY', 'Termina la carrera antes de cambiar de conductor.');
+    }
+    if (await this.openShiftOf(driverId)) await this.closeShift(driverId);
   }
 
   /**
@@ -619,6 +703,7 @@ export class FleetService {
         suspendidoHasta: drivers.suspendidoHasta,
         motivoSuspension: drivers.motivoSuspension,
         shiftStartedAt: driverShifts.startedAt,
+        fueraDeListado: driverShifts.fueraDeListado,
         plate: vehicles.plate,
         vehicleType: vehicles.type,
         capacity: vehicles.capacity,

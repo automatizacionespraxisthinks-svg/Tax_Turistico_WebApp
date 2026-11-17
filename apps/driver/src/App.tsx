@@ -66,6 +66,13 @@ export function App() {
   const [session, dispatch] = useReducer(sessionReducer, initialSession);
   const [notice, setNotice] = useState<string>();
   const [push, setPush] = useState<PushState>(() => pushSupport());
+  /**
+   * Quién tiene la sesión y en qué carro, según la API. Con un celular que
+   * comparten dos conductores, la pantalla tiene que decir de quién es el
+   * turno (17/11/2026).
+   */
+  const [conductor, setConductor] = useState<{ code: string; name: string }>();
+  const [placaDelTurno, setPlacaDelTurno] = useState<string>();
   const previousPhase = useRef<Phase>(session.phase);
   const positionWatcher = useRef<PositionWatcher>(undefined);
   /**
@@ -98,6 +105,8 @@ export function App() {
       // Antes de cualquier `dispatch`: el efecto del GPS puede crear el
       // vigilante en ese mismo ciclo y tiene que leer ya la cadencia buena.
       if (me.rules?.positionSeconds) cadencia.current = me.rules.positionSeconds;
+      setConductor({ code: me.driver.code, name: me.driver.name });
+      setPlacaDelTurno(me.shift?.plate);
 
       // La placa del turno abierto manda sobre la recordada: es la que de
       // verdad está asociada en la base.
@@ -171,12 +180,14 @@ export function App() {
          * sigue siendo bueno y vuelve a servir en cuanto lo habiliten.
          *
          * Borrándolo, una suspensión de media hora le costaba al conductor
-         * volver a entrar con código, placa y PIN. Y si de verdad le
+         * volver a entrar con código y PIN. Y si de verdad le
          * revocaron el celular, guardarlo no le da nada: el servidor no lo
          * acepta nunca más y va a ver esta misma pantalla.
          */
         dispatch({ type: 'logged_out' });
-        setNotice('Tu acceso está en pausa. Si ya te habilitaron, vuelve a abrir la aplicación.');
+        setNotice(
+          'Tu sesión no está activa: puede que hayas entrado en otro celular, o que la oficina pausara tu acceso. Entra de nuevo o llama a la oficina.',
+        );
       }
     }
   }, []);
@@ -283,6 +294,14 @@ export function App() {
       onShiftClosed: (motivo) => {
         setNotice(motivo);
         void restore();
+      },
+      onSessionClosed: (motivo) => {
+        // Esta credencial no vuelve a servir: se borra y se pide entrar.
+        storeToken(null);
+        setConductor(undefined);
+        setPlacaDelTurno(undefined);
+        dispatch({ type: 'logged_out' });
+        setNotice(motivo);
       },
     });
 
@@ -436,11 +455,10 @@ export function App() {
   );
 
   const login = useCallback(
-    async (code: string, plate: string, pin: string): Promise<string | null> => {
+    async (code: string, pin: string): Promise<string | null> => {
       try {
         const response = await api.login<{ token: string }>('/v1/auth/driver', {
           code,
-          plate,
           pin,
           device: navigator.userAgent.slice(0, 100),
           install: installId(),
@@ -458,11 +476,63 @@ export function App() {
         if (error instanceof ApiError && error.code === 'DRIVER_SUSPENDED') {
           return error.message;
         }
-        return 'Código, placa o PIN incorrectos.';
+        return 'Código o PIN incorrectos.';
       }
     },
     [restore],
   );
+
+  /*
+   * Cambiar de carro y cambiar de conductor (17/11/2026).
+   *
+   * Directo, sin la cola de sin conexión, como cancelar: hecho más tarde,
+   * cuando vuelva la señal, podría caer sobre un turno que ya cambió. Sin
+   * señal se le dice y lo intenta de nuevo.
+   */
+  const cambiarDeCarro = useCallback(
+    async (plate: string): Promise<string | null> => {
+      try {
+        const turno = await api.post<{ plate: string }>('/v1/driver/shift/switch', { plate });
+        try {
+          window.localStorage.setItem('tax.driver.plate', turno.plate);
+        } catch {
+          // Sin almacenamiento la escribe la próxima vez.
+        }
+        setPlacaDelTurno(turno.plate);
+        await restore();
+        setNotice(`Listo: ahora vas en el ${turno.plate}.`);
+        return null;
+      } catch (error) {
+        if (error instanceof ApiError && error.isOffline) return 'Sin señal: no se pudo cambiar de carro.';
+        return error instanceof ApiError ? error.message : 'No se pudo cambiar de carro. Inténtalo de nuevo.';
+      }
+    },
+    [restore],
+  );
+
+  const cambiarDeConductor = useCallback(async (): Promise<string | null> => {
+    try {
+      await api.post('/v1/driver/logout');
+    } catch (error) {
+      if (error instanceof ApiError && error.isOffline) return 'Sin señal: no se pudo cerrar la sesión.';
+      // Con la sesión ya revocada (por ejemplo, otro conductor entró en este
+      // celular) no hay nada que cerrar: se sigue a la pantalla de acceso.
+      if (!(error instanceof ApiError && error.status === 401)) {
+        return error instanceof ApiError ? error.message : 'No se pudo cerrar la sesión. Inténtalo de nuevo.';
+      }
+    }
+    /*
+     * La suscripción de push del navegador se conserva: es la de este
+     * celular, y la API ya la quitó de la cuenta del que sale. Cuando el que
+     * entra abra su turno, se registra a su nombre.
+     */
+    storeToken(null);
+    setConductor(undefined);
+    setPlacaDelTurno(undefined);
+    dispatch({ type: 'logged_out' });
+    setNotice('Sesión cerrada. Ahora entra el otro conductor con su código y su PIN.');
+    return null;
+  }, []);
 
   const rideId = session.offer?.rideId;
 
@@ -532,11 +602,16 @@ export function App() {
             {session.phase === 'off_shift' || session.phase === 'available' || session.phase === 'paused' ? (
               <Turno
                 session={session}
+                conductor={conductor}
+                placaDelTurno={placaDelTurno}
+                onSwitchVehicle={cambiarDeCarro}
+                onChangeDriver={cambiarDeConductor}
                 push={push}
                 onEnablePush={() => void enablePush().then(setPush).catch(() => undefined)}
                 onStartShift={(plate) =>
                   void command('/v1/driver/shift/open', () => {
                     dispatch({ type: 'shift_opened' });
+                    setPlacaDelTurno(plate);
                     /*
                      * El permiso se pide aquí y no al abrir la aplicación:
                      * preguntarlo nada más entrar es la forma más rápida de
@@ -549,6 +624,7 @@ export function App() {
                 onEndShift={() =>
                   void command('/v1/driver/shift/close', () => {
                     dispatch({ type: 'end_shift' });
+                    setPlacaDelTurno(undefined);
                     // Fuera de turno no llegan ofertas: tampoco avisos.
                     void disablePush().catch(() => undefined);
                   })

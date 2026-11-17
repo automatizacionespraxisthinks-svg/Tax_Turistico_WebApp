@@ -39,6 +39,11 @@ export interface DriverSocketHandlers {
   onRideChanged: (event: RideChangedPush) => void;
   /** Le cerraron el turno sin pedirlo (relevo o suspensión), con el motivo. */
   onShiftClosed: (motivo: string) => void;
+  /**
+   * La sesión de este celular se cerró: el conductor entró en otro teléfono,
+   * otro conductor entró en este, o la oficina lo revocó (17/11/2026).
+   */
+  onSessionClosed: (motivo: string) => void;
   onConnectionChange: (connected: boolean) => void;
 }
 
@@ -79,6 +84,7 @@ export function connectDriverSocket(handlers: DriverSocketHandlers): () => void 
   );
   socket.on('ride:changed', handlers.onRideChanged);
   socket.on('shift:closed', (event: { motivo: string }) => handlers.onShiftClosed(event.motivo));
+  socket.on('session:closed', (event: { motivo: string }) => handlers.onSessionClosed(event.motivo));
 
   return () => {
     socket.removeAllListeners();

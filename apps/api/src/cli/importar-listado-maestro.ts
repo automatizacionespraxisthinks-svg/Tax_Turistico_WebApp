@@ -147,7 +147,7 @@ async function main(): Promise<void> {
       }
       if (rutaPines) {
         writeFileSync(rutaPines, csvDePines(informe), { encoding: 'utf8', mode: 0o600 });
-        console.log(`\nTambién quedaron en ${rutaPines}. Entrégalos y borra el archivo: con código, placa y PIN se entra a la PWA.`);
+        console.log(`\nTambién quedaron en ${rutaPines}. Entrégalos y borra el archivo: con código y PIN se entra a la PWA.`);
       }
       console.log('\nCada conductor entra con su código, la placa de su móvil y su PIN. Si alguno pierde el PIN, se le genera otro desde Flota.');
     }

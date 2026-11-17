@@ -146,26 +146,35 @@ export class IdentityService {
   /* ---------------------------------------------------------- conductores */
 
   /**
-   * Acceso del conductor: código + placa + PIN (§8.1).
+   * Acceso del conductor: código + PIN (§8.1).
    *
-   * El código circula entre compañeros y la placa es pública, así que el PIN
-   * es lo único que de verdad autentica. Se bloquea a los cinco intentos y
-   * siempre se responde lo mismo, para no revelar si el código existe.
+   * El código circula entre compañeros, así que el PIN es lo único que de
+   * verdad autentica. Se bloquea a los cinco intentos y siempre se responde
+   * lo mismo, para no revelar si el código existe.
+   *
+   * La placa salió del acceso el 17/11/2026: aquí solo se comprobaba que
+   * tuviera cinco letras, y el carro de verdad se elige al abrir el turno,
+   * porque un conductor maneja varios carros y un carro varios conductores.
+   * El acceso dice QUIÉN es; el turno, en QUÉ carro va.
    */
   async loginDriver(
     code: string,
-    plate: string,
     pin: string,
     deviceLabel: string,
     installId?: string,
-  ): Promise<{ driver: DriverPrincipal; refreshToken: string }> {
+  ): Promise<{
+    driver: DriverPrincipal;
+    refreshToken: string;
+    /** Sesiones que este acceso cerró en otros celulares, para cortar su socket. */
+    sesionesCerradas: { driverId: string; deviceId: string; motivo: string }[];
+  }> {
     const [driver] = await this.db
       .select()
       .from(drivers)
       .where(and(eq(drivers.code, code), eq(drivers.active, true)))
       .limit(1);
 
-    const invalid = new AppError('UNAUTHORIZED', 'Código, placa o PIN incorrectos');
+    const invalid = new AppError('UNAUTHORIZED', 'Código o PIN incorrectos');
     if (!driver) throw invalid;
 
     if (driver.lockedUntil && driver.lockedUntil > new Date()) {
@@ -188,10 +197,6 @@ export class IdentityService {
       throw invalid;
     }
 
-    // La placa se valida contra el turno abierto en el módulo de Flota; aquí
-    // solo se comprueba que venga, porque sin ella el acceso sería código+PIN.
-    if (!plate || plate.trim().length < 5) throw invalid;
-
     // Después del PIN y no antes: decir «suspendido» a quien no lo tiene
     // revelaría que el código existe. Con el PIN correcto, en cambio, se le
     // dice hasta cuándo; un «PIN incorrecto» lo mandaría a pedir otro.
@@ -204,6 +209,7 @@ export class IdentityService {
 
     const refreshToken = randomToken(32);
     let deviceId = uuidv7();
+    const sesionesCerradas: { driverId: string; deviceId: string; motivo: string }[] = [];
 
     await this.db.transaction(async (tx) => {
       await tx
@@ -252,21 +258,62 @@ export class IdentityService {
         });
       }
 
-      // Filas sin identificador: las dejó una versión anterior de la
-      // aplicación, que creaba una por acceso. Se retiran cuando el conductor
-      // entra desde una instalación que sí se identifica, porque si no
-      // seguirían recibiendo avisos para siempre sin que nadie las mire.
+      /*
+       * Un celular, un conductor a la vez.
+       *
+       * Si este celular estaba a nombre de otro conductor (el carro lo
+       * manejan dos con el mismo teléfono), su sesión aquí se revoca y su
+       * suscripción de push se borra: si no, al de antes le seguirían
+       * llegando ofertas al teléfono que ahora tiene el compañero.
+       */
       if (installId) {
-        await tx
+        const ajenos = await tx
           .update(driverDevices)
-          .set({ revokedAt: new Date() })
+          .set({ revokedAt: new Date(), pushSubscription: null })
           .where(
             and(
-              eq(driverDevices.driverId, driver.id),
-              isNull(driverDevices.installId),
+              eq(driverDevices.installId, installId),
+              ne(driverDevices.driverId, driver.id),
               isNull(driverDevices.revokedAt),
             ),
-          );
+          )
+          .returning({ id: driverDevices.id, driverId: driverDevices.driverId });
+        for (const fila of ajenos) {
+          sesionesCerradas.push({
+            driverId: fila.driverId,
+            deviceId: fila.id,
+            motivo: `${driver.name} entró en este celular. Tu sesión aquí quedó cerrada.`,
+          });
+        }
+      }
+
+      /*
+       * Un conductor, un celular activo (17/11/2026).
+       *
+       * Como WhatsApp: entrar en otro teléfono cierra la sesión del anterior
+       * y le borra el push. Antes un conductor podía quedar activo en varios
+       * a la vez: las ofertas le llegaban a todos, y quien conociera su PIN
+       * podía usar su cuenta en otro teléfono sin que él se enterara. Esto
+       * también retira las filas sin identificador que dejaba una versión
+       * vieja de la aplicación, una por acceso.
+       */
+      const anteriores = await tx
+        .update(driverDevices)
+        .set({ revokedAt: new Date(), pushSubscription: null })
+        .where(
+          and(
+            eq(driverDevices.driverId, driver.id),
+            ne(driverDevices.id, deviceId),
+            isNull(driverDevices.revokedAt),
+          ),
+        )
+        .returning({ id: driverDevices.id });
+      for (const fila of anteriores) {
+        sesionesCerradas.push({
+          driverId: driver.id,
+          deviceId: fila.id,
+          motivo: 'Entraste en otro celular. Aquí la sesión quedó cerrada.',
+        });
       }
     });
 
@@ -279,6 +326,7 @@ export class IdentityService {
         deviceId,
       },
       refreshToken,
+      sesionesCerradas,
     };
   }
 
@@ -341,6 +389,18 @@ export class IdentityService {
     await this.db
       .update(driverDevices)
       .set({ pushSubscription: JSON.stringify(subscription), lastSeenAt: new Date() })
+      .where(eq(driverDevices.id, deviceId));
+  }
+
+  /**
+   * El conductor sale de este celular («Cambiar de conductor»): la sesión
+   * deja de valer y el push se borra, para que no le lleguen ofertas a un
+   * teléfono que ya tiene otro.
+   */
+  async revocarDispositivo(deviceId: string): Promise<void> {
+    await this.db
+      .update(driverDevices)
+      .set({ revokedAt: new Date(), pushSubscription: null })
       .where(eq(driverDevices.id, deviceId));
   }
 

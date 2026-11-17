@@ -19,7 +19,7 @@ export const drivers = pgTable(
   {
     id: uuid('id').primaryKey(),
     /** Código interno que el conductor usa para entrar; se enumera, así que
-        va acompañado siempre de placa y PIN (§8.1). */
+        va acompañado siempre del PIN (§8.1). */
     code: text('code').notNull(),
     name: text('name').notNull(),
     /** Documento cifrado a nivel de aplicación: el disco del VPS no se
@@ -152,6 +152,12 @@ export const driverShifts = pgTable(
       .references(() => vehicles.id),
     startedAt: timestamp('started_at', { withTimezone: true }).notNull().defaultNow(),
     endedAt: timestamp('ended_at', { withTimezone: true }),
+    /**
+     * El conductor tomó un móvil al que el listado maestro no lo vincula
+     * (17/11/2026). El turno se abre igual —que un Excel desactualizado no
+     * deje a nadie sin trabajar— y la oficina lo ve marcado en Flota.
+     */
+    fueraDeListado: boolean('fuera_de_listado').notNull().default(false),
   },
   (table) => [
     index('driver_shifts_driver_idx').on(table.driverId, table.startedAt),

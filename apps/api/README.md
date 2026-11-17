@@ -468,7 +468,7 @@ otro mecanismo: la bitácora tiene `DELETE` revocado a propósito.
   avisos de push salen a todos los dispositivos vivos del conductor, uno que
   vuelve a entrar varias veces recibiría la misma oferta repetida. Ahora la
   PWA se genera un identificador la primera vez y lo guarda; no autentica
-  nada, para llegar a usarlo hay que haber pasado código, placa y PIN.
+  nada, para llegar a usarlo hay que haber pasado código y PIN.
 
 ## Superficies
 

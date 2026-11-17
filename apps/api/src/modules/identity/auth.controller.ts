@@ -5,11 +5,17 @@ import { isValidLogin, normalizeLogin } from '@tax/shared';
 import { zodBody } from '../../common/zod.pipe';
 import { loadEnv } from '../../config/env';
 import { IdentityService } from './identity.service';
+import { AuditService } from '../audit/audit.service';
+import { RealtimeGateway } from '../../realtime/realtime.gateway';
 import { AllowWithTemporaryPassword, AllowWithoutTotp, SESSION_COOKIE, SessionGuard } from './guards';
 
 const driverLoginSchema = z.object({
   code: z.string().min(1),
-  plate: z.string().min(5),
+  /**
+   * Ya no se usa (17/11/2026): el carro se elige al abrir el turno. Se acepta
+   * para que una PWA vieja, que todavía la manda, pueda seguir entrando.
+   */
+  plate: z.string().optional(),
   pin: z.string().min(4).max(6).regex(/^\d+$/, 'El PIN es numérico'),
   device: z.string().min(1).max(120).default('Dispositivo del conductor'),
   /**
@@ -48,17 +54,41 @@ const totpActivateSchema = z.object({
 
 @Controller('v1/auth')
 export class AuthController {
-  constructor(private readonly identity: IdentityService) {}
+  constructor(
+    private readonly identity: IdentityService,
+    private readonly audit: AuditService,
+    private readonly realtime: RealtimeGateway,
+  ) {}
 
   @Post('driver')
-  async driverLogin(@Body(zodBody(driverLoginSchema)) body: z.infer<typeof driverLoginSchema>) {
-    const { driver, refreshToken } = await this.identity.loginDriver(
+  async driverLogin(
+    @Req() request: FastifyRequest,
+    @Body(zodBody(driverLoginSchema)) body: z.infer<typeof driverLoginSchema>,
+  ) {
+    const { driver, refreshToken, sesionesCerradas } = await this.identity.loginDriver(
       body.code,
-      body.plate,
       body.pin,
       body.device,
       body.install,
     );
+
+    // Los celulares que este acceso dejó sin sesión se enteran ya.
+    for (const cerrada of sesionesCerradas) {
+      await this.realtime.cerrarSesionDe(cerrada.driverId, cerrada.deviceId, cerrada.motivo);
+    }
+
+    const propias = sesionesCerradas.filter((s) => s.driverId === driver.id).length;
+    await this.audit.record({
+      actorId: driver.id,
+      actorName: driver.name,
+      role: 'conductor',
+      action: propias > 0 ? 'Entró en otro celular (el anterior quedó cerrado)' : 'Entró en un celular',
+      entity: 'drivers',
+      entityId: driver.code,
+      after: { celular: body.device.slice(0, 120), cerradas: sesionesCerradas.length },
+      ip: request.ip,
+    });
+
     return { driver: { id: driver.id, code: driver.code, name: driver.name }, token: refreshToken };
   }
 

@@ -155,6 +155,22 @@ export class RealtimeGateway implements OnGatewayConnection, OnGatewayDisconnect
    * estado y muestra el motivo, en vez de quedarse esperando carreras que
    * ya no le van a llegar.
    */
+  /**
+   * Cierra la sesión de UN celular del conductor (17/11/2026): le avisa a la
+   * PWA por qué y le corta el socket. La sala es por conductor, así que sin
+   * esto un celular revocado seguía recibiendo ofertas por el socket hasta
+   * que se reconectara.
+   */
+  async cerrarSesionDe(driverId: string, deviceId: string, motivo: string): Promise<void> {
+    if (!this.server) return;
+    const sockets = await this.server.in(`driver:${driverId}`).fetchSockets();
+    for (const socket of sockets) {
+      if ((socket.data.principal as { deviceId?: string } | undefined)?.deviceId !== deviceId) continue;
+      socket.emit('session:closed', { motivo });
+      socket.disconnect(true);
+    }
+  }
+
   turnoCerrado(driverId: string, motivo: string): void {
     this.server?.to(`driver:${driverId}`).emit('shift:closed', { motivo });
   }

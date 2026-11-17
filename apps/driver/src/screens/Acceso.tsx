@@ -7,19 +7,23 @@ import { Screen } from '../components/Chrome';
 import logo from '../assets/logo-tax-turistico.png';
 
 /**
- * Acceso del conductor: código + placa + PIN personal (§8.1).
+ * Acceso del conductor: código + PIN personal (§8.1).
  *
- * El código circula entre compañeros y la placa es pública, así que ninguno de
- * los dos basta: el PIN es personal y el dispositivo queda registrado, de modo
- * que la oficina puede revocar un celular perdido.
+ * El código circula entre compañeros, así que no basta: el PIN es personal y
+ * el dispositivo queda registrado, de modo que la oficina puede revocar un
+ * celular perdido.
+ *
+ * Sin placa desde el 17/11/2026: un conductor maneja varios carros y un carro
+ * varios conductores, así que el acceso dice QUIÉN es y el carro se elige al
+ * abrir el turno.
  */
 export function Acceso({
   onSubmit,
 }: {
-  onSubmit: (code: string, plate: string, pin: string) => Promise<string | null>;
+  onSubmit: (code: string, pin: string) => Promise<string | null>;
 }) {
   /*
-   * Vacíos, los tres.
+   * Vacíos.
    *
    * El código y la placa traían los del conductor de pruebas (101 / UBP472),
    * sin guardia de desarrollo, así que en producción cada conductor abría la
@@ -27,7 +31,6 @@ export function Acceso({
    * intentaba entrar con un código que no era el suyo y el PIN no cuadraba.
    */
   const [code, setCode] = useState('');
-  const [plate, setPlate] = useState('');
   const [pin, setPin] = useState('');
   const [error, setError] = useState<string>();
   const [submitting, setSubmitting] = useState(false);
@@ -41,7 +44,7 @@ export function Acceso({
     setError(undefined);
     setSubmitting(true);
     try {
-      const failure = await onSubmit(code.trim(), plate.trim().toUpperCase(), pin);
+      const failure = await onSubmit(code.trim(), pin);
       if (failure) setError(failure);
     } finally {
       setSubmitting(false);
@@ -66,7 +69,7 @@ export function Acceso({
             height={64}
             className="mb-5 size-16 rounded-full bg-surface shadow-sm"
           />
-          <h1 className="text-display font-semibold tracking-[-0.02em] text-ink">Entrar al turno</h1>
+          <h1 className="text-display font-semibold tracking-[-0.02em] text-ink">Entrar</h1>
           <p className="mt-1.5 text-lg text-ink-secondary">
             Tax Turístico · aplicación de conductores
           </p>
@@ -81,16 +84,6 @@ export function Acceso({
               value={code}
               onChange={(e) => setCode(e.target.value)}
               className="h-14 text-xl"
-            />
-          </Field>
-
-          <Field label="Placa del vehículo" htmlFor="plate" required>
-            <Input
-              id="plate"
-              autoCapitalize="characters"
-              value={plate}
-              onChange={(e) => setPlate(e.target.value.toUpperCase())}
-              className="h-14 font-mono text-xl tracking-[0.08em]"
             />
           </Field>
 

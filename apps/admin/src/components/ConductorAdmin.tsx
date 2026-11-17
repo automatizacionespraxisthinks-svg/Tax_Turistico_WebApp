@@ -522,6 +522,15 @@ export function GestionConductor({
   });
 
   const vivos = (dispositivos.data ?? []).filter((d) => !d.revokedAt);
+  /*
+   * Un conductor tiene un solo celular activo (17/11/2026): entrar en otro
+   * cierra el anterior. Los cerrados se muestran debajo, en gris y sin
+   * botón, solo los últimos: sirven para ver cuándo cambió de teléfono.
+   */
+  const anteriores = (dispositivos.data ?? [])
+    .filter((d) => d.revokedAt)
+    .sort((a, b) => (b.revokedAt ?? '').localeCompare(a.revokedAt ?? ''))
+    .slice(0, 3);
 
   return (
     <div className="space-y-5">
@@ -624,7 +633,7 @@ export function GestionConductor({
 
       {gestionar ? (
         <div>
-          <SectionLabel>Celulares registrados</SectionLabel>
+          <SectionLabel>Celular activo</SectionLabel>
           <div className="mt-2 space-y-2">
             {dispositivos.isLoading ? (
               <p className="text-caption text-ink-muted">Cargando…</p>
@@ -661,6 +670,21 @@ export function GestionConductor({
               ))
             )}
           </div>
+
+          {anteriores.length > 0 ? (
+            <div className="mt-3">
+              <p className="text-micro font-semibold uppercase tracking-[0.07em] text-ink-muted">Anteriores</p>
+              <ul className="mt-1.5 space-y-1">
+                {anteriores.map((d) => (
+                  <li key={d.id} className="flex items-center gap-1.5 truncate text-caption text-ink-muted">
+                    <Smartphone className="size-3 shrink-0" />
+                    <span className="truncate">{d.label.slice(0, 40)}</span>
+                    <span className="ml-auto shrink-0">cerrado {formatRelative(d.revokedAt!)}</span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          ) : null}
         </div>
       ) : null}
     </div>

@@ -114,6 +114,7 @@ export interface ApiDriver {
   }[];
   deviceRegistered: boolean;
   shiftStartedAt: string | null;
+  fueraDeListado?: boolean | null;
   plate: string | null;
   vehicleType: VehicleType | null;
   capacity: number | null;
@@ -266,6 +267,7 @@ export function toDriver(row: ApiDriver): Driver {
     position: row.position,
     positionAgeSeconds: row.positionAgeSeconds,
     shiftStartedAt: row.shiftStartedAt ?? undefined,
+    fueraDeListado: row.fueraDeListado === true,
     // Estos dos todavía no los expone la API; se calcularán con los reportes.
     ridesToday: 0,
     acceptanceRate: 0,

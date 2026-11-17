@@ -148,6 +148,13 @@
       "when": 1793934930724,
       "tag": "0020_cancelacion_del_conductor",
       "breakpoints": true
+    },
+    {
+      "idx": 21,
+      "version": "7",
+      "when": 1794952487388,
+      "tag": "0021_movil_fuera_de_listado",
+      "breakpoints": true
     }
   ]
 }

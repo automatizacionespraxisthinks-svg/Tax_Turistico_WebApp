@@ -51,6 +51,11 @@ export interface Driver {
   /** Los móviles a los que está vinculado, como conductor o relevador. */
   moviles?: MovilVinculado[];
   shiftStartedAt?: string;
+  /**
+   * El turno abierto es en un móvil al que el listado maestro no lo vincula
+   * (17/11/2026): se le deja trabajar, y la oficina lo ve marcado.
+   */
+  fueraDeListado?: boolean;
   ridesToday: number;
   acceptanceRate: number;
   currentRideId?: string;

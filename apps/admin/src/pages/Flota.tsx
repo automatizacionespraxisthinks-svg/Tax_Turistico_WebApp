@@ -223,6 +223,7 @@ function DriverCard({ driver, onClick }: { driver: Driver; onClick: () => void }
         stale ||
         !driver.deviceRegistered ||
         !driver.vehicle.active ||
+        driver.fueraDeListado ||
         licencia.alerta) && (
         <div className="mt-2.5 flex flex-wrap gap-1.5">
           {!driver.active ? <Desactivado /> : null}
@@ -231,6 +232,7 @@ function DriverCard({ driver, onClick }: { driver: Driver; onClick: () => void }
           {stale ? <Alert>Sin GPS reciente</Alert> : null}
           {!driver.deviceRegistered ? <Alert>Dispositivo sin registrar</Alert> : null}
           {!driver.vehicle.active ? <Alert>Vehículo inactivo</Alert> : null}
+          {driver.fueraDeListado ? <Alert>Móvil fuera de su listado</Alert> : null}
           {licencia.alerta ? <Alert>{licencia.alerta}</Alert> : null}
         </div>
       )}
@@ -355,7 +357,7 @@ function DriverDetail({ driver, rideCode }: { driver: Driver; rideCode?: string 
         <SectionLabel>Seguridad</SectionLabel>
         <div className="mt-2 space-y-1.5 rounded-md border border-line p-3 text-base">
           <Row label="Dispositivo registrado">{driver.deviceRegistered ? 'Sí' : 'No'}</Row>
-          <Row label="Acceso">Código + placa + PIN personal</Row>
+          <Row label="Acceso">Código + PIN personal · un celular a la vez</Row>
         </div>
       </div>
     </div>

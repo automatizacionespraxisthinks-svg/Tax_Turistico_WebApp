@@ -402,6 +402,7 @@ export class FleetAdminService {
         label: driverDevices.label,
         revokedAt: driverDevices.revokedAt,
         code: drivers.code,
+        driverId: drivers.id,
       })
       .from(driverDevices)
       .innerJoin(drivers, eq(drivers.id, driverDevices.driverId))
@@ -432,6 +433,12 @@ export class FleetAdminService {
       );
     });
 
+    // Sin esto el celular seguía recibiendo ofertas por el socket abierto.
+    await this.realtime.cerrarSesionDe(
+      dispositivo.driverId,
+      deviceId,
+      'La oficina cerró tu sesión en este celular. Si es un error, llama a la oficina.',
+    );
     this.logger.log({ code: dispositivo.code, actor: actor.name }, 'Dispositivo revocado');
   }
 
