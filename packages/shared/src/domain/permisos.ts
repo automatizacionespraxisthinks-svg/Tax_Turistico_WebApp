@@ -55,13 +55,20 @@ export const PERMISOS = [
     area: 'Flota',
     nombre: 'Gestionar conductores',
     descripcion:
-      'Dar de alta, activar o desactivar, pago electrónico, cuentas de prueba, PIN nuevo y teléfonos registrados.',
+      'Dar de alta, activar o desactivar, pago electrónico, cuentas de prueba, PIN nuevo, teléfonos registrados, vehículos y los vehículos que cada conductor puede manejar.',
   },
   {
     clave: 'conductores.suspender',
     area: 'Flota',
     nombre: 'Suspender conductores',
     descripcion: 'Suspender por días con un motivo, y levantar la suspensión antes de tiempo.',
+  },
+  {
+    clave: 'conductores.eliminar',
+    area: 'Flota',
+    nombre: 'Eliminar conductores',
+    descripcion:
+      'Dar de baja definitiva a un conductor y borrar sus datos personales. No se puede deshacer; queda en la auditoría.',
   },
   {
     clave: 'zonas.gestionar',

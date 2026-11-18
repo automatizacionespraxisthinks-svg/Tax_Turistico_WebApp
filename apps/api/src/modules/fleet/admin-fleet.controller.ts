@@ -24,9 +24,35 @@ const nuevoConductorSchema = z.object({
   code: z.string().trim().min(1).max(10).regex(/^[0-9]+$/, 'El código es numérico'),
   name: z.string().trim().min(3).max(120),
   phone: z.string().trim().regex(/^\+\d{8,15}$/, 'Teléfono en formato E.164, por ejemplo +573001234567'),
-  plate: z.string().trim().min(5).max(10),
-  vehicleType: z.enum(VEHICLE_TYPES).default('sedan'),
+  /** Los vehículos que podrá manejar (18/11/2026); es lo que manda el panel. */
+  vehicleIds: z.array(z.string().uuid()).max(100).optional(),
+  /** La forma de antes: una placa que crea el vehículo si no existe. */
+  plate: z.string().trim().min(5).max(10).optional(),
+  vehicleType: z.enum(VEHICLE_TYPES).optional(),
+}).refine((v) => (v.vehicleIds?.length ?? 0) > 0 || Boolean(v.plate), {
+  message: 'Elige al menos un vehículo que pueda manejar',
+  path: ['vehicleIds'],
 });
+
+const vehiculosPermitidosSchema = z.object({
+  vehicleIds: z.array(z.string().uuid()).max(100),
+});
+
+const nuevoVehiculoSchema = z.object({
+  plate: z.string().trim().min(5, 'La placa tiene al menos 5 caracteres').max(10),
+  internalNumber: z.string().trim().max(10).optional(),
+  type: z.enum(VEHICLE_TYPES).default('sedan'),
+  capacity: z.number().int().min(1).max(20).optional(),
+});
+
+const cambiosVehiculoSchema = z
+  .object({
+    internalNumber: z.string().trim().max(10).nullable().optional(),
+    type: z.enum(VEHICLE_TYPES).optional(),
+    capacity: z.number().int().min(1).max(20).optional(),
+    active: z.boolean().optional(),
+  })
+  .refine((v) => Object.keys(v).length > 0, 'No hay nada que cambiar');
 
 const cambiosSchema = z
   .object({
@@ -39,6 +65,12 @@ const cambiosSchema = z
     aceptaPagoElectronico: z.boolean().optional(),
   })
   .refine((v) => Object.keys(v).length > 0, 'No hay nada que cambiar');
+
+const eliminarSchema = z.object({
+  motivo: z.string().trim().min(5, 'Escribe el motivo (al menos 5 letras)').max(300),
+  /** El código del conductor, escrito a mano por quien elimina. */
+  confirmacion: z.string().trim().min(1, 'Escribe el código del conductor para confirmar').max(10),
+});
 
 function actorDe(request: FastifyRequest): AdminActor {
   const user = request.user!;
@@ -124,6 +156,20 @@ export class AdminFleetController {
     return { code, pin, aviso: 'Este PIN no se vuelve a mostrar.' };
   }
 
+  /**
+   * Los vehículos que puede manejar (18/11/2026). Reemplaza la lista: solo
+   * podrá abrir turno o cambiar de carro dentro de ella.
+   */
+  @Post(':driverId/vehicles')
+  @RequierePermiso('conductores.gestionar')
+  async fijarVehiculos(
+    @Req() request: FastifyRequest,
+    @Param('driverId', ParseUUIDPipe) driverId: string,
+    @Body(zodBody(vehiculosPermitidosSchema)) body: z.infer<typeof vehiculosPermitidosSchema>,
+  ) {
+    return this.admin.fijarVehiculos(driverId, body.vehicleIds, actorDe(request));
+  }
+
   /** Si tiene turno abierto: la oficina lo mira antes de desactivarlo. */
   @Get(':driverId/shift')
   async shift(@Param('driverId', ParseUUIDPipe) driverId: string) {
@@ -142,6 +188,21 @@ export class AdminFleetController {
     }));
   }
 
+  /**
+   * Elimina un conductor: baja definitiva y borrado de sus datos personales
+   * (ver `FleetAdminService.eliminarDriver`). Pide el motivo y el código del
+   * conductor escrito a mano, y queda en la bitácora con quién lo hizo.
+   */
+  @Post(':driverId/eliminar')
+  @RequierePermiso('conductores.eliminar')
+  async eliminar(
+    @Req() request: FastifyRequest,
+    @Param('driverId', ParseUUIDPipe) driverId: string,
+    @Body(zodBody(eliminarSchema)) body: z.infer<typeof eliminarSchema>,
+  ) {
+    return this.admin.eliminarDriver(driverId, body, actorDe(request));
+  }
+
   @Post('devices/:deviceId/revoke')
   @RequierePermiso('conductores.gestionar')
   @HttpCode(204)
@@ -150,7 +211,11 @@ export class AdminFleetController {
   }
 }
 
-/** Placas dadas de alta, para elegir en vez de escribirlas a mano. */
+/**
+ * Vehículos (18/11/2026): los que se eligen como permitidos de cada
+ * conductor. Se dan de alta y se editan; no se borran, porque sus turnos y
+ * carreras los siguen nombrando: se desactivan.
+ */
 @Controller('v1/admin/vehicles')
 @UseGuards(SessionGuard)
 export class AdminVehiclesController {
@@ -159,5 +224,25 @@ export class AdminVehiclesController {
   @Get()
   list() {
     return this.admin.listVehicles();
+  }
+
+  @Post()
+  @RequierePermiso('conductores.gestionar')
+  crear(
+    @Req() request: FastifyRequest,
+    @Body(zodBody(nuevoVehiculoSchema)) body: z.infer<typeof nuevoVehiculoSchema>,
+  ) {
+    return this.admin.crearVehiculo(body, actorDe(request));
+  }
+
+  @Patch(':vehicleId')
+  @RequierePermiso('conductores.gestionar')
+  @HttpCode(204)
+  async editar(
+    @Req() request: FastifyRequest,
+    @Param('vehicleId', ParseUUIDPipe) vehicleId: string,
+    @Body(zodBody(cambiosVehiculoSchema)) body: z.infer<typeof cambiosVehiculoSchema>,
+  ) {
+    await this.admin.editarVehiculo(vehicleId, body, actorDe(request));
   }
 }

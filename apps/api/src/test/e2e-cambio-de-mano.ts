@@ -12,7 +12,9 @@ import { uuidv7 } from 'uuidv7';
  *    que la sigue mandando entra igual);
  *  - «Cambiar de carro» cierra el turno del carro de antes y abre el del
  *    nuevo con la misma sesión, y si algo falla no deja al conductor fuera;
- *  - un móvil que el listado maestro no le asigna se abre igual, marcado;
+ *  - solo se abre turno o se cambia de carro en un vehículo permitido
+ *    (18/11/2026): con el de un compañero se rechaza, no se le quita el carro
+ *    y el intento queda en la bitácora;
  *  - con una carrera tomada no se cambia ni de carro ni de conductor;
  *  - «Cambiar de conductor» cierra el turno, revoca la sesión del celular y
  *    le borra el push; el compañero entra en el mismo celular con su PIN;
@@ -81,7 +83,30 @@ async function main() {
   const idDe = async (code: string) => (await fila<{ id: string }>('select id from drivers where code = $1', [code])).id;
   const uno = await idDe(UNO);
   const otro = await idDe(OTRO);
-  const vinculoDePrueba = uuidv7();
+  /*
+   * Los vehículos permitidos de la prueba: el uno puede UBP472 y TQR118, el
+   * otro UBP472 y SVM903. Solo se borran al final los que la prueba creó.
+   */
+  const vinculosDePrueba: string[] = [];
+  for (const [driverId, placa] of [
+    [uno, 'UBP472'],
+    [uno, 'TQR118'],
+    [otro, 'UBP472'],
+    [otro, 'SVM903'],
+  ] as const) {
+    const r = await db.query(
+      `insert into vehicle_drivers (id, vehicle_id, driver_id, role, origen)
+       select $1, v.id, $2, 'relevador', 'panel' from vehicles v where v.plate = $3
+       on conflict do nothing returning id`,
+      [uuidv7(), driverId, placa],
+    );
+    if (r.rows[0]) vinculosDePrueba.push(r.rows[0].id as string);
+  }
+  // El SVM903 no es del uno, aunque otra prueba lo hubiera dejado vinculado.
+  await db.query(
+    `delete from vehicle_drivers where driver_id = $1 and vehicle_id = (select id from vehicles where plate = 'SVM903')`,
+    [uno],
+  );
 
   // Punto de partida limpio: nadie de los dos en turno ni bloqueado.
   await db.query(`update driver_shifts set ended_at = now() where ended_at is null and driver_id = any($1)`, [[uno, otro]]);
@@ -132,23 +157,39 @@ async function main() {
       assert(abrio.n >= 1, 'y antes «Abrió turno en el móvil UBP472»');
     }
 
-    console.log('\n3. Un móvil que el listado no le asigna: se abre, marcado');
+    console.log('\n3. Solo en sus vehículos permitidos: el carro de un compañero se rechaza');
     {
-      // El SVM903 queda en el listado solo con el otro conductor.
-      await db.query(
-        `insert into vehicle_drivers (id, vehicle_id, driver_id, role)
-         select $1, v.id, $2, 'conductor' from vehicles v where v.plate = 'SVM903'`,
-        [vinculoDePrueba, otro],
-      );
+      // El otro está trabajando en el SVM903, que el uno no tiene permitido.
+      const tOtro = (await entrar(OTRO, { install: `${CELULAR}-otro` })).body.token as string;
+      const abreOtro = await call('/v1/driver/shift/open', { method: 'POST', token: tOtro, body: { plate: 'SVM903' } });
+      assert(abreOtro.status < 400, `el otro abre turno en el SVM903 (HTTP ${abreOtro.status})`, abreOtro.body);
+
+      const permitidos = await call('/v1/driver/vehicles', { token });
+      const placas = ((permitidos.body as unknown as { plate: string }[]) ?? []).map((v) => v.plate).sort();
+      assert(placas.join(',') === 'TQR118,UBP472', `la PWA recibe sus vehículos permitidos (${placas.join(', ')})`, permitidos.body);
+
       const r = await call('/v1/driver/shift/switch', { method: 'POST', token, body: { plate: 'SVM903' } });
-      assert(r.status < 400 && r.body.fueraDeListado === true, `pasa al SVM903 y viene marcado (HTTP ${r.status})`, r.body);
-      const turno = await fila<{ fuera: boolean }>(`select fuera_de_listado fuera from driver_shifts where driver_id = $1 and ended_at is null`, [uno]);
-      assert(turno?.fuera === true, 'el turno queda con fuera_de_listado');
-      const audit = await fila<{ n: number }>(`select count(*)::int n from audit_log where action = 'Tomó el móvil SVM903, que el listado no le asigna' and entity_id = $1 and at > now() - interval '1 minute'`, [UNO]);
-      assert(audit.n >= 1, 'y la bitácora lo anota');
+      assert(r.status === 403 && codigo(r) === 'VEHICLE_NOT_ALLOWED', `cambiar al SVM903: 403 VEHICLE_NOT_ALLOWED (HTTP ${r.status})`, r.body);
+      assert(/TQR118/.test(JSON.stringify(r.body)) && /UBP472/.test(JSON.stringify(r.body)), 'el mensaje dice en cuáles sí puede trabajar', r.body);
+      const sigue = await call('/v1/driver/rides/me', { token });
+      assert((sigue.body.shift as Json | null)?.plate === 'TQR118', 'y sigue en turno en el TQR118');
+      const delOtro = await fila<{ n: number }>(
+        `select count(*)::int n from driver_shifts s join vehicles v on v.id = s.vehicle_id
+          where s.driver_id = $1 and v.plate = 'SVM903' and s.ended_at is null`,
+        [otro],
+      );
+      assert(delOtro.n === 1, 'al otro no se le cerró el turno en el SVM903');
+
+      const abrir = await call('/v1/driver/shift/open', { method: 'POST', token, body: { plate: 'SVM903' } });
+      assert(codigo(abrir) === 'VEHICLE_NOT_ALLOWED', 'abrir turno en él también se rechaza', abrir.body);
+      const audit = await fila<{ n: number }>(`select count(*)::int n from audit_log where action = 'Intentó tomar el móvil SVM903, que no tiene permitido' and entity_id = $1 and at > now() - interval '1 minute'`, [UNO]);
+      assert(audit.n >= 2, 'los dos intentos quedan en la bitácora');
+
+      await db.query(`update driver_shifts set ended_at = now() where ended_at is null and driver_id = $1`, [otro]);
+      await db.query(`update drivers set status = 'OFF_SHIFT' where id = $1`, [otro]);
 
       const vuelta = await call('/v1/driver/shift/switch', { method: 'POST', token, body: { plate: 'UBP472' } });
-      assert(vuelta.status < 400 && vuelta.body.fueraDeListado === false, 'un móvil sin nadie en el listado no se marca');
+      assert(vuelta.status < 400 && vuelta.body.plate === 'UBP472', 'a un vehículo permitido sí pasa');
     }
 
     console.log('\n4. Con una carrera tomada no se cambia de carro ni de conductor');
@@ -253,7 +294,7 @@ async function main() {
       await db.query(`update driver_devices set revoked_at = now() where install_id = $1 and revoked_at is null`, [`${CELULAR}-b`]);
     }
   } finally {
-    await db.query('delete from vehicle_drivers where id = $1', [vinculoDePrueba]);
+    if (vinculosDePrueba.length) await db.query('delete from vehicle_drivers where id = any($1)', [vinculosDePrueba]);
     await db.query(`update driver_shifts set ended_at = now() where ended_at is null and driver_id = any($1)`, [[uno, otro]]);
     await db.query(`update drivers set status = 'OFF_SHIFT' where id = any($1)`, [[uno, otro]]);
     await db.query(`update driver_devices set revoked_at = now(), push_subscription = null where install_id = $1 and revoked_at is null`, [CELULAR]);

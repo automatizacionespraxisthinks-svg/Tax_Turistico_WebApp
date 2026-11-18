@@ -8,6 +8,7 @@ import type { SessionState } from '../state/session';
 import type { PushState } from '../api/push';
 import { Instalar } from '../components/Instalar';
 import { CambiosDelCelular } from '../components/CambiosDelCelular';
+import { PlacasPermitidas } from '../components/PlacasPermitidas';
 
 /**
  * Tres estados de espera en una sola pantalla: fuera de turno, disponible y en
@@ -134,16 +135,19 @@ export function Turno({
         </div>
 
         {!onShift ? (
-          <Field label="Placa del vehículo de hoy" htmlFor="plate" required>
-            <Input
-              id="plate"
-              autoCapitalize="characters"
-              value={plate}
-              onChange={(event) => setPlate(event.target.value.toUpperCase())}
-              placeholder="UBP472"
-              className="h-14 font-mono text-xl tracking-[0.08em]"
-            />
-          </Field>
+          <div className="space-y-3">
+            <PlacasPermitidas elegida={plate} onElegir={setPlate} />
+            <Field label="Placa del vehículo de hoy" htmlFor="plate" required>
+              <Input
+                id="plate"
+                autoCapitalize="characters"
+                value={plate}
+                onChange={(event) => setPlate(event.target.value.toUpperCase())}
+                placeholder="UBP472"
+                className="h-14 font-mono text-xl tracking-[0.08em]"
+              />
+            </Field>
+          </div>
         ) : null}
 
         <div className="rounded-lg border border-transparent bg-surface px-4 shadow-sm">

@@ -162,6 +162,20 @@
       "when": 1794964318922,
       "tag": "0022_supresion_de_datos",
       "breakpoints": true
+    },
+    {
+      "idx": 23,
+      "version": "7",
+      "when": 1795009960906,
+      "tag": "0023_eliminacion_de_conductores",
+      "breakpoints": true
+    },
+    {
+      "idx": 24,
+      "version": "7",
+      "when": 1795011169523,
+      "tag": "0024_vehiculos_permitidos",
+      "breakpoints": true
     }
   ]
 }

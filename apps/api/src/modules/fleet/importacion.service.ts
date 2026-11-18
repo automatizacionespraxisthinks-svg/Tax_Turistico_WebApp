@@ -346,19 +346,26 @@ export class ImportacionService {
       const par = `${v.vehicleId}|${v.driverId}`;
       const rol = deseados.get(par);
       if (!rol) {
+        /*
+         * Solo se quitan los que puso el listado. Los vínculos son los
+         * vehículos permitidos de cada conductor (18/11/2026), y los que
+         * asignó la oficina en el panel no los deshace una carga del Excel.
+         */
+        if (v.origen === 'panel') continue;
         await tx.delete(vehicleDrivers).where(eq(vehicleDrivers.id, v.id));
         informe.vinculos.quitados += 1;
         continue;
       }
-      if (rol !== v.role) {
-        await tx.update(vehicleDrivers).set({ role: rol }).where(eq(vehicleDrivers.id, v.id));
-        informe.vinculos.cambiados += 1;
+      // El listado lo confirma: pasa a ser suyo, con el rol que diga.
+      if (rol !== v.role || v.origen !== 'listado') {
+        await tx.update(vehicleDrivers).set({ role: rol, origen: 'listado' }).where(eq(vehicleDrivers.id, v.id));
+        if (rol !== v.role) informe.vinculos.cambiados += 1;
       }
       deseados.delete(par);
     }
     for (const [par, rol] of deseados) {
       const [vehicleId, driverId] = par.split('|') as [string, string];
-      await tx.insert(vehicleDrivers).values({ id: uuidv7(), vehicleId, driverId, role: rol });
+      await tx.insert(vehicleDrivers).values({ id: uuidv7(), vehicleId, driverId, role: rol, origen: 'listado' });
       informe.vinculos.nuevos += 1;
     }
 

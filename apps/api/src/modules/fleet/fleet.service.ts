@@ -35,8 +35,10 @@ import { isUniqueViolation } from '../../common/pg-errors';
  */
 export const noSuspendido = sql`(${drivers.suspendidoHasta} is null or ${drivers.suspendidoHasta} <= now())`;
 
-/** Un móvil al que está vinculado un conductor, según el listado maestro. */
+/** Un vehículo permitido del conductor: del listado maestro o del panel. */
 export interface MovilVinculado {
+  vehicleId: string;
+  origen: 'listado' | 'panel';
   internalNumber: string | null;
   plate: string;
   brand: string | null;
@@ -118,10 +120,15 @@ export class FleetService {
 
     if (!vehicle) throw new AppError('NOT_FOUND', `No hay un vehículo activo con placa ${plate}`);
 
+    // Antes de relevar: si no, con la placa de un compañero se le cerraba el
+    // turno aunque después no se pudiera abrir el propio.
+    await this.exigirPermitido(driverId, vehicle.id, vehicle.plate);
     await this.relevar(vehicle.id, vehicle.plate, driverId);
 
     const shiftId = uuidv7();
-    const fueraDeListado = await this.fueraDelListado(vehicle.id, driverId);
+    // Desde que solo se puede abrir turno en un vehículo permitido, ya no hay
+    // turnos «fuera de listado». La columna queda por los turnos de antes.
+    const fueraDeListado = false;
 
     // Los índices parciales `one_open_shift_per_*` garantizan que no haya dos
     // turnos abiertos del mismo conductor ni del mismo vehículo; si los hay,
@@ -142,18 +149,36 @@ export class FleetService {
   }
 
   /**
-   * El listado maestro no vincula a este conductor con este móvil.
-   *
-   * Un móvil sin nadie en el listado (todavía no se cargó, o se creó a mano
-   * en el panel) no tiene contra qué compararse y no se marca: marcar a
-   * todos los que lo manejan no le diría nada a la oficina.
+   * Los vehículos que la oficina le permite manejar (18/11/2026): los de
+   * sus vínculos, del listado maestro o asignados en el panel, y activos.
    */
-  private async fueraDelListado(vehicleId: string, driverId: string): Promise<boolean> {
-    const vinculados = await this.db
-      .select({ driverId: vehicleDrivers.driverId })
+  async vehiculosPermitidos(driverId: string): Promise<{ id: string; plate: string; interno: string | null }[]> {
+    return this.db
+      .select({ id: vehicles.id, plate: vehicles.plate, interno: vehicles.internalNumber })
       .from(vehicleDrivers)
-      .where(eq(vehicleDrivers.vehicleId, vehicleId));
-    return vinculados.length > 0 && !vinculados.some((fila) => fila.driverId === driverId);
+      .innerJoin(vehicles, eq(vehicles.id, vehicleDrivers.vehicleId))
+      .where(and(eq(vehicleDrivers.driverId, driverId), eq(vehicles.active, true)))
+      .orderBy(vehicles.internalNumber, vehicles.plate);
+  }
+
+  /**
+   * Solo puede abrir turno en un vehículo permitido (18/11/2026).
+   *
+   * Antes bastaba con escribir cualquier placa activa: con la de un
+   * compañero se le quitaba el carro y se trabajaba a su nombre. El mensaje
+   * dice cuáles sí puede usar, para que un error de dedo no parezca un
+   * bloqueo sin salida.
+   */
+  private async exigirPermitido(driverId: string, vehicleId: string, plate: string): Promise<void> {
+    const permitidos = await this.vehiculosPermitidos(driverId);
+    if (permitidos.some((v) => v.id === vehicleId)) return;
+    const lista = permitidos.map((v) => v.plate).join(', ');
+    throw new AppError(
+      'VEHICLE_NOT_ALLOWED',
+      permitidos.length
+        ? `El móvil ${plate} no está entre tus vehículos permitidos. Puedes trabajar en: ${lista}. Si necesitas otro, llama a la oficina.`
+        : 'No tienes vehículos asignados. Llama a la oficina para que te asignen uno.',
+    );
   }
 
   /**
@@ -186,6 +211,9 @@ export class FleetService {
     if (actual?.vehicleId === vehicle.id) {
       throw new AppError('VALIDATION_FAILED', `Ya estás en el móvil ${vehicle.plate}.`);
     }
+
+    // Antes de cerrar nada: un carro no permitido no le cuesta el turno.
+    await this.exigirPermitido(driverId, vehicle.id, vehicle.plate);
 
     // Quien tenga ahora ese carro lo suelta, salvo que vaya en carrera.
     await this.relevar(vehicle.id, vehicle.plate, driverId);
@@ -304,6 +332,11 @@ export class FleetService {
     for (const { rideId } of retiradas) this.realtime.retirarOfertaDe(driverId, rideId);
 
     // Fuera de turno no se guarda posición: se borra la que hubiera (§9.2).
+    await this.olvidarPosicion(driverId);
+  }
+
+  /** Quita su última posición de Redis: deja de aparecer en el mapa. */
+  async olvidarPosicion(driverId: string): Promise<void> {
     await this.redis.zrem(redisKeys.driverPositions, driverId);
     await this.redis.del(redisKeys.driverMeta(driverId));
   }
@@ -725,6 +758,8 @@ export class FleetService {
       .from(drivers)
       .leftJoin(driverShifts, and(eq(driverShifts.driverId, drivers.id), isNull(driverShifts.endedAt)))
       .leftJoin(vehicles, eq(vehicles.id, driverShifts.vehicleId))
+      // Los eliminados solo siguen existiendo para su historial.
+      .where(isNull(drivers.eliminadoAt))
       .orderBy(drivers.code);
 
     if (rows.length === 0) return [];
@@ -757,7 +792,9 @@ export class FleetService {
     const vinculos = await this.db
       .select({
         driverId: vehicleDrivers.driverId,
+        vehicleId: vehicleDrivers.vehicleId,
         role: vehicleDrivers.role,
+        origen: vehicleDrivers.origen,
         internalNumber: vehicles.internalNumber,
         plate: vehicles.plate,
         brand: vehicles.brand,

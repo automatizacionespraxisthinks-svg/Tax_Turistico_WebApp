@@ -1,0 +1,1 @@
+ALTER TABLE "drivers" ADD COLUMN "eliminado_at" timestamp with time zone;

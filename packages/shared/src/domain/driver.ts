@@ -17,6 +17,10 @@ export interface Vehicle {
 }
 
 export interface MovilVinculado {
+  /** El vehículo: lo que se manda al fijar los permitidos. */
+  vehiculoId?: string;
+  /** Si lo puso el listado maestro o la oficina en el panel. */
+  origen?: 'listado' | 'panel';
   /** El número del móvil en la empresa: «002». */
   interno?: string;
   placa: string;

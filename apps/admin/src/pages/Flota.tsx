@@ -24,6 +24,7 @@ import {
   Sheet,
   Stat,
   StatusPill,
+  Tabs,
   cn,
   staggerList,
   staggerItem,
@@ -34,6 +35,7 @@ import { zoneOf } from '../live/store';
 import { usePuede } from '../api/queries';
 import { useCifrasDeHoy } from '../api/informes';
 import { GestionConductor, NuevoConductorBoton } from '../components/ConductorAdmin';
+import { VehiculosAdmin } from '../components/VehiculosAdmin';
 
 type Filter = 'turno' | 'disponibles' | 'carrera' | 'todos' | 'atencion';
 
@@ -60,6 +62,9 @@ export function Flota() {
   const [filter, setFilter] = useState<Filter>('turno');
   const [query, setQuery] = useState('');
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  // Conductores o vehículos (18/11/2026): los vehículos se eligen como
+  // permitidos de cada conductor, así que viven aquí al lado.
+  const [vista, setVista] = useState<'conductores' | 'vehiculos'>('conductores');
 
   // Solo cortesía: quien autoriza es el guardia de la API, que exige el
   // permiso. Enseñar un botón que siempre falla es peor que ocultarlo.
@@ -76,6 +81,7 @@ export function Flota() {
   );
   const gestionar = puede('conductores.gestionar');
   const suspender = puede('conductores.suspender');
+  const eliminar = puede('conductores.eliminar');
 
   const active = FILTERS.find((f) => f.value === filter) ?? FILTERS[0]!;
 
@@ -116,81 +122,102 @@ export function Flota() {
 
   return (
     <div className="space-y-4 p-5">
-      <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
-        <Stat label="Flota vinculada" value={drivers.length} hint="Vehículos habilitados" />
-        <Stat label="En turno" value={counts.turno} tone="info" hint="GPS activo durante el turno" />
-        <Stat label="Disponibles" value={counts.disponibles} tone="positive" hint="Candidatos a oleada" />
-        <Stat
-          label="Sin GPS reciente"
-          value={stale}
-          tone={stale > 0 ? 'warning' : 'positive'}
-          icon={<SignalLow className="size-3.5" />}
-          hint="Más de 60 s sin posición"
-        />
-      </div>
+      <Tabs
+        value={vista}
+        onChange={setVista}
+        options={[
+          { value: 'conductores', label: 'Conductores' },
+          { value: 'vehiculos', label: 'Vehículos' },
+        ]}
+      />
 
-      <div className="flex flex-wrap items-center gap-2">
-        <Segmented
-          value={filter}
-          onChange={setFilter}
-          options={FILTERS.map((f) => ({ value: f.value, label: f.label, count: counts[f.value] }))}
-        />
-        <div className="relative min-w-52 flex-1">
-          <Search className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-ink-muted" />
-          <Input
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            placeholder="Nombre, código o placa…"
-            className="pl-8"
-            aria-label="Buscar conductores"
-          />
-        </div>
-        {gestionar ? <NuevoConductorBoton /> : null}
-      </div>
-
-      {rows.length === 0 ? (
-        <Card>
-          <EmptyState
-            icon={<Car className="size-4" />}
-            title="Ningún conductor coincide"
-            description="Ajusta el filtro o limpia la búsqueda."
-          />
-        </Card>
+      {vista === 'vehiculos' ? (
+        <VehiculosAdmin gestionar={gestionar} />
       ) : (
-        <motion.div
-          variants={staggerList(rows.length)}
-          initial="hidden"
-          animate="visible"
-          className="grid gap-2.5 sm:grid-cols-2 xl:grid-cols-3"
-        >
-          <AnimatePresence initial={false}>
-            {rows.map((driver) => (
-              <DriverCard
-                key={driver.id}
-                driver={driver}
-                hoy={hoyDe.get(driver.id)}
-                onClick={() => setSelectedId(driver.id)}
-              />
-            ))}
-          </AnimatePresence>
-        </motion.div>
-      )}
-
-      <Sheet
-        open={selected !== null}
-        onClose={() => setSelectedId(null)}
-        title={selected?.name ?? ''}
-        subtitle={selected ? `Código ${selected.code} · ${vehiculoDe(selected)}` : undefined}
-      >
-        {selected ? (
-          <div className="space-y-5">
-            <DriverDetail driver={selected} rideCode={selectedRide?.code} hoy={hoyDe.get(selected.id)} />
-            {gestionar || suspender ? (
-              <GestionConductor driver={selected} gestionar={gestionar} suspender={suspender} />
-            ) : null}
+        <>
+          <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
+            <Stat label="Flota vinculada" value={drivers.length} hint="Vehículos habilitados" />
+            <Stat label="En turno" value={counts.turno} tone="info" hint="GPS activo durante el turno" />
+            <Stat label="Disponibles" value={counts.disponibles} tone="positive" hint="Candidatos a oleada" />
+            <Stat
+              label="Sin GPS reciente"
+              value={stale}
+              tone={stale > 0 ? 'warning' : 'positive'}
+              icon={<SignalLow className="size-3.5" />}
+              hint="Más de 60 s sin posición"
+            />
           </div>
-        ) : null}
-      </Sheet>
+
+          <div className="flex flex-wrap items-center gap-2">
+            <Segmented
+              value={filter}
+              onChange={setFilter}
+              options={FILTERS.map((f) => ({ value: f.value, label: f.label, count: counts[f.value] }))}
+            />
+            <div className="relative min-w-52 flex-1">
+              <Search className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-ink-muted" />
+              <Input
+                value={query}
+                onChange={(e) => setQuery(e.target.value)}
+                placeholder="Nombre, código o placa…"
+                className="pl-8"
+                aria-label="Buscar conductores"
+              />
+            </div>
+            {gestionar ? <NuevoConductorBoton /> : null}
+          </div>
+
+          {rows.length === 0 ? (
+            <Card>
+              <EmptyState
+                icon={<Car className="size-4" />}
+                title="Ningún conductor coincide"
+                description="Ajusta el filtro o limpia la búsqueda."
+              />
+            </Card>
+          ) : (
+            <motion.div
+              variants={staggerList(rows.length)}
+              initial="hidden"
+              animate="visible"
+              className="grid gap-2.5 sm:grid-cols-2 xl:grid-cols-3"
+            >
+              <AnimatePresence initial={false}>
+                {rows.map((driver) => (
+                  <DriverCard
+                    key={driver.id}
+                    driver={driver}
+                    hoy={hoyDe.get(driver.id)}
+                    onClick={() => setSelectedId(driver.id)}
+                  />
+                ))}
+              </AnimatePresence>
+            </motion.div>
+          )}
+
+          <Sheet
+            open={selected !== null}
+            onClose={() => setSelectedId(null)}
+            title={selected?.name ?? ''}
+            subtitle={selected ? `Código ${selected.code} · ${vehiculoDe(selected)}` : undefined}
+          >
+            {selected ? (
+              <div className="space-y-5">
+                <DriverDetail driver={selected} rideCode={selectedRide?.code} hoy={hoyDe.get(selected.id)} />
+                {gestionar || suspender || eliminar ? (
+                  <GestionConductor
+                    driver={selected}
+                    gestionar={gestionar}
+                    suspender={suspender}
+                    eliminar={eliminar}
+                    rideCode={selectedRide?.code}
+                  />
+                ) : null}
+              </div>
+            ) : null}
+          </Sheet>
+        </>
+      )}
     </div>
   );
 }

@@ -57,6 +57,17 @@ async function main(): Promise<void> {
         pinHash: devPinHash,
       })
       .onConflictDoNothing();
+
+    // Su carro es su vehículo permitido (18/11/2026): sin vínculo no podría
+    // abrir turno. Por código y placa, porque si ya existían los dos de una
+    // siembra anterior, los ids de arriba no son los de la base.
+    await db.execute(sql`
+      insert into vehicle_drivers (id, vehicle_id, driver_id, role, origen)
+      select ${uuidv7()}, v.id, d.id, 'conductor', 'panel'
+      from vehicles v, drivers d
+      where v.plate = ${driver.plate} and d.code = ${driver.code}
+      on conflict do nothing
+    `);
   }
 
   console.log('Creando usuario de oficina y clave de API…');

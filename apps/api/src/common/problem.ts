@@ -74,6 +74,8 @@ export const ERROR_CODES = {
   /* La PWA ramifica por este: muestra hasta cuándo, no «PIN incorrecto». */
   DRIVER_SUSPENDED: 'El conductor está suspendido',
   DRIVER_NO_ELECTRONIC_PAYMENT: 'El conductor no recibe pagos electrónicos',
+  /* El móvil no está entre los que la oficina le permite manejar. */
+  VEHICLE_NOT_ALLOWED: 'Ese vehículo no está entre tus vehículos permitidos',
   RIDE_TOO_SHORT: 'Todavía no ha pasado el tiempo mínimo para finalizar',
   NO_FARE_RULE: 'No hay regla tarifaria vigente para ese par de zonas',
 
@@ -121,6 +123,7 @@ const STATUS_BY_CODE: Record<ErrorCode, HttpStatus> = {
   DRIVER_OFF_SHIFT: HttpStatus.CONFLICT,
   DRIVER_SUSPENDED: HttpStatus.FORBIDDEN,
   DRIVER_NO_ELECTRONIC_PAYMENT: HttpStatus.CONFLICT,
+  VEHICLE_NOT_ALLOWED: HttpStatus.FORBIDDEN,
   RIDE_TOO_SHORT: HttpStatus.CONFLICT,
   NO_FARE_RULE: HttpStatus.UNPROCESSABLE_ENTITY,
 

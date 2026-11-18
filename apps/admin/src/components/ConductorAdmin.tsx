@@ -1,13 +1,11 @@
 import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { motion } from 'motion/react';
-import { Ban, Check, Copy, CreditCard, KeyRound, Smartphone, UserPlus } from 'lucide-react';
-import type { Driver, VehicleType } from '@tax/shared';
+import { Ban, Car, Check, Copy, CreditCard, KeyRound, Smartphone, Trash2, UserPlus } from 'lucide-react';
+import type { Driver } from '@tax/shared';
 import {
   DIAS_DE_SUSPENSION,
   MAX_DIAS_SUSPENSION,
-  VEHICLE_TYPES,
-  VEHICLE_TYPE_LABEL,
   finDeSuspension,
   formatRelative,
 } from '@tax/shared';
@@ -16,8 +14,8 @@ import {
   Button,
   Field,
   Input,
+  Modal,
   SectionLabel,
-  Select,
   Sheet,
   Textarea,
   cn,
@@ -26,6 +24,7 @@ import {
 } from '@tax/ui';
 import { ApiError, api } from '../api/client';
 import { actions } from '../live/store';
+import { SelectorDeVehiculos, useVehiculos } from './VehiculosAdmin';
 
 /**
  * Gestión de conductores desde la oficina (§6, §8.1).
@@ -96,11 +95,11 @@ interface NuevoConductor {
   code: string;
   name: string;
   phone: string;
-  plate: string;
-  vehicleType: VehicleType;
+  /** Los vehículos que podrá manejar: solo abrirá turno en estos. */
+  vehicleIds: string[];
 }
 
-const VACIO: NuevoConductor = { code: '', name: '', phone: '+57', plate: '', vehicleType: 'sedan' };
+const VACIO: NuevoConductor = { code: '', name: '', phone: '+57', vehicleIds: [] };
 
 export function NuevoConductorBoton() {
   const [abierto, setAbierto] = useState(false);
@@ -109,11 +108,7 @@ export function NuevoConductorBoton() {
   const [error, setError] = useState<string>();
   const toast = useToast();
 
-  const vehiculos = useQuery({
-    queryKey: ['vehiculos'],
-    queryFn: () => api.get<{ plate: string; type: VehicleType }[]>('/v1/admin/vehicles'),
-    enabled: abierto,
-  });
+  const vehiculos = useVehiculos(abierto);
 
   const crear = useMutation({
     mutationFn: (body: NuevoConductor) =>
@@ -143,7 +138,7 @@ export function NuevoConductorBoton() {
     /^[0-9]{1,10}$/.test(datos.code) &&
     datos.name.trim().length >= 3 &&
     /^\+\d{8,15}$/.test(datos.phone) &&
-    datos.plate.trim().length >= 5;
+    datos.vehicleIds.length > 0;
 
   return (
     <>
@@ -197,40 +192,23 @@ export function NuevoConductorBoton() {
               />
             </Field>
 
-            <div className="grid grid-cols-2 gap-3">
-              <Field label="Placa" htmlFor="plate" required>
-                <Input
-                  id="plate"
-                  list="placas-existentes"
-                  autoCapitalize="characters"
-                  placeholder="UBP472"
-                  value={datos.plate}
-                  onChange={(e) => setDatos({ ...datos, plate: e.target.value.toUpperCase() })}
-                  className="font-mono"
-                />
-                {/* Sugiere las ya dadas de alta sin impedir escribir una nueva:
-                    si la placa no existe, se crea el vehículo con ella. */}
-                <datalist id="placas-existentes">
-                  {(vehiculos.data ?? []).map((v) => (
-                    <option key={v.plate} value={v.plate} />
-                  ))}
-                </datalist>
-              </Field>
-
-              <Field label="Tipo" htmlFor="tipo">
-                <Select
-                  id="tipo"
-                  value={datos.vehicleType}
-                  onChange={(e) => setDatos({ ...datos, vehicleType: e.target.value as VehicleType })}
-                >
-                  {VEHICLE_TYPES.map((t) => (
-                    <option key={t} value={t}>
-                      {VEHICLE_TYPE_LABEL[t]}
-                    </option>
-                  ))}
-                </Select>
-              </Field>
-            </div>
+            {/* Solo podrá abrir turno o cambiar de carro dentro de estos
+                (18/11/2026). Un vehículo nuevo se da de alta antes en la
+                pestaña Vehículos de Flota. */}
+            <Field
+              label="Vehículos que puede manejar"
+              htmlFor="vehiculos-nuevo"
+              required
+              hint="Solo podrá abrir turno o cambiar de carro en estos. ¿Falta uno? Créalo en la pestaña Vehículos."
+            >
+              <SelectorDeVehiculos
+                id="vehiculos-nuevo"
+                value={datos.vehicleIds}
+                onChange={(vehicleIds) => setDatos({ ...datos, vehicleIds })}
+                vehiculos={vehiculos.data ?? []}
+                cargando={vehiculos.isLoading}
+              />
+            </Field>
 
             {error ? <Banner tone="critical">{error}</Banner> : null}
 
@@ -441,10 +419,16 @@ export function GestionConductor({
   driver,
   gestionar,
   suspender,
+  eliminar = false,
+  rideCode,
 }: {
   driver: Driver;
   gestionar: boolean;
   suspender: boolean;
+  /** Si quien mira tiene «Eliminar conductores». */
+  eliminar?: boolean;
+  /** Su carrera en curso, si tiene: con ella no se puede eliminar. */
+  rideCode?: string;
 }) {
   const [pinNuevo, setPinNuevo] = useState<string | null>(null);
   const toast = useToast();
@@ -632,6 +616,8 @@ export function GestionConductor({
         ) : null}
       </div>
 
+      {gestionar ? <VehiculosPermitidos driver={driver} /> : null}
+
       {gestionar ? (
         <div>
           <SectionLabel>Celular activo</SectionLabel>
@@ -688,6 +674,262 @@ export function GestionConductor({
           ) : null}
         </div>
       ) : null}
+
+      {eliminar ? <EliminarConductor driver={driver} rideCode={rideCode} /> : null}
+    </div>
+  );
+}
+
+/**
+ * Los vehículos que el conductor puede manejar (18/11/2026). Solo abre turno
+ * o cambia de carro dentro de estos; la API lo comprueba, esto solo los
+ * elige. Los del listado maestro van marcados: si se quitan aquí, la próxima
+ * carga del listado los vuelve a poner.
+ */
+function VehiculosPermitidos({ driver }: { driver: Driver }) {
+  const toast = useToast();
+  const vehiculos = useVehiculos();
+  const actuales = (driver.moviles ?? []).map((m) => m.vehiculoId).filter((x): x is string => Boolean(x));
+  const [elegidos, setElegidos] = useState<string[]>(actuales);
+  const [editando, setEditando] = useState(false);
+
+  const cambiado =
+    elegidos.length !== actuales.length || elegidos.some((x) => !actuales.includes(x));
+  const delListado = new Set((driver.moviles ?? []).filter((m) => m.origen === 'listado').map((m) => m.vehiculoId));
+  const quitaDelListado = actuales.some((x) => delListado.has(x) && !elegidos.includes(x));
+
+  const guardar = useMutation({
+    mutationFn: () => api.post<{ placas: string[] }>(`/v1/admin/drivers/${driver.id}/vehicles`, { vehicleIds: elegidos }),
+    onSuccess: async (r) => {
+      await actions.refreshDrivers();
+      setEditando(false);
+      toast.push({
+        tone: 'positive',
+        title: 'Vehículos permitidos guardados',
+        description: r.placas.length ? `Puede manejar: ${r.placas.join(', ')}.` : 'No podrá abrir turno hasta que le asignes uno.',
+      });
+    },
+    onError: (e) =>
+      toast.push({ tone: 'critical', title: 'No se pudo guardar', description: e instanceof ApiError ? e.message : undefined }),
+  });
+
+  const moviles = driver.moviles ?? [];
+
+  return (
+    <div>
+      <SectionLabel>Vehículos que puede manejar</SectionLabel>
+      <div className="mt-2 space-y-3 rounded-md border border-line p-3">
+        {!editando ? (
+          <>
+            {moviles.length === 0 ? (
+              <Banner tone="warning" icon={<Car className="size-4" />}>
+                No tiene ninguno: no puede abrir turno hasta que le asignes uno.
+              </Banner>
+            ) : (
+              <ul className="flex flex-wrap gap-1.5">
+                {moviles.map((m) => (
+                  <li
+                    key={m.vehiculoId ?? m.placa}
+                    className={cn(
+                      'inline-flex items-center gap-1 rounded-full border border-line px-2.5 py-0.5 font-mono text-caption',
+                      m.activo ? 'text-ink' : 'text-ink-muted line-through',
+                    )}
+                    title={m.origen === 'listado' ? 'Del listado maestro' : 'Asignado en el panel'}
+                  >
+                    {m.interno ? `${m.interno} · ${m.placa}` : m.placa}
+                    {m.origen === 'listado' ? <span className="font-sans text-micro text-ink-muted">listado</span> : null}
+                  </li>
+                ))}
+              </ul>
+            )}
+            <div className="flex items-center justify-between gap-3">
+              <p className="text-micro text-ink-muted">
+                Solo puede abrir turno o cambiar de carro en estos. Uno inactivo aparece tachado.
+              </p>
+              <Button
+                size="sm"
+                variant="secondary"
+                icon={<Car className="size-4" />}
+                onClick={() => {
+                  setElegidos(actuales);
+                  setEditando(true);
+                }}
+              >
+                Cambiar
+              </Button>
+            </div>
+          </>
+        ) : (
+          <>
+            <SelectorDeVehiculos
+              value={elegidos}
+              onChange={setElegidos}
+              vehiculos={vehiculos.data ?? []}
+              cargando={vehiculos.isLoading}
+            />
+            {quitaDelListado ? (
+              <Banner tone="info">
+                Quitas un vehículo que viene del listado maestro: la próxima carga del listado se lo vuelve a asignar.
+              </Banner>
+            ) : null}
+            {elegidos.length === 0 ? (
+              <Banner tone="warning">Sin ningún vehículo no podrá abrir turno.</Banner>
+            ) : null}
+            <div className="flex justify-end gap-2">
+              <Button size="sm" variant="secondary" disabled={guardar.isPending} onClick={() => setEditando(false)}>
+                Cancelar
+              </Button>
+              <Button size="sm" variant="primary" disabled={!cambiado} loading={guardar.isPending} onClick={() => guardar.mutate()}>
+                Guardar
+              </Button>
+            </div>
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
+/**
+ * Eliminar al conductor: lo último de la tarjeta, aparte de lo demás, porque
+ * no se puede deshacer (18/11/2026).
+ *
+ * Dos pasos, como cancelar una carrera desde la PWA: el botón solo abre la
+ * ventana, y ahí hay que escribir el motivo y el código del conductor. El
+ * código escrito a mano es lo que evita eliminar a otro por un clic en la
+ * tarjeta equivocada; la API lo vuelve a comprobar.
+ */
+function EliminarConductor({ driver, rideCode }: { driver: Driver; rideCode?: string }) {
+  const toast = useToast();
+  const [abierta, setAbierta] = useState(false);
+  const [motivo, setMotivo] = useState('');
+  const [confirmacion, setConfirmacion] = useState('');
+  const [error, setError] = useState<string | null>(null);
+
+  const listo = motivo.trim().length >= 5 && confirmacion.trim() === driver.code && !rideCode;
+
+  const cerrar = () => {
+    setAbierta(false);
+    setMotivo('');
+    setConfirmacion('');
+    setError(null);
+  };
+
+  const eliminar = useMutation({
+    mutationFn: () =>
+      api.post<{ code: string; modo: 'borrado' | 'baja' }>(`/v1/admin/drivers/${driver.id}/eliminar`, {
+        motivo: motivo.trim(),
+        confirmacion: confirmacion.trim(),
+      }),
+    onSuccess: async (r) => {
+      cerrar();
+      // Al refrescar desaparece de la lista y la tarjeta se cierra sola.
+      await actions.refreshDrivers();
+      toast.push({
+        tone: 'positive',
+        title: `Conductor ${r.code} eliminado`,
+        description:
+          r.modo === 'baja'
+            ? 'Sus carreras pasadas se conservan con su nombre; sus datos personales se borraron.'
+            : 'No tenía carreras ni turnos: se borró por completo.',
+      });
+    },
+    onError: (e) =>
+      setError((e instanceof ApiError && e.message) || 'No se pudo eliminar. Inténtalo de nuevo.'),
+  });
+
+  return (
+    <div>
+      <SectionLabel>Eliminar conductor</SectionLabel>
+      <div className="tone-critical mt-2 flex items-center justify-between gap-3 rounded-md border border-[var(--tone-line)] p-3">
+        <div className="min-w-0">
+          <p className="text-base text-ink">Dar de baja definitiva</p>
+          <p className="text-micro text-ink-muted">
+            Sale de Flota, pierde el acceso y se borran sus datos personales. No se puede deshacer.
+          </p>
+        </div>
+        <Button size="sm" variant="danger" icon={<Trash2 className="size-4" />} onClick={() => setAbierta(true)}>
+          Eliminar
+        </Button>
+      </div>
+
+      <Modal
+        open={abierta}
+        onClose={() => {
+          if (!eliminar.isPending) cerrar();
+        }}
+        title={`¿Eliminar a ${driver.name}?`}
+        subtitle={`Código ${driver.code}`}
+        footer={
+          <>
+            <Button variant="secondary" disabled={eliminar.isPending} onClick={cerrar}>
+              No, volver
+            </Button>
+            <Button
+              variant="danger"
+              icon={<Trash2 className="size-4" />}
+              disabled={!listo}
+              loading={eliminar.isPending}
+              onClick={() => {
+                setError(null);
+                eliminar.mutate();
+              }}
+            >
+              Sí, eliminar conductor
+            </Button>
+          </>
+        }
+      >
+        <div className="space-y-4">
+          {rideCode ? (
+            <Banner tone="warning" icon={<Ban className="size-4" />}>
+              Tiene la carrera {rideCode} en curso. Espera a que termine o cancélala antes de eliminarlo.
+            </Banner>
+          ) : null}
+
+          <div className="space-y-1.5 text-base text-ink-secondary">
+            <p>Al eliminarlo:</p>
+            <ul className="list-disc space-y-1 pl-5">
+              <li>Desaparece de Flota y deja de recibir carreras.</li>
+              <li>Se cierran sus celulares y su sesión, y ya no puede entrar a la aplicación.</li>
+              <li>Se borran su cédula, teléfono, licencia y PIN.</li>
+              <li>
+                Sus carreras pasadas se conservan con su nombre y código, y el código {driver.code} no se le vuelve a
+                asignar a nadie.
+              </li>
+            </ul>
+            <p className="text-ink">Queda registrado en la auditoría quién lo eliminó, cuándo y por qué.</p>
+          </div>
+
+          <Field label="Motivo" htmlFor="motivo-eliminar" required hint="Queda en la auditoría.">
+            <Textarea
+              id="motivo-eliminar"
+              rows={3}
+              maxLength={300}
+              value={motivo}
+              onChange={(e) => setMotivo(e.target.value)}
+              placeholder="Por ejemplo: se retiró de la empresa"
+            />
+          </Field>
+
+          <Field label={`Para confirmar, escribe su código: ${driver.code}`} htmlFor="confirmar-eliminar" required>
+            <Input
+              id="confirmar-eliminar"
+              inputMode="numeric"
+              autoComplete="off"
+              value={confirmacion}
+              onChange={(e) => setConfirmacion(e.target.value)}
+              className="font-mono"
+            />
+          </Field>
+
+          {error ? (
+            <Banner tone="critical" icon={<Ban className="size-4" />}>
+              {error}
+            </Banner>
+          ) : null}
+        </div>
+      </Modal>
     </div>
   );
 }

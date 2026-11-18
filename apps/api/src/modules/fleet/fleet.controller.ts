@@ -1,4 +1,4 @@
-import { Body, Controller, Post, Req, UseGuards } from '@nestjs/common';
+import { Body, Controller, Get, Post, Req, UseGuards } from '@nestjs/common';
 import type { FastifyRequest } from 'fastify';
 import { z } from 'zod';
 import { pointSchema } from '@tax/shared';
@@ -35,10 +35,18 @@ export class FleetController {
     @Body(zodBody(shiftSchema)) body: z.infer<typeof shiftSchema>,
   ) {
     const driver = requireDriver(request);
-    const turno = await this.fleet.openShift(driver.id, body.plate);
+    const turno = await this.anotarSiNoPermitido(request, body.plate, () => this.fleet.openShift(driver.id, body.plate));
     await this.anotar(request, `Abrió turno en el móvil ${turno.plate}`, { movil: turno.plate });
-    await this.anotarFueraDeListado(request, turno);
     return turno;
+  }
+
+  /**
+   * Los vehículos que puede manejar, para que la PWA los ofrezca al abrir
+   * turno o cambiar de carro en vez de hacerle escribir la placa.
+   */
+  @Get('vehicles')
+  async vehiculos(@Req() request: FastifyRequest) {
+    return this.fleet.vehiculosPermitidos(requireDriver(request).id);
   }
 
   /**
@@ -53,13 +61,14 @@ export class FleetController {
   ) {
     const driver = requireDriver(request);
     const antes = await this.fleet.placaDelTurno(driver.id);
-    const turno = await this.fleet.switchVehicle(driver.id, body.plate);
+    const turno = await this.anotarSiNoPermitido(request, body.plate, () =>
+      this.fleet.switchVehicle(driver.id, body.plate),
+    );
     await this.anotar(
       request,
       antes ? `Cambió de carro: del móvil ${antes} al ${turno.plate}` : `Cambió de carro: al móvil ${turno.plate}`,
       { antes, movil: turno.plate },
     );
-    await this.anotarFueraDeListado(request, turno);
     return turno;
   }
 
@@ -103,13 +112,21 @@ export class FleetController {
     });
   }
 
-  /** Un móvil que el listado maestro no le asigna queda en la bitácora. */
-  private async anotarFueraDeListado(
-    request: FastifyRequest,
-    turno: { plate: string; fueraDeListado: boolean },
-  ): Promise<void> {
-    if (!turno.fueraDeListado) return;
-    await this.anotar(request, `Tomó el móvil ${turno.plate}, que el listado no le asigna`, { movil: turno.plate });
+  /**
+   * Un intento con un vehículo no permitido queda en la bitácora antes de
+   * devolver el error (18/11/2026): es justo el caso que esta regla vigila, y
+   * la oficina tiene que poder ver quién lo intentó y con qué placa.
+   */
+  private async anotarSiNoPermitido<T>(request: FastifyRequest, plate: string, abrir: () => Promise<T>): Promise<T> {
+    try {
+      return await abrir();
+    } catch (error) {
+      if (error instanceof AppError && error.code === 'VEHICLE_NOT_ALLOWED') {
+        const movil = plate.trim().toUpperCase();
+        await this.anotar(request, `Intentó tomar el móvil ${movil}, que no tiene permitido`, { movil });
+      }
+      throw error;
+    }
   }
 
   @Post('shift/close')

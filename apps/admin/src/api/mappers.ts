@@ -104,6 +104,8 @@ export interface ApiDriver {
   licenseExpiresOn?: string | null;
   licenseRestriction?: string | null;
   moviles?: {
+    vehicleId?: string;
+    origen?: 'listado' | 'panel';
     internalNumber: string | null;
     plate: string;
     brand: string | null;
@@ -237,6 +239,8 @@ export function toDriver(row: ApiDriver): Driver {
     licenciaVence: row.licenseExpiresOn ?? undefined,
     licenciaRestriccion: row.licenseRestriction ?? undefined,
     moviles: (row.moviles ?? []).map((m) => ({
+      vehiculoId: m.vehicleId,
+      origen: m.origen,
       interno: m.internalNumber ?? undefined,
       placa: m.plate,
       marca: m.brand ?? undefined,

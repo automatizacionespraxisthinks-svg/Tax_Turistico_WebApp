@@ -63,6 +63,14 @@ export const drivers = pgTable(
     suspendidoHasta: timestamp('suspendido_hasta', { withTimezone: true }),
     /** Por qué, para la oficina; el conductor solo ve hasta cuándo. */
     motivoSuspension: text('motivo_suspension'),
+    /**
+     * Cuándo lo eliminó la oficina (18/11/2026). La fila se queda porque sus
+     * carreras, ofertas y turnos la siguen nombrando, pero sin sus datos
+     * personales: cédula, teléfono, licencia y PIN se borran al eliminarlo.
+     * El nombre y el código se conservan para que el historial se lea, y el
+     * código no se vuelve a asignar. No aparece en Flota ni puede entrar.
+     */
+    eliminadoAt: timestamp('eliminado_at', { withTimezone: true }),
     /** Intentos fallidos seguidos; a los 5 se bloquea el acceso (§8.1). */
     failedAttempts: integer('failed_attempts').notNull().default(0),
     lockedUntil: timestamp('locked_until', { withTimezone: true }),
@@ -128,6 +136,13 @@ export const vehicleDrivers = pgTable(
       .notNull()
       .references(() => drivers.id, { onDelete: 'cascade' }),
     role: text('role').$type<'conductor' | 'relevador'>().notNull(),
+    /**
+     * De dónde salió el vínculo (18/11/2026). Los vínculos son los vehículos
+     * que el conductor puede manejar: solo puede abrir turno en ellos. Los
+     * del listado maestro los rehace cada carga; los que asignó la oficina
+     * en el panel, la carga no los toca.
+     */
+    origen: text('origen').$type<'listado' | 'panel'>().notNull().default('listado'),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   },
   (table) => [

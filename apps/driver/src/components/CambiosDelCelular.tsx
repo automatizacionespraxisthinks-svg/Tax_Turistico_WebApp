@@ -2,6 +2,7 @@ import { useState, type ReactNode } from 'react';
 import { AnimatePresence, motion } from 'motion/react';
 import { CarFront, UsersRound } from 'lucide-react';
 import { Input, TONE_CLASS, cn, transition } from '@tax/ui';
+import { PlacasPermitidas } from './PlacasPermitidas';
 
 /**
  * Cambiar de carro o de conductor (17/11/2026).
@@ -88,8 +89,18 @@ export function CambiosDelCelular({
             <h2 className="text-2xl font-bold text-ink">¿A qué carro pasas?</h2>
             <p className="mt-2 text-lg leading-snug text-ink-secondary">
               Se cierra el turno{placaActual ? ` en el ${placaActual}` : ''} y se abre en el carro nuevo.
-              Sigues con tu misma cuenta.
+              Sigues con tu misma cuenta. Solo puedes pasar a uno de tus vehículos.
             </p>
+            <div className="mt-4">
+              <PlacasPermitidas
+                elegida={placaLimpia}
+                excluir={placaActual}
+                onElegir={(p) => {
+                  setPlaca(p);
+                  setError(null);
+                }}
+              />
+            </div>
             <label className="mt-4 block">
               <span className="text-base font-medium text-ink">Placa del carro nuevo</span>
               <Input
