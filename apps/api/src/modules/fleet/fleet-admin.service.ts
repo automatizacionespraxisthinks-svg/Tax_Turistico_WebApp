@@ -838,11 +838,18 @@ export class FleetAdminService {
         active: vehicles.active,
         brand: vehicles.brand,
         modelYear: vehicles.modelYear,
-        // Cuántos conductores vigentes lo tienen permitido.
+        /*
+         * Cuántos conductores vigentes lo tienen permitido.
+         *
+         * Escrito a mano y con alias, no con las columnas de Drizzle: en una
+         * consulta de una sola tabla Drizzle las escribe sin el nombre de la
+         * tabla, y la subconsulta quedaba con `"id" = "driver_id"`, que
+         * Postgres rechaza por ambiguo. Toda la lista de vehículos fallaba.
+         */
         conductores: sql<number>`(
-          select count(*)::int from ${vehicleDrivers}
-          join ${drivers} on ${drivers.id} = ${vehicleDrivers.driverId}
-          where ${vehicleDrivers.vehicleId} = ${vehicles.id} and ${drivers.eliminadoAt} is null
+          select count(*)::int from vehicle_drivers vd
+          join drivers d on d.id = vd.driver_id
+          where vd.vehicle_id = "vehicles"."id" and d.eliminado_at is null
         )`,
       })
       .from(vehicles)
