@@ -216,7 +216,7 @@ export class RidesService {
 
     const creadas = await this.db
       .transaction(async (tx) => {
-        const customerId = await this.upsertCustomer(tx, input.customerPhone, input.customerName);
+        const customerId = await this.upsertCustomer(tx, input.customerPhone, input.customerName, input.consent);
 
         /*
          * Tope de taxis por teléfono.
@@ -404,7 +404,12 @@ export class RidesService {
     return cantidad === 1 ? primera! : { ...primera!, cantidad, rides: creadas };
   }
 
-  private async upsertCustomer(tx: Tx, phone: string, name?: string): Promise<string> {
+  private async upsertCustomer(
+    tx: Tx,
+    phone: string,
+    name?: string,
+    consent?: { version: string; channel: string },
+  ): Promise<string> {
     /*
      * Primero se asegura que la fila exista, y después se bloquea.
      *
@@ -427,15 +432,27 @@ export class RidesService {
       .onConflictDoNothing({ target: customers.phone });
 
     const [cliente] = await tx
-      .select({ id: customers.id, name: customers.name })
+      .select({ id: customers.id, name: customers.name, consentVersion: customers.consentVersion })
       .from(customers)
       .where(eq(customers.phone, phone))
       .for('update')
       .limit(1);
 
-    if (!cliente) throw new Error(`No se pudo registrar el cliente ${phone}`);
-    if (name && cliente.name !== name) {
-      await tx.update(customers).set({ name }).where(eq(customers.id, cliente.id));
+    if (!cliente) throw new Error('No se pudo registrar el cliente');
+    /*
+     * La autorización (Ley 1581, art. 9): la primera vez, o cuando la empresa
+     * publica una versión nueva de la política. La hora es la del servidor:
+     * es la prueba, no la puede poner quien llama.
+     */
+    const cambios: Partial<typeof customers.$inferInsert> = {};
+    if (name && cliente.name !== name) cambios.name = name;
+    if (consent && cliente.consentVersion !== consent.version) {
+      cambios.consentVersion = consent.version;
+      cambios.consentChannel = consent.channel;
+      cambios.consentAt = new Date();
+    }
+    if (Object.keys(cambios).length > 0) {
+      await tx.update(customers).set(cambios).where(eq(customers.id, cliente.id));
     }
     return cliente.id;
   }

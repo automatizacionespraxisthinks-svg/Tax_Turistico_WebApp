@@ -48,6 +48,13 @@ export const customers = pgTable(
      * ficha de cualquiera de sus carreras y vale también para las de antes.
      */
     esPrueba: boolean('es_prueba').notNull().default(false),
+    /**
+     * Cuándo se suprimieron sus datos a petición del titular (Ley 1581,
+     * art. 8 y 15; 17/11/2026). La fila queda —las carreras la necesitan para
+     * las cifras— pero sin teléfono, nombre ni ubicaciones; la autorización
+     * que dio en su momento se conserva como prueba.
+     */
+    suprimidoAt: timestamp('suprimido_at', { withTimezone: true }),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   },
   (table) => [uniqueIndex('customers_phone_key').on(table.phone)],

@@ -257,6 +257,18 @@ export const createRideSchema = z.object({
    * con `POST /v1/rides/:id/photo`.
    */
   pickupPhotoUrl: z.string().url().max(2000).optional(),
+  /**
+   * La autorización de tratamiento de datos que dio el cliente (Ley 1581,
+   * art. 9; 17/11/2026): la versión de la política que se le informó y el
+   * canal. n8n la manda con cada pedido; la API la guarda en el cliente si
+   * es la primera vez o cambió la versión, con la hora del servidor.
+   */
+  consent: z
+    .object({
+      version: z.string().trim().min(1).max(40),
+      channel: z.string().trim().min(1).max(60),
+    })
+    .optional(),
 }).refine((pedido) => pedido.numeroEnPedido + pedido.cantidad - 1 <= MAX_CARRERAS_ACTIVAS, {
   path: ['cantidad'],
   message: `Un pedido llega hasta el taxi ${MAX_CARRERAS_ACTIVAS}: numeroEnPedido + cantidad - 1 no puede pasar de ${MAX_CARRERAS_ACTIVAS}`,

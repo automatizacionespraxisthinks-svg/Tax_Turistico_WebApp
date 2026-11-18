@@ -5,7 +5,7 @@ import { and, eq, inArray, isNull, or, sql } from 'drizzle-orm';
 import { uuidv7 } from 'uuidv7';
 import { DB, type Database } from '../../db/db.module';
 import { AuditService } from '../audit/audit.service';
-import { drivers, rideOffers, rideStatusHistory, rides, vehicles } from '../../db/schema';
+import { driverShifts, drivers, rideOffers, rideStatusHistory, rides, vehicles } from '../../db/schema';
 import { AppError } from '../../common/problem';
 import { isUniqueViolation } from '../../common/pg-errors';
 import { OutboxService } from '../integrations/outbox.service';
@@ -535,6 +535,13 @@ export class DispatchService {
                   and o.revoked_at is null
                   and o.response = 'pending'
              )
+             -- Sin turno abierto no se toma carrera (17/11/2026): antes un
+             -- conductor que había cerrado turno aceptaba igual una oferta
+             -- que le quedó en pantalla, y la carrera salía sin taxi.
+             and exists (
+               select 1 from driver_shifts s
+                where s.driver_id = ${driverId} and s.ended_at is null
+             )
           returning id, code, version, pago_electronico
         `);
 
@@ -551,6 +558,14 @@ export class DispatchService {
           if (!ride) throw new AppError('NOT_FOUND', `No existe la carrera ${rideId}`);
           if (ride.status !== 'NOTIFIED') {
             throw new AppError('RIDE_ALREADY_TAKEN', 'Otro conductor aceptó la carrera primero');
+          }
+          const [turno] = await tx
+            .select({ id: driverShifts.id })
+            .from(driverShifts)
+            .where(and(eq(driverShifts.driverId, driverId), isNull(driverShifts.endedAt)))
+            .limit(1);
+          if (!turno) {
+            throw new AppError('DRIVER_BUSY', 'No tienes turno abierto: abre el turno para tomar carreras.');
           }
           throw new AppError('OFFER_NOT_VALID', 'La oferta venció o fue revocada');
         }
@@ -758,10 +773,72 @@ export class DispatchService {
       );
     }
 
-    // Se crea una oferta vigente para este conductor y se acepta con la misma
-    // sentencia atómica: la asignación manual no se salta la exclusividad.
+    /*
+     * Se crea una oferta vigente para este conductor y se acepta con la misma
+     * sentencia atómica: la asignación manual no se salta la exclusividad.
+     *
+     * Antes de eso, con la carrera bloqueada (17/11/2026):
+     *  - solo se asigna una carrera que todavía no tiene conductor. Antes se
+     *    ponía en «Notificada» sin mirar, así que se podía revivir una
+     *    terminada o quitársela a otro conductor a mitad de camino;
+     *  - el conductor tiene que estar en turno y libre: sin turno la carrera
+     *    salía sin taxi, y en carrera quedaba con dos;
+     *  - la oferta es del intento de despacho en curso. Con el intento 1 fijo,
+     *    un conductor que ya había tenido esa oferta vencida chocaba con el
+     *    índice único, la aceptación fallaba y la carrera quedaba «Notificada»
+     *    sin temporizador, colgada para siempre.
+     */
     await this.db.transaction(async (tx) => {
-      await tx.update(rides).set({ status: 'NOTIFIED' }).where(eq(rides.id, rideId));
+      const [actual] = await tx
+        .select({ status: rides.status, intento: rides.intentoDespacho, code: rides.code })
+        .from(rides)
+        .where(eq(rides.id, rideId))
+        .for('update')
+        .limit(1);
+      if (!actual) throw new AppError('NOT_FOUND', `No existe la carrera ${rideId}`);
+      if (!['PENDING', 'NOTIFIED', 'UNASSIGNED'].includes(actual.status)) {
+        throw new AppError(
+          'INVALID_TRANSITION',
+          `La carrera ${actual.code} ya no está buscando conductor: no se le puede asignar uno.`,
+        );
+      }
+
+      const [turno] = await tx
+        .select({ status: drivers.status })
+        .from(driverShifts)
+        .innerJoin(drivers, eq(drivers.id, driverShifts.driverId))
+        .where(and(eq(driverShifts.driverId, driverId), isNull(driverShifts.endedAt)))
+        .limit(1);
+      if (!turno) {
+        throw new AppError('DRIVER_BUSY', `${conductor.name} no tiene turno abierto: no se le puede asignar.`);
+      }
+      if (turno.status !== 'AVAILABLE') {
+        throw new AppError(
+          'DRIVER_BUSY',
+          turno.status === 'ON_RIDE'
+            ? `${conductor.name} ya va en otra carrera.`
+            : `${conductor.name} está en pausa: que vuelva a estar disponible, o elige a otro.`,
+        );
+      }
+
+      if (actual.status !== 'NOTIFIED') {
+        await tx
+          .update(rides)
+          .set({ status: 'NOTIFIED', version: sql`${rides.version} + 1`, updatedAt: new Date() })
+          .where(eq(rides.id, rideId));
+        await tx.insert(rideStatusHistory).values({
+          id: uuidv7(),
+          rideId,
+          fromStatus: actual.status,
+          toStatus: 'NOTIFIED',
+          actor: actor.kind,
+          actorName: actor.name,
+          actorId: actor.id,
+          note: 'Asignación manual',
+        });
+      }
+
+      const intento = Math.max(1, actual.intento);
       await tx
         .insert(rideOffers)
         .values({
@@ -769,12 +846,16 @@ export class DispatchService {
           rideId,
           driverId,
           wave: 3,
+          intento,
           distanceKm: 0,
           etaMinutes: 0,
           expiresAt,
           response: 'pending',
         })
-        .onConflictDoNothing();
+        .onConflictDoUpdate({
+          target: [rideOffers.rideId, rideOffers.driverId, rideOffers.wave, rideOffers.intento],
+          set: { response: 'pending', revokedAt: null, respondedAt: null, expiresAt },
+        });
     });
 
     return this.accept(rideId, driverId, actor);

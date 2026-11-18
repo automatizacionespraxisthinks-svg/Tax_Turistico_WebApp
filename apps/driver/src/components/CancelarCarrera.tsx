@@ -144,7 +144,7 @@ export function CancelarCarrera({
                       onChange={(e) => setDetalle(e.target.value.slice(0, 200))}
                       rows={3}
                       placeholder={motivo === 'otro' ? 'Por ejemplo: se me varó el carro en la vía a Duitama' : ''}
-                      className="mt-1.5 w-full resize-none rounded-lg border border-line bg-surface px-3 py-2.5 text-lg text-ink outline-none focus:border-[var(--accent)]"
+                      className="mt-1.5 w-full resize-none rounded-lg border border-line bg-surface px-3 py-2.5 text-lg text-ink outline-none focus:border-accent"
                     />
                     {motivo === 'otro' && detalle.trim().length > 0 && detalle.trim().length < 5 ? (
                       <span className="text-base text-ink-muted">Un poco más, para que la oficina entienda.</span>

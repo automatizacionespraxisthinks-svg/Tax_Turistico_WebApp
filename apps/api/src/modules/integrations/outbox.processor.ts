@@ -8,6 +8,9 @@ import { loadEnv } from '../../config/env';
 import { signWebhook } from '../../common/crypto';
 import { OUTBOX_QUEUE, SWEEP_JOB, OutboxService, type OutboxJobData } from './outbox.service';
 
+/** Si una entrega no termina en este tiempo, el barrido la vuelve a intentar. */
+const PLAZO_DE_ENTREGA_MS = 2 * 60_000;
+
 /**
  * Relay del outbox hacia n8n (§7.1).
  *
@@ -18,6 +21,7 @@ import { OUTBOX_QUEUE, SWEEP_JOB, OutboxService, type OutboxJobData } from './ou
  * Concurrencia 4: el presupuesto de CPU del contenedor es medio vCPU y estas
  * llamadas son de espera, no de cálculo.
  */
+
 @Processor(OUTBOX_QUEUE, { concurrency: 4 })
 export class OutboxProcessor extends WorkerHost {
   private readonly logger = new Logger(OutboxProcessor.name);
@@ -71,9 +75,16 @@ export class OutboxProcessor extends WorkerHost {
       return;
     }
 
+    /*
+     * «Entregando» con un plazo (17/11/2026). Si el proceso se cae justo
+     * aquí —un despliegue, falta de memoria—, el evento se quedaba en
+     * «delivering» para siempre: el barrido solo recogía los pendientes. Con
+     * el plazo, pasados dos minutos el barrido lo vuelve a tomar. n8n
+     * descarta los repetidos por `eventId`, así que reentregar no duplica.
+     */
     await this.db
       .update(outboxEvents)
-      .set({ status: 'delivering' })
+      .set({ status: 'delivering', nextAttemptAt: new Date(Date.now() + PLAZO_DE_ENTREGA_MS) })
       .where(eq(outboxEvents.eventId, eventId));
 
     const body = JSON.stringify({

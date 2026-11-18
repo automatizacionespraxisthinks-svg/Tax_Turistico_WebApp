@@ -78,7 +78,7 @@ export interface SessionState {
   rideStatus: Extract<RideStatus, 'ASSIGNED' | 'DRIVER_ARRIVED' | 'IN_PROGRESS'>;
   offer: OfferedRide | null;
   online: boolean;
-  /** Acciones hechas sin conexión, esperando en IndexedDB para reenviarse. */
+  /** Acciones hechas sin conexión, guardadas en el celular para reenviarse. */
   queued: number;
   shiftStartedAt: number | null;
   ridesToday: number;
@@ -91,10 +91,12 @@ export interface SessionState {
    */
   minRideMinutes: number | null;
   /**
-   * Distancia al punto de recogida, medida con cada lectura del GPS; bajo
-   * 150 m se habilita "Llegué" (§5.3). Nula mientras no se sabe.
+   * Distancia al punto de recogida, medida con cada lectura del GPS; dentro
+   * de `radioLlegada` se habilita "Llegué" (§5.3). Nula mientras no se sabe.
    */
   metersToPickup: number | null;
+  /** El radio de «Llegué», en metros, como lo dice la API. */
+  radioLlegada: number;
 }
 
 export const initialSession: SessionState = {
@@ -109,11 +111,11 @@ export const initialSession: SessionState = {
   ridesToday: 0,
   minRideMinutes: null,
   metersToPickup: null,
+  radioLlegada: 150,
 };
 
 export type SessionAction =
   | { type: 'login' }
-  | { type: 'start_shift' }
   | { type: 'end_shift' }
   | { type: 'pause' }
   | { type: 'resume' }
@@ -128,7 +130,7 @@ export type SessionAction =
   | { type: 'approach'; meters: number }
   | { type: 'set_online'; online: boolean }
   | { type: 'flush_queue' }
-  | { type: 'queued' }
+  | { type: 'queued'; count: number }
   | {
       type: 'restore';
       phase: Phase;
@@ -137,17 +139,67 @@ export type SessionAction =
       shiftStartedAt?: number | null;
       totals?: { rides: number };
       minRideMinutes?: number;
+      radioLlegada?: number;
     }
   | { type: 'shift_opened' }
   | { type: 'logged_out' };
+
+/* ----------------------------------------------------- lo último que se supo */
+
+const ULTIMO_ESTADO_KEY = 'tax.driver.ultimo-estado';
+const TOKEN_KEY = 'tax.driver.token';
+
+/**
+ * Lo último que se supo de la sesión, guardado en el celular (17/11/2026).
+ *
+ * Antes, abrir la aplicación sin señal mostraba «Entrar» aunque el conductor
+ * tuviera sesión y una carrera en curso: el estado solo venía de la API. Con
+ * esto arranca donde estaba —su carrera, su turno— mientras la API vuelve a
+ * contestar. Una oferta no se guarda: sin señal ya no se puede aceptar.
+ */
+export function guardarUltimoEstado(state: SessionState): void {
+  if (state.phase === 'login') return;
+  const enCarrera = state.phase === 'ride';
+  const foto = {
+    phase: state.phase === 'offer' || state.phase === 'summary' ? 'available' : state.phase,
+    rideStatus: state.rideStatus,
+    offer: enCarrera ? state.offer : null,
+    shiftStartedAt: state.shiftStartedAt,
+    ridesToday: state.ridesToday,
+    minRideMinutes: state.minRideMinutes,
+    radioLlegada: state.radioLlegada,
+  };
+  try {
+    window.localStorage.setItem(ULTIMO_ESTADO_KEY, JSON.stringify(foto));
+  } catch {
+    // Sin almacenamiento, al abrir sin señal se verá el acceso, como antes.
+  }
+}
+
+export function borrarUltimoEstado(): void {
+  try {
+    window.localStorage.removeItem(ULTIMO_ESTADO_KEY);
+  } catch {
+    // Nada que borrar.
+  }
+}
+
+/** El estado con que arranca la aplicación: lo último que se supo, si hay sesión. */
+export function estadoInicial(): SessionState {
+  try {
+    if (!window.localStorage.getItem(TOKEN_KEY)) return initialSession;
+    const raw = window.localStorage.getItem(ULTIMO_ESTADO_KEY);
+    if (!raw) return initialSession;
+    return { ...initialSession, ...(JSON.parse(raw) as Partial<SessionState>), online: false, queued: 0 };
+  } catch {
+    return initialSession;
+  }
+}
 
 export function sessionReducer(state: SessionState, action: SessionAction): SessionState {
   switch (action.type) {
     case 'login':
       return { ...state, phase: 'off_shift' };
-
-    case 'start_shift':
-      return { ...state, phase: 'available', shiftStartedAt: Date.now() };
 
     case 'end_shift':
       return { ...state, phase: 'off_shift', shiftStartedAt: null, offer: null };
@@ -213,8 +265,10 @@ export function sessionReducer(state: SessionState, action: SessionAction): Sess
     case 'flush_queue':
       return { ...state, queued: 0 };
 
+    // El número de verdad, no uno más por cada cambio: con dos pendientes,
+    // enviar el primero decía «3 acciones guardadas».
     case 'queued':
-      return { ...state, queued: state.queued + 1 };
+      return { ...state, queued: action.count };
 
     /** Estado recuperado de la API al abrir o recargar la aplicación. */
     case 'restore':
@@ -240,6 +294,9 @@ export function sessionReducer(state: SessionState, action: SessionAction): Sess
         shiftStartedAt: action.shiftStartedAt ?? state.shiftStartedAt,
         ridesToday: action.totals?.rides ?? state.ridesToday,
         minRideMinutes: action.minRideMinutes ?? state.minRideMinutes,
+        radioLlegada: action.radioLlegada ?? state.radioLlegada,
+        // La distancia vieja no vale para otra carrera: se mide de nuevo.
+        metersToPickup: action.offer?.rideId === state.offer?.rideId ? state.metersToPickup : null,
       };
 
     case 'shift_opened':

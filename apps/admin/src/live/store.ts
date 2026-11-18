@@ -1,18 +1,16 @@
 import { useSyncExternalStore } from 'react';
-import type { Driver, OutboxEvent, Place, Ride, WahaSession, Zone } from '@tax/shared';
-import { estimateEtaMinutes, haversineKm, pointInPolygon, type Point } from '@tax/shared';
+import type { Driver, Place, Ride, WahaSession, Zone } from '@tax/shared';
+import { OPEN_RIDE_STATUSES, estimateEtaMinutes, haversineKm, pointInPolygon, type Point } from '@tax/shared';
 import { ApiError, api } from '../api/client';
 import { connectOfficeSocket, type OfficeAlert } from '../api/socket';
 import { sonarAlarma } from './alarma';
 import {
   toDriver,
-  toOutboxEvent,
   toRide,
   toRideDetail,
   toWahaSession,
   toZone,
   type ApiDriver,
-  type ApiOutboxEvent,
   type ApiRide,
   type ApiRideDetail,
   type ApiWahaSession,
@@ -40,7 +38,6 @@ export interface LiveState {
   drivers: Driver[];
   zones: Zone[];
   places: Place[];
-  outbox: OutboxEvent[];
   wahaSessions: WahaSession[];
   /** Las alertas que aún no se han cerrado, la más reciente primero. */
   alerts: AlertaRecibida[];
@@ -68,7 +65,6 @@ let state: LiveState = {
   drivers: [],
   zones: [],
   places: [],
-  outbox: [],
   wahaSessions: [],
   alerts: [],
   pulseRideId: null,
@@ -117,7 +113,19 @@ export function getLive(): LiveState {
 const conDetalle = new Set<string>();
 
 async function loadRides(): Promise<void> {
-  const rows = await api.get<ApiRide[]>('/v1/admin/rides?limit=300');
+  /*
+   * Las abiertas aparte de las recientes (17/11/2026). Antes eran solo las
+   * últimas 300 de cualquier día: una carrera activa más vieja que esas 300
+   * desaparecía del tablero y de Carreras. Las abiertas van todas; las
+   * recientes, para el historial de la jornada.
+   */
+  const [abiertas, recientes] = await Promise.all([
+    api.get<ApiRide[]>(`/v1/admin/rides?status=${OPEN_RIDE_STATUSES.join(',')}&limit=500`),
+    api.get<ApiRide[]>('/v1/admin/rides?limit=300'),
+  ]);
+  const porId = new Map<string, ApiRide>();
+  for (const row of [...recientes, ...abiertas]) porId.set(row.id, row);
+  const rows = [...porId.values()].sort((a, b) => b.createdAt.localeCompare(a.createdAt));
   const previas = new Map(state.rides.map((ride) => [ride.id, ride]));
 
   emit({
@@ -136,10 +144,6 @@ async function loadDrivers(): Promise<void> {
   emit({ drivers: rows.map(toDriver) });
 }
 
-async function loadOutbox(): Promise<void> {
-  const rows = await api.get<ApiOutboxEvent[]>('/v1/admin/outbox?limit=100');
-  emit({ outbox: rows.map(toOutboxEvent) });
-}
 
 async function loadReference(): Promise<void> {
   const zones = await api.get<ApiZone[]>('/v1/admin/zones');
@@ -176,7 +180,6 @@ function scheduleRefresh(): void {
   refreshTimer = window.setTimeout(() => {
     refreshTimer = undefined;
     void loadRides().catch(reportError);
-    void loadOutbox().catch(reportError);
   }, 400);
 }
 
@@ -275,11 +278,6 @@ export const actions = {
     void loadDrivers().catch(reportError);
   },
 
-  async retryEvent(eventId: string) {
-    await api.post(`/v1/admin/outbox/${eventId}/retry`);
-    await loadOutbox();
-  },
-
   dismissAlert(id: number) {
     emit({ alerts: state.alerts.filter((alerta) => alerta.id !== id) });
   },
@@ -314,7 +312,9 @@ export function startLive(): () => void {
 
   const bootstrap = async () => {
     try {
-      await Promise.all([loadReference(), loadRides(), loadDrivers(), loadOutbox()]);
+      // Sin el outbox (17/11/2026): se pedía en cada refresco y nadie lo
+      // mostraba, y ahora solo lo ve quien tiene `sistema.tecnico`.
+      await Promise.all([loadReference(), loadRides(), loadDrivers()]);
       emit({ loading: false, error: null });
     } catch (error) {
       emit({ loading: false });

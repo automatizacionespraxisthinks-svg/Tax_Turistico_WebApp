@@ -36,10 +36,11 @@ export function TopStatus({
   onDismissNotice?: () => void;
 }) {
   // El aviso se va solo: el conductor está conduciendo y no puede quedarse
-  // buscando dónde cerrarlo.
+  // buscando dónde cerrarlo. Los largos (una acción que no se registró, por
+  // ejemplo) duran más: en 5 segundos no alcanza a leerlos de un vistazo.
   useEffect(() => {
     if (!notice || !onDismissNotice) return;
-    const id = window.setTimeout(onDismissNotice, 5000);
+    const id = window.setTimeout(onDismissNotice, Math.min(15_000, Math.max(5000, notice.length * 90)));
     return () => window.clearTimeout(id);
   }, [notice, onDismissNotice]);
 

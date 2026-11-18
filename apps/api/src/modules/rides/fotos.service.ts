@@ -1,4 +1,7 @@
 import { Inject, Injectable, Logger } from '@nestjs/common';
+import { lookup } from 'node:dns/promises';
+import { BlockList, isIP } from 'node:net';
+import { loadEnv } from '../../config/env';
 import { eq } from 'drizzle-orm';
 import { DB, type Database } from '../../db/db.module';
 import { ridePhotos, rides } from '../../db/schema';
@@ -10,6 +13,76 @@ import type { Actor } from './rides.service';
 export const MAX_FOTO_BYTES = 5 * 1024 * 1024;
 
 const TIEMPO_DESCARGA_MS = 15_000;
+
+const MAX_REDIRECCIONES = 3;
+
+/** Direcciones a las que nunca se le pide una foto: las del propio servidor y su red. */
+const PRIVADAS = new BlockList();
+for (const [red, bits] of [
+  ['0.0.0.0', 8],
+  ['10.0.0.0', 8],
+  ['100.64.0.0', 10],
+  ['127.0.0.0', 8],
+  ['169.254.0.0', 16],
+  ['172.16.0.0', 12],
+  ['192.168.0.0', 16],
+  ['224.0.0.0', 4],
+] as const) {
+  PRIVADAS.addSubnet(red, bits, 'ipv4');
+}
+for (const [red, bits] of [
+  ['::', 128],
+  ['::1', 128],
+  ['fc00::', 7],
+  ['fe80::', 10],
+] as const) {
+  PRIVADAS.addSubnet(red, bits, 'ipv6');
+}
+
+export function esPrivada(direccion: string): boolean {
+  // Una IPv4 escrita como IPv6 (::ffff:10.0.0.1) se mira como IPv4.
+  const v4 = direccion.toLowerCase().startsWith('::ffff:') ? direccion.slice(7) : null;
+  if (v4 && isIP(v4) === 4) return PRIVADAS.check(v4, 'ipv4');
+  return PRIVADAS.check(direccion, isIP(direccion) === 6 ? 'ipv6' : 'ipv4');
+}
+
+async function destinoPermitido(url: URL): Promise<void> {
+  if (url.protocol !== 'https:' && url.protocol !== 'http:') {
+    throw new AppError('VALIDATION_FAILED', 'El enlace de la foto tiene que ser http o https');
+  }
+  const host = url.hostname.toLowerCase().replace(/^\[|\]$/g, '');
+  const permitidos = loadEnv().FOTO_HOSTS_PERMITIDOS;
+  if (permitidos.length > 0) {
+    if (!permitidos.some((h) => host === h || host.endsWith(`.${h}`))) {
+      throw new AppError('VALIDATION_FAILED', 'Ese servidor no está entre los permitidos para fotos');
+    }
+    return;
+  }
+  const direcciones = isIP(host) ? [{ address: host }] : await lookup(host, { all: true });
+  if (direcciones.length === 0 || direcciones.some((d) => esPrivada(d.address))) {
+    throw new AppError('VALIDATION_FAILED', 'El enlace de la foto apunta a una dirección no permitida');
+  }
+}
+
+/** Lee el cuerpo hasta `tope` bytes; si lo pasa, corta la descarga y devuelve nulo. */
+async function leerConTope(respuesta: Response, tope: number): Promise<Buffer | null> {
+  if (Number(respuesta.headers.get('content-length') ?? 0) > tope) return null;
+  if (!respuesta.body) return Buffer.alloc(0);
+  const lector = respuesta.body.getReader();
+  const partes: Uint8Array[] = [];
+  let total = 0;
+  for (;;) {
+    const { done, value } = await lector.read();
+    if (done) break;
+    total += value.byteLength;
+    if (total > tope) {
+      await lector.cancel();
+      return null;
+    }
+    partes.push(value);
+  }
+  return Buffer.concat(partes);
+}
 
 /**
  * El tipo se decide por los primeros bytes, no por lo que diga quien la manda:
@@ -97,26 +170,45 @@ export class FotosService {
    * lo que llega tiene que ser de verdad una imagen.
    */
   async desdeEnlace(rideId: string, enlace: string, actor: Actor) {
-    const url = new URL(enlace);
-    if (url.protocol !== 'https:' && url.protocol !== 'http:') {
-      throw new AppError('VALIDATION_FAILED', 'El enlace de la foto tiene que ser http o https');
-    }
-
-    let respuesta: Response;
+    /*
+     * Endurecido el 17/11/2026. Antes se seguía cualquier redirección y se
+     * leía el cuerpo entero: un enlace podía hacer que la API le pidiera
+     * cosas a los servicios internos del servidor (WAHA, Redis, Postgres en
+     * la red de Docker) o bajara un archivo enorme. Ahora cada salto se
+     * comprueba contra la lista de servidores permitidos (o, sin lista,
+     * contra las direcciones privadas), se siguen máximo tres, y la descarga
+     * se corta al pasar de 5 MB aunque el servidor no diga el tamaño.
+     */
+    const plazo = AbortSignal.timeout(TIEMPO_DESCARGA_MS);
+    let url = new URL(enlace);
+    let respuesta: Response | undefined;
     try {
-      respuesta = await fetch(url, { redirect: 'follow', signal: AbortSignal.timeout(TIEMPO_DESCARGA_MS) });
+      for (let salto = 0; salto <= MAX_REDIRECCIONES; salto++) {
+        await destinoPermitido(url);
+        respuesta = await fetch(url, { redirect: 'manual', signal: plazo });
+        const destino = respuesta.headers.get('location');
+        if (respuesta.status >= 300 && respuesta.status < 400 && destino) {
+          url = new URL(destino, url);
+          respuesta = undefined;
+          continue;
+        }
+        break;
+      }
     } catch (error) {
-      throw new AppError('VALIDATION_FAILED', `No se pudo descargar la foto: ${error instanceof Error ? error.message : error}`);
+      if (error instanceof AppError) throw error;
+      this.logger.warn({ rideId, err: error }, 'No se pudo descargar la foto del lugar');
+      throw new AppError('VALIDATION_FAILED', 'No se pudo descargar la foto del enlace');
     }
+    if (!respuesta) throw new AppError('VALIDATION_FAILED', 'El enlace de la foto redirige demasiadas veces');
     if (!respuesta.ok) {
       throw new AppError('VALIDATION_FAILED', `El enlace de la foto respondió HTTP ${respuesta.status}`);
     }
-    const declarado = Number(respuesta.headers.get('content-length') ?? 0);
-    if (declarado > MAX_FOTO_BYTES) {
+
+    const contenido = await leerConTope(respuesta, MAX_FOTO_BYTES);
+    if (!contenido) {
       throw new AppError('VALIDATION_FAILED', `La foto pesa más de ${MAX_FOTO_BYTES / 1024 / 1024} MB`);
     }
-
-    return this.guardar(rideId, Buffer.from(await respuesta.arrayBuffer()), 'enlace', actor);
+    return this.guardar(rideId, contenido, 'enlace', actor);
   }
 
   async leer(rideId: string): Promise<{ content: Buffer; mimeType: string } | null> {

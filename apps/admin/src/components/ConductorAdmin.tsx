@@ -7,6 +7,7 @@ import {
   DIAS_DE_SUSPENSION,
   MAX_DIAS_SUSPENSION,
   VEHICLE_TYPES,
+  VEHICLE_TYPE_LABEL,
   finDeSuspension,
   formatRelative,
 } from '@tax/shared';
@@ -224,7 +225,7 @@ export function NuevoConductorBoton() {
                 >
                   {VEHICLE_TYPES.map((t) => (
                     <option key={t} value={t}>
-                      {t}
+                      {VEHICLE_TYPE_LABEL[t]}
                     </option>
                   ))}
                 </Select>

@@ -5,10 +5,18 @@
  * cookie: la aplicación puede estar instalada y conviene que el token viva
  * con ella, revocable desde la oficina si se pierde el celular (§8.1).
  *
- * Toda llamada que cambie algo pasa por `enqueue`, que la reintenta al volver
- * la señal. En vereda la conexión se cae a mitad de carrera y el conductor no
- * puede quedarse esperando a que vuelva para marcar que llegó.
+ * Las etapas de la carrera (llegué, a bordo, finalicé) pasan por `send`, de
+ * la cola sin conexión, que las reintenta al volver la señal: en vereda la
+ * conexión se cae a mitad de carrera y el conductor no puede quedarse
+ * esperando para marcar que llegó.
  */
+
+/**
+ * Cuánto se espera una respuesta antes de darla por perdida (17/11/2026).
+ * Sin tope, con señal débil una petición se quedaba colgada minutos: ni
+ * fallaba —así que no se guardaba en la cola— ni avanzaba la pantalla.
+ */
+const TIEMPO_MAXIMO_MS = 12_000;
 
 export const API_BASE = import.meta.env.VITE_API_BASE ?? 'http://localhost:3000';
 
@@ -77,13 +85,23 @@ export class ApiError extends Error {
   get isOffline(): boolean {
     return this.code === 'NETWORK';
   }
+
+  /**
+   * Vale la pena reintentarla más tarde: sin red, el servidor reiniciándose
+   * (un despliegue, el proxy: 502, 503, 504), demasiadas peticiones o tiempo
+   * agotado. Un 4xx de negocio («la carrera ya no es tuya») no: repetirlo
+   * daría lo mismo.
+   */
+  get isRetryable(): boolean {
+    return this.isOffline || this.status === 408 || this.status === 429 || this.status >= 500;
+  }
 }
 
 async function request<T>(
   path: string,
-  options: { method?: string; body?: unknown; auth?: boolean } = {},
+  options: { method?: string; body?: unknown; auth?: boolean; headers?: Record<string, string> } = {},
 ): Promise<T> {
-  const headers: Record<string, string> = {};
+  const headers: Record<string, string> = { ...(options.headers ?? {}) };
   if (options.body) headers['content-type'] = 'application/json';
 
   if (options.auth !== false) {
@@ -97,28 +115,41 @@ async function request<T>(
       method: options.method ?? 'GET',
       headers,
       body: options.body ? JSON.stringify(options.body) : undefined,
+      signal: AbortSignal.timeout(TIEMPO_MAXIMO_MS),
     });
-  } catch (cause) {
+  } catch {
+    // Sin red o sin respuesta a tiempo: para el conductor es lo mismo. El
+    // texto del navegador («Failed to fetch») no se le muestra.
     throw new ApiError({
       title: 'Sin conexión',
       status: 0,
       code: 'NETWORK',
-      detail: cause instanceof Error ? cause.message : undefined,
+      detail: 'Sin señal o el servidor no responde.',
     });
   }
 
   if (response.status === 204) return undefined as T;
 
-  const text = await response.text();
-  const payload: unknown = text ? JSON.parse(text) : null;
+  /*
+   * El proxy, durante un despliegue, contesta con HTML (502). Antes eso
+   * rompía `JSON.parse` con un error que no era `ApiError`, y la cola
+   * descartaba la acción como si el servidor la hubiera rechazado.
+   */
+  const text = await response.text().catch(() => '');
+  let payload: unknown = null;
+  try {
+    payload = text ? JSON.parse(text) : null;
+  } catch {
+    payload = null;
+  }
 
   if (!response.ok) {
     const problem = payload as Partial<ProblemDocument> | null;
     throw new ApiError({
-      title: problem?.title ?? response.statusText,
+      title: problem?.title ?? 'El servidor no respondió bien',
       status: problem?.status ?? response.status,
-      code: problem?.code ?? 'INTERNAL',
-      detail: problem?.detail,
+      code: problem?.code ?? (response.status >= 500 ? 'UNAVAILABLE' : 'INTERNAL'),
+      detail: problem?.detail ?? (response.status >= 500 ? 'El servidor no está disponible en este momento.' : undefined),
     });
   }
 
@@ -144,7 +175,8 @@ async function imagen(path: string): Promise<Blob> {
 export const api = {
   get: <T>(path: string) => request<T>(path),
   imagen,
-  post: <T>(path: string, body?: unknown) => request<T>(path, { method: 'POST', body }),
+  post: <T>(path: string, body?: unknown, headers?: Record<string, string>) =>
+    request<T>(path, { method: 'POST', body, headers }),
   delete: <T>(path: string) => request<T>(path, { method: 'DELETE' }),
   /** Sin token: el acceso es lo que lo obtiene. */
   login: <T>(path: string, body: unknown) => request<T>(path, { method: 'POST', body, auth: false }),

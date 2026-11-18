@@ -3,11 +3,12 @@ import { AnimatePresence, motion } from 'motion/react';
 import { Fingerprint } from 'lucide-react';
 import { formatRelative } from '@tax/shared';
 import { Card, EmptyState, SectionLabel, Skeleton, StatusPill, Tabs, cn, transition } from '@tax/ui';
-import { useAuditLog, useAuditVerification, usePuede, useSesion } from '../api/queries';
+import { useAuditLog, useAuditVerification, usePlazos, usePuede, useSesion } from '../api/queries';
 import { RolesAdmin } from '../components/RolesAdmin';
 import { UsuariosAdmin } from '../components/UsuariosAdmin';
+import { DatosPersonales } from '../components/DatosPersonales';
 
-type Tab = 'usuarios' | 'roles' | 'auditoria';
+type Tab = 'usuarios' | 'roles' | 'datos' | 'auditoria';
 
 /**
  * Sistema: las cuentas de la oficina, sus roles y la bitácora de auditoría.
@@ -26,6 +27,7 @@ export function Sistema() {
   const pestanas = [
     ...(puede('usuarios.gestionar') ? [{ value: 'usuarios' as const, label: 'Usuarios' }] : []),
     ...(puede('roles.gestionar') ? [{ value: 'roles' as const, label: 'Roles y permisos' }] : []),
+    ...(puede('clientes.datos') ? [{ value: 'datos' as const, label: 'Datos personales' }] : []),
     ...(puede('auditoria.ver') ? [{ value: 'auditoria' as const, label: 'Auditoría' }] : []),
   ];
   const [elegida, setElegida] = useState<Tab | null>(null);
@@ -49,7 +51,7 @@ export function Sistema() {
           <EmptyState
             icon={<Fingerprint className="size-4" />}
             title="Nada que ver aquí con tu rol"
-            description="Usuarios, roles y auditoría piden permisos que tu rol no tiene."
+            description="Usuarios, roles, datos personales y auditoría piden permisos que tu rol no tiene."
           />
         </Card>
       </div>
@@ -70,6 +72,7 @@ export function Sistema() {
         >
           {tab === 'usuarios' ? <UsuariosAdmin /> : null}
           {tab === 'roles' ? <RolesAdmin /> : null}
+          {tab === 'datos' ? <DatosPersonales /> : null}
           {tab === 'auditoria' ? <Auditoria /> : null}
         </motion.div>
       </AnimatePresence>
@@ -91,6 +94,7 @@ const ROLE_TONE: Record<string, 'info' | 'accent' | 'progress' | 'neutral'> = {
 function Auditoria() {
   const entries = useAuditLog(50);
   const verification = useAuditVerification();
+  const plazos = usePlazos();
 
   if (entries.isError) {
     return (
@@ -154,10 +158,16 @@ function Auditoria() {
       <SectionLabel>Retención</SectionLabel>
       <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
         {[
-          { label: 'Fotos del lugar', value: '30 días' },
-          { label: 'Histórico GPS', value: '6 meses' },
-          { label: 'Conversaciones', value: '12 meses' },
-          { label: 'Carreras y auditoría', value: '5 años' },
+          {
+            label: 'Fotos del lugar',
+            value: plazos.data ? `${plazos.data.fotosDias} días` : '—',
+          },
+          {
+            label: 'Histórico GPS',
+            value: plazos.data ? `${plazos.data.posicionesDias} días` : '—',
+          },
+          { label: 'Conversaciones', value: 'En Chatwoot' },
+          { label: 'Carreras y auditoría', value: 'Se conservan' },
         ].map((item) => (
           <div key={item.label} className="rounded-md border border-line bg-surface px-3 py-2.5">
             <p className="text-micro uppercase tracking-[0.06em] text-ink-muted">{item.label}</p>
@@ -166,8 +176,9 @@ function Auditoria() {
         ))}
       </div>
       <p className="text-micro text-ink-muted">
-        Plazos propuestos, pendientes de confirmar con la empresa. El borrado automático corre como
-        tarea programada.
+        Las fotos y el histórico GPS se borran solos cada madrugada con estos plazos, que se cambian en
+        la configuración del servidor. Las conversaciones las guarda Chatwoot, y las carreras y la
+        bitácora no tienen borrado automático todavía: sus plazos están por confirmar con la empresa.
       </p>
     </div>
   );

@@ -4,11 +4,16 @@ import type { VehicleType } from './ride';
 export const DRIVER_STATUSES = ['OFF_SHIFT', 'AVAILABLE', 'ON_RIDE', 'PAUSED'] as const;
 export type DriverStatus = (typeof DRIVER_STATUSES)[number];
 
+/**
+ * El taxi del turno abierto. Sin turno no hay taxi: entonces solo viene la
+ * placa «—» y lo demás queda sin dato, en vez de inventar «sedán, 4
+ * pasajeros, activo» como hacía el panel (17/11/2026).
+ */
 export interface Vehicle {
   plate: string;
-  type: VehicleType;
-  capacity: number;
-  active: boolean;
+  type?: VehicleType;
+  capacity?: number;
+  active?: boolean;
 }
 
 export interface MovilVinculado {
@@ -56,19 +61,5 @@ export interface Driver {
    * (17/11/2026): se le deja trabajar, y la oficina lo ve marcado.
    */
   fueraDeListado?: boolean;
-  ridesToday: number;
-  acceptanceRate: number;
-  currentRideId?: string;
   deviceRegistered: boolean;
-}
-
-/** Un conductor es candidato solo si está disponible y su GPS es reciente (§5.2). */
-export function isDispatchCandidate(driver: Driver, vehicleType: VehicleType): boolean {
-  return (
-    driver.status === 'AVAILABLE' &&
-    driver.vehicle.active &&
-    driver.vehicle.type === vehicleType &&
-    driver.position !== undefined &&
-    (driver.positionAgeSeconds ?? Number.POSITIVE_INFINITY) <= 60
-  );
 }

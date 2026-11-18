@@ -115,6 +115,12 @@ export class FleetController {
   @Post('shift/close')
   async closeShift(@Req() request: FastifyRequest) {
     const driver = requireDriver(request);
+    // Con una carrera tomada el turno no se cierra (17/11/2026): el conductor
+    // quedaba fuera de turno con el cliente esperando, y al terminar volvía a
+    // «disponible» sin turno.
+    if (await this.fleet.tieneCarreraActiva(driver.id)) {
+      throw new AppError('DRIVER_BUSY', 'Termina la carrera antes de cerrar el turno.');
+    }
     const placa = await this.fleet.placaDelTurno(driver.id);
     await this.fleet.closeShift(driver.id);
     // Cerrar sin turno abierto (un reintento de la cola) no se anota dos veces.

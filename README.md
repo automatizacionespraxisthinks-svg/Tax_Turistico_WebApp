@@ -155,6 +155,47 @@ El panel no inventa acciones: cada botón sale de la tabla de transiciones.
   el entorno de la API: la PWA lo pide al abrir, así que cambiarlo no obliga a
   recompilarla, y con `0` la restricción queda desactivada. La oficina sí
   puede cerrar antes.
+- **Datos personales, Ley 1581 de 2012** (17/11/2026, migración 0022):
+  - **Aviso y autorización.** El flujo de atención agrega al final del primer
+    mensaje de cada solicitud un aviso de privacidad fijo (`avisoPrivacidad`
+    en el nodo Config; el modelo no lo escribe). Seguir escribiendo después
+    de leerlo es la autorización (conducta inequívoca, Decreto 1377 art. 7).
+    `crear_carrera` manda `consent: { version, channel }`, y la API la guarda
+    en el cliente con la hora del servidor la primera vez o cuando cambia
+    `politicaVersion`. Sin aviso configurado no se manda ni se guarda.
+  - **Consulta y supresión.** *Sistema › Datos personales* (permiso
+    `clientes.datos`, solo administradores por defecto): buscar por teléfono,
+    descargar todo lo que el sistema guarda del cliente y suprimirlo. Suprimir
+    borra teléfono, nombre, direcciones, notas y fotos; las carreras quedan en
+    las cifras con la recogida redondeada a ~1 km, y la autorización se
+    conserva como prueba. No se puede con una carrera abierta. Las dos
+    acciones quedan en la bitácora, sin el teléfono completo. La conversación
+    en Chatwoot y la memoria del agente en n8n se borran allá.
+  - Flujos: `Flujos/Principales/Actualizados 2026-11-17`. **Antes de
+    importarlos, la empresa tiene que publicar su política de tratamiento y
+    poner el enlace en `politicaUrl`** del nodo Config (sin enlace, el aviso
+    sale sin él). Prueba: `src/test/e2e-datos-personales.ts`.
+- **PWA sin señal** (17/11/2026, auditoría):
+  - **La cola solo guarda las etapas** de una carrera suya (llegué, a bordo,
+    finalicé). Aceptar una oferta y abrir, cerrar o pausar el turno van
+    directo: sin señal se le dice al conductor y no avanza la pantalla. Antes
+    un «Aceptar» sin señal lo mandaba a buscar a un cliente que no era suyo.
+  - **La cola reintenta lo pasajero** (sin red, tiempo agotado, 5xx de un
+    despliegue, 429), se para ante un 401 sin borrar nada, y si el servidor
+    rechaza una acción se lo dice al conductor en vez de dejarlo en la
+    consola. Cada acción lleva clave de idempotencia y es del conductor que la
+    hizo: «Cambiar conductor» no deja pasar la de uno al otro, y no cierra la
+    sesión con acciones sin enviar.
+  - **Las peticiones tienen 12 s de tope**, y los botones de etapa dicen
+    «Enviando…» y no aceptan un segundo toque.
+  - **Abrir sin señal** muestra lo último que se supo (su carrera, su turno)
+    en vez de «Entrar», y se recupera solo al volver la red.
+  - **Versión nueva**: la app la busca cada 30 min y al volver al frente, y se
+    recarga sola en un momento seguro (sin oferta ni carrera en pantalla).
+  - El radio de «Llegué» viene de la API (`rules.arrivalRadiusMeters`), la
+    oferta suena (Web Audio, sin archivo), el reloj del turno avanza, la
+    suscripción push se vuelve a registrar al recuperar un turno, y se puede
+    hacer zoom.
 - **Cambiar de carro o de conductor** (17/11/2026, migración 0021): un
   carro lo manejan varios conductores y un conductor maneja varios carros,
   muchas veces con el mismo celular.

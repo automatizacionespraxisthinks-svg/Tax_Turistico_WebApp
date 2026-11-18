@@ -90,6 +90,10 @@ export class DriverRidesController {
        */
       rules: {
         minRideMinutes: this.env.MIN_DURACION_CARRERA_MIN,
+        // El radio de «Llegué» (17/11/2026): la PWA lo tenía fijo en 150 m,
+        // y si la oficina cambiaba `ARRIVAL_RADIUS_METERS` la pantalla decía
+        // una cosa y el servidor registraba otra.
+        arrivalRadiusMeters: this.env.ARRIVAL_RADIUS_METERS,
         positionSeconds: {
           ride: this.env.POSITION_REPORT_RIDE_SECONDS,
           idle: this.env.POSITION_REPORT_IDLE_SECONDS,

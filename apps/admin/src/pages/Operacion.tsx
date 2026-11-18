@@ -2,7 +2,7 @@ import { useMemo, useState } from 'react';
 import { AnimatePresence, motion } from 'motion/react';
 import { Bot, CarFront, Check, Inbox, Timer, TriangleAlert } from 'lucide-react';
 import type { Ride, RideStatus } from '@tax/shared';
-import { RIDE_STATUS_LABEL, RIDE_STATUS_TONE, formatRelative } from '@tax/shared';
+import { METAS, RIDE_STATUS_LABEL, RIDE_STATUS_TONE, diaEnPaipa, formatRelative } from '@tax/shared';
 import {
   BANDA_DE_ESTADO,
   Button,
@@ -21,6 +21,7 @@ import { RideCard } from '../components/RideCard';
 import { RideDetail } from '../components/RideDetail';
 import { actions, useLive } from '../live/store';
 import { usePuede } from '../api/queries';
+import { useCifrasRecientes } from '../api/informes';
 
 /**
  * Columnas del tablero: el ciclo de vida leído de izquierda a derecha. Cada
@@ -34,12 +35,15 @@ const COLUMNS: { status: RideStatus; title: string; band: string }[] = [
   { status: 'IN_PROGRESS', title: 'En curso', band: BANDA_DE_ESTADO.IN_PROGRESS },
 ];
 
-/*
- * Tiempo a asignación: cifras de muestra fijas hasta que la API lo dé en
- * vivo. El p95 se pinta en rojo cuando supera el objetivo.
- */
-const P95_ASIGNACION_S = 58;
-const OBJETIVO_OFERTA_S = 3;
+/** Segundos legibles: «45 s», «2 min 10 s». */
+function duracion(segundos: number): { valor: number; unidad: string } {
+  return segundos < 120 ? { valor: Math.round(segundos), unidad: 's' } : { valor: Math.round(segundos / 60), unidad: 'min' };
+}
+
+/** Si la carrera se pidió hoy, en hora de Paipa. */
+function esDeHoy(iso: string): boolean {
+  return diaEnPaipa(new Date(iso)) === diaEnPaipa(new Date());
+}
 
 export function Operacion() {
   const rides = useLive((s) => s.rides);
@@ -54,7 +58,30 @@ export function Operacion() {
   const unassigned = live.filter((r) => r.status === 'UNASSIGNED' || r.status === 'PENDING');
   const available = drivers.filter((d) => d.status === 'AVAILABLE').length;
   const onShift = drivers.filter((d) => d.status !== 'OFF_SHIFT').length;
+  // La flota es la que está dada de alta y activa, no un número escrito a mano.
+  const flota = drivers.filter((d) => d.active !== false).length;
   const selected = rides.find((r) => r.id === selectedId) ?? null;
+
+  /*
+   * Tiempo a asignación y sin intervención, de verdad (17/11/2026): antes
+   * eran cifras de muestra fijas (23 s, p95 58 s, 83 %) con un objetivo
+   * «< 3 s» que contradecía la meta de Reportes. Ahora salen del mismo
+   * informe que Reportes, la cifra es la de hoy y la gráfica los últimos 7
+   * días; las metas son las de `METAS`.
+   */
+  const puede = usePuede();
+  const verCifras = puede('reportes.ver');
+  const recientes = useCifrasRecientes(verCifras);
+  const dias = recientes.data?.porDia ?? [];
+  const hoy = dias.at(-1);
+  const asignacion = hoy?.asignacionP50 != null ? duracion(hoy.asignacionP50) : null;
+  const p95 = hoy?.asignacionP95 ?? null;
+  const sinIntervencion = hoy?.sinIntervencion ?? null;
+  const serie = (valores: (number | null)[]) => {
+    const limpios = valores.filter((v): v is number => v != null);
+    return limpios.length >= 2 ? limpios : undefined;
+  };
+  const sinDato = !verCifras ? 'Sin permiso para ver cifras' : recientes.isError ? 'No se pudieron cargar las cifras' : 'Sin carreras hoy todavía';
 
   return (
     <div className="space-y-4 p-5">
@@ -64,7 +91,7 @@ export function Operacion() {
           value={live.length}
           icon={<Inbox className="size-3.5" />}
           iconTone="info"
-          hint={`${rides.length} hoy en total`}
+          hint={`${rides.filter((r) => esDeHoy(r.createdAt)).length} pedidas hoy`}
         />
         <Stat
           label="Sin asignar"
@@ -72,7 +99,7 @@ export function Operacion() {
           tone={live.some((r) => r.status === 'UNASSIGNED') ? 'critical' : 'positive'}
           icon={<TriangleAlert className="size-3.5" />}
           iconTone="critical"
-          hint="Tres oleadas agotadas"
+          hint="Sin conductor tras todas las oleadas"
         />
         <Stat
           label="Conductores libres"
@@ -80,35 +107,44 @@ export function Operacion() {
           tone="positive"
           icon={<CarFront className="size-3.5" />}
           iconTone="positive"
-          hint={`${onShift} de 62 en turno`}
+          hint={`${onShift} de ${flota} en turno`}
         />
         <Stat
           label="Tiempo a asignación"
-          value={23}
-          unit="s"
-          tone="info"
+          value={asignacion ? asignacion.valor : '—'}
+          unit={asignacion?.unidad}
+          tone={asignacion && hoy!.asignacionP50! > METAS.asignacionSegundos ? 'critical' : 'info'}
           icon={<Timer className="size-3.5" />}
           iconTone="info"
           hint={
-            <>
-              p95 hoy:{' '}
-              <span className={cn(P95_ASIGNACION_S > OBJETIVO_OFERTA_S && 'text-danger')}>
-                {P95_ASIGNACION_S} s
-              </span>{' '}
-              · objetivo &lt; {OBJETIVO_OFERTA_S} s para ofertar
-            </>
+            asignacion ? (
+              <>
+                Mediana de hoy
+                {p95 != null ? (
+                  <>
+                    {' '}· p95{' '}
+                    <span className={cn(p95 > METAS.asignacionSegundos && 'text-danger')}>
+                      {duracion(p95).valor} {duracion(p95).unidad}
+                    </span>
+                  </>
+                ) : null}{' '}
+                · meta {METAS.asignacionSegundos} s
+              </>
+            ) : (
+              sinDato
+            )
           }
-          trend={[31, 28, 26, 30, 24, 22, 25, 23]}
+          trend={serie(dias.map((d) => d.asignacionP50))}
         />
         <Stat
           label="Sin intervención"
-          value={83}
-          unit="%"
-          tone="positive"
+          value={sinIntervencion != null ? Math.round(sinIntervencion * 100) : '—'}
+          unit={sinIntervencion != null ? '%' : undefined}
+          tone={sinIntervencion == null ? 'neutral' : sinIntervencion >= METAS.sinIntervencion ? 'positive' : 'warning'}
           icon={<Bot className="size-3.5" />}
           iconTone="positive"
-          hint="Meta inicial 80 %"
-          trend={[72, 74, 77, 72, 69, 75, 81, 83]}
+          hint={sinIntervencion != null ? `Hoy · meta ${Math.round(METAS.sinIntervencion * 100)} %` : sinDato}
+          trend={serie(dias.map((d) => (d.sinIntervencion == null ? null : Math.round(d.sinIntervencion * 100))))}
         />
       </div>
 

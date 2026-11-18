@@ -29,7 +29,7 @@ const STEPS: ActiveStatus[] = ['ASSIGNED', 'DRIVER_ARRIVED', 'IN_PROGRESS'];
  * destino: el cliente casi nunca lo dice al pedir, y en la pantalla del
  * conductor se confundía con la dirección de recogida.
  *
- * "Llegué" solo se habilita a menos de 150 m del punto; más lejos se puede
+ * "Llegué" solo se habilita dentro del radio de llegada (el de la API); más lejos se puede
  * marcar igual, pero queda registrada la excepción (§5.3). "Finalizar" queda
  * bloqueado los primeros minutos con el pasajero a bordo: el servidor no deja
  * cerrar antes, y un botón que siempre falla es peor que uno que dice cuánto
@@ -40,6 +40,8 @@ export function Carrera({
   status,
   metersToPickup,
   minRideMinutes,
+  radioLlegada,
+  enviando = false,
   onArrived,
   onBoard,
   onFinish,
@@ -49,6 +51,10 @@ export function Carrera({
   status: ActiveStatus;
   metersToPickup: number | null;
   minRideMinutes: number | null;
+  /** Metros dentro de los que «Llegué» cuenta como en el punto. */
+  radioLlegada: number;
+  /** Hay una etapa enviándose: el botón no acepta otro toque. */
+  enviando?: boolean;
   onArrived: () => void;
   onBoard: () => void;
   onFinish: () => void;
@@ -58,7 +64,7 @@ export function Carrera({
   // Sin punto (carrera sin ubicar) no hay distancia que medir: el conductor
   // se guía por la dirección y marca «Llegué» cuando lo encuentre.
   const conPunto = offer.pickupPoint !== undefined;
-  const nearby = conPunto && metersToPickup !== null && metersToPickup <= 150;
+  const nearby = conPunto && metersToPickup !== null && metersToPickup <= radioLlegada;
   const stepIndex = STEPS.indexOf(status);
   const tone = tonoDeEtapa(status);
   const faltan = useFaltaParaFinalizar(status === 'IN_PROGRESS' ? offer.startedAt : undefined, minRideMinutes);
@@ -170,14 +176,14 @@ export function Carrera({
 
       <ActionBar>
         {status === 'ASSIGNED' ? (
-          <BotonDeEtapa estado="ASSIGNED" icon={<Navigation className="size-6" />} onClick={onArrived}>
-            {nearby ? 'Llegué al punto' : 'Marcar que llegué'}
+          <BotonDeEtapa estado="ASSIGNED" icon={<Navigation className="size-6" />} onClick={onArrived} disabled={enviando}>
+            {enviando ? 'Enviando…' : nearby ? 'Llegué al punto' : 'Marcar que llegué'}
           </BotonDeEtapa>
         ) : null}
 
         {status === 'DRIVER_ARRIVED' ? (
-          <BotonDeEtapa estado="DRIVER_ARRIVED" icon={<UserCheck className="size-6" />} onClick={onBoard}>
-            Pasajero a bordo
+          <BotonDeEtapa estado="DRIVER_ARRIVED" icon={<UserCheck className="size-6" />} onClick={onBoard} disabled={enviando}>
+            {enviando ? 'Enviando…' : 'Pasajero a bordo'}
           </BotonDeEtapa>
         ) : null}
 
@@ -192,15 +198,15 @@ export function Carrera({
               Finalizar en <span className="tnum">{formatoCuenta(faltan)}</span>
             </BotonDeEtapa>
           ) : (
-            <BotonDeEtapa estado="IN_PROGRESS" icon={<Flag className="size-6" />} onClick={onFinish}>
-              Finalizar carrera
+            <BotonDeEtapa estado="IN_PROGRESS" icon={<Flag className="size-6" />} onClick={onFinish} disabled={enviando}>
+              {enviando ? 'Enviando…' : 'Finalizar carrera'}
             </BotonDeEtapa>
           )
         ) : null}
 
         {!nearby && status === 'ASSIGNED' && conPunto && metersToPickup !== null ? (
           <p className="text-center text-base text-ink-muted">
-            Estás a más de 150 m; si marcas ahora, queda registrada la excepción.
+            Estás a más de {radioLlegada} m; si marcas ahora, queda registrada la excepción.
           </p>
         ) : null}
 

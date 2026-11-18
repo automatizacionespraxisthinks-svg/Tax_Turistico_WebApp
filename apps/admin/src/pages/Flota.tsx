@@ -2,10 +2,11 @@ import { useMemo, useState } from 'react';
 import type { ReactNode } from 'react';
 import { AnimatePresence, motion } from 'motion/react';
 import { Ban, Car, CreditCard, Search, ShieldAlert, SignalLow, UserX } from 'lucide-react';
-import type { Driver, MovilVinculado } from '@tax/shared';
+import type { Driver, FilaConductorInforme, MovilVinculado } from '@tax/shared';
 import {
   DRIVER_STATUS_LABEL,
   DRIVER_STATUS_TONE,
+  VEHICLE_TYPE_LABEL,
   ZONA_HORARIA_PAIPA,
   finDeSuspension,
   formatDistance,
@@ -31,6 +32,7 @@ import {
 import { useLive } from '../live/store';
 import { zoneOf } from '../live/store';
 import { usePuede } from '../api/queries';
+import { useCifrasDeHoy } from '../api/informes';
 import { GestionConductor, NuevoConductorBoton } from '../components/ConductorAdmin';
 
 type Filter = 'turno' | 'disponibles' | 'carrera' | 'todos' | 'atencion';
@@ -45,7 +47,7 @@ const FILTERS: { value: Filter; label: string; match: (d: Driver) => boolean }[]
     match: (d) =>
       Boolean(d.suspendidoHasta) ||
       !d.deviceRegistered ||
-      !d.vehicle.active ||
+      d.vehicle.active === false ||
       Boolean(estadoLicencia(d.licenciaVence).alerta) ||
       (d.status !== 'OFF_SHIFT' && (d.positionAgeSeconds ?? 0) > 60),
   },
@@ -62,6 +64,16 @@ export function Flota() {
   // Solo cortesía: quien autoriza es el guardia de la API, que exige el
   // permiso. Enseñar un botón que siempre falla es peor que ocultarlo.
   const puede = usePuede();
+  /*
+   * Carreras de hoy y aceptación de cada conductor, del mismo informe que
+   * Reportes (17/11/2026). Antes llegaban en 0 fijo y la tarjeta decía
+   * «0 carreras hoy · 0 % aceptación» a todos.
+   */
+  const cifrasHoy = useCifrasDeHoy(puede('reportes.ver'));
+  const hoyDe = useMemo(
+    () => new Map((cifrasHoy.data?.conductores ?? []).map((fila) => [fila.id, fila])),
+    [cifrasHoy.data],
+  );
   const gestionar = puede('conductores.gestionar');
   const suspender = puede('conductores.suspender');
 
@@ -92,8 +104,10 @@ export function Flota() {
   }, [drivers, active, query]);
 
   const selected = drivers.find((d) => d.id === selectedId) ?? null;
-  const selectedRide = selected?.currentRideId
-    ? rides.find((r) => r.id === selected.currentRideId)
+  // Su carrera en curso, de las que ya tiene el panel en vivo. El campo
+  // `currentRideId` no lo llenaba nadie, así que nunca se mostraba.
+  const selectedRide = selected
+    ? rides.find((r) => r.driverId === selected.id && ['ASSIGNED', 'DRIVER_ARRIVED', 'IN_PROGRESS'].includes(r.status))
     : undefined;
 
   const stale = drivers.filter(
@@ -151,7 +165,12 @@ export function Flota() {
         >
           <AnimatePresence initial={false}>
             {rows.map((driver) => (
-              <DriverCard key={driver.id} driver={driver} onClick={() => setSelectedId(driver.id)} />
+              <DriverCard
+                key={driver.id}
+                driver={driver}
+                hoy={hoyDe.get(driver.id)}
+                onClick={() => setSelectedId(driver.id)}
+              />
             ))}
           </AnimatePresence>
         </motion.div>
@@ -165,7 +184,7 @@ export function Flota() {
       >
         {selected ? (
           <div className="space-y-5">
-            <DriverDetail driver={selected} rideCode={selectedRide?.code} />
+            <DriverDetail driver={selected} rideCode={selectedRide?.code} hoy={hoyDe.get(selected.id)} />
             {gestionar || suspender ? (
               <GestionConductor driver={selected} gestionar={gestionar} suspender={suspender} />
             ) : null}
@@ -176,7 +195,16 @@ export function Flota() {
   );
 }
 
-function DriverCard({ driver, onClick }: { driver: Driver; onClick: () => void }) {
+function DriverCard({
+  driver,
+  hoy,
+  onClick,
+}: {
+  driver: Driver;
+  /** Sus cifras de hoy; sin fila es que hoy no ha tenido ofertas ni carreras. */
+  hoy?: FilaConductorInforme;
+  onClick: () => void;
+}) {
   const stale = driver.status !== 'OFF_SHIFT' && (driver.positionAgeSeconds ?? 0) > 60;
   const licencia = estadoLicencia(driver.licenciaVence);
 
@@ -210,8 +238,10 @@ function DriverCard({ driver, onClick }: { driver: Driver; onClick: () => void }
       </div>
 
       <div className="mt-2.5 flex items-center gap-3 text-micro text-ink-muted">
-        <span className="tnum">{driver.ridesToday} carreras hoy</span>
-        <span className="tnum">{Math.round(driver.acceptanceRate * 100)} % aceptación</span>
+        <span className="tnum">{hoy ? `${hoy.asignadas} carreras hoy` : 'Sin carreras hoy'}</span>
+        {hoy?.tasaAceptacion != null ? (
+          <span className="tnum">{Math.round(hoy.tasaAceptacion * 100)} % aceptación</span>
+        ) : null}
         {driver.shiftStartedAt ? (
           <span className="ml-auto">turno {formatRelative(driver.shiftStartedAt)}</span>
         ) : null}
@@ -222,7 +252,7 @@ function DriverCard({ driver, onClick }: { driver: Driver; onClick: () => void }
         driver.aceptaPagoElectronico ||
         stale ||
         !driver.deviceRegistered ||
-        !driver.vehicle.active ||
+        driver.vehicle.active === false ||
         driver.fueraDeListado ||
         licencia.alerta) && (
         <div className="mt-2.5 flex flex-wrap gap-1.5">
@@ -231,7 +261,7 @@ function DriverCard({ driver, onClick }: { driver: Driver; onClick: () => void }
           {driver.aceptaPagoElectronico ? <PagoElectronico /> : null}
           {stale ? <Alert>Sin GPS reciente</Alert> : null}
           {!driver.deviceRegistered ? <Alert>Dispositivo sin registrar</Alert> : null}
-          {!driver.vehicle.active ? <Alert>Vehículo inactivo</Alert> : null}
+          {driver.vehicle.active === false ? <Alert>Vehículo inactivo</Alert> : null}
           {driver.fueraDeListado ? <Alert>Móvil fuera de su listado</Alert> : null}
           {licencia.alerta ? <Alert>{licencia.alerta}</Alert> : null}
         </div>
@@ -294,7 +324,15 @@ function Alert({ children }: { children: string }) {
   );
 }
 
-function DriverDetail({ driver, rideCode }: { driver: Driver; rideCode?: string }) {
+function DriverDetail({
+  driver,
+  rideCode,
+  hoy,
+}: {
+  driver: Driver;
+  rideCode?: string;
+  hoy?: FilaConductorInforme;
+}) {
   const zone = driver.position ? zoneOf(driver.position) : undefined;
   const distanceToCenter = driver.position
     ? haversineKm(driver.position, { lat: 5.7803, lng: -73.1142 })
@@ -320,10 +358,12 @@ function DriverDetail({ driver, rideCode }: { driver: Driver; rideCode?: string 
         <Meta label="Placa" mono>
           {driver.vehicle.plate}
         </Meta>
-        <Meta label="Tipo de vehículo">{driver.vehicle.type}</Meta>
-        <Meta label="Capacidad">{driver.vehicle.capacity} pasajeros</Meta>
-        <Meta label="Carreras hoy">{driver.ridesToday}</Meta>
-        <Meta label="Aceptación">{Math.round(driver.acceptanceRate * 100)} %</Meta>
+        <Meta label="Tipo de vehículo">{driver.vehicle.type ? VEHICLE_TYPE_LABEL[driver.vehicle.type] : '—'}</Meta>
+        <Meta label="Capacidad">{driver.vehicle.capacity ? `${driver.vehicle.capacity} pasajeros` : '—'}</Meta>
+        <Meta label="Carreras hoy">{hoy ? `${hoy.asignadas} tomadas · ${hoy.finalizadas} finalizadas` : '0'}</Meta>
+        <Meta label="Aceptación hoy">
+          {hoy?.tasaAceptacion != null ? `${Math.round(hoy.tasaAceptacion * 100)} % de ${hoy.ofertas} ofertas` : '—'}
+        </Meta>
         <Meta label="Pago electrónico">{driver.aceptaPagoElectronico ? 'Lo recibe' : 'No lo recibe'}</Meta>
       </div>
 
@@ -377,7 +417,9 @@ function Row({ label, children }: { label: string; children: ReactNode }) {
 
 /** En turno, el taxi con que salió; si no, su móvil del listado maestro. */
 function vehiculoDe(driver: Driver): string {
-  if (driver.status !== 'OFF_SHIFT' && driver.vehicle.plate !== '—') return `${driver.vehicle.plate} · ${driver.vehicle.type}`;
+  if (driver.status !== 'OFF_SHIFT' && driver.vehicle.plate !== '—') {
+    return driver.vehicle.type ? `${driver.vehicle.plate} · ${VEHICLE_TYPE_LABEL[driver.vehicle.type]}` : driver.vehicle.plate;
+  }
   const movil = driver.moviles?.find((m) => m.rol === 'conductor') ?? driver.moviles?.[0];
   return movil ? `${movil.interno ? `Móvil ${movil.interno} · ` : ''}${movil.placa}` : 'Sin móvil vinculado';
 }

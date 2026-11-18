@@ -6,6 +6,7 @@ import { Button, ProgressRing, StatusPill, cn, transition } from '@tax/ui';
 import { BotonDeEtapa } from '../components/BotonDeEtapa';
 import { ActionBar, AddressBlock, Screen } from '../components/Chrome';
 import { MedioDePago } from '../components/MedioDePago';
+import { sonarOferta } from '../api/sonido';
 import type { OfferedRide } from '../state/session';
 
 /**
@@ -46,7 +47,9 @@ export function Oferta({
 
   useEffect(() => {
     // Vibration API: patrón corto-largo, distinto de una notificación normal.
+    // Y el timbre: con la aplicación abierta antes no sonaba nada.
     navigator.vibrate?.([120, 70, 220]);
+    sonarOferta();
   }, [offer.code]);
 
   useEffect(() => {

@@ -1,7 +1,7 @@
 import { motion } from 'motion/react';
 import { BellOff, BellRing, Coffee, LogOut, Play, Radar } from 'lucide-react';
 import { formatDuration } from '@tax/shared';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Button, Field, Input, StatusPill, cn, transition } from '@tax/ui';
 import { ActionBar, DataRow, Screen } from '../components/Chrome';
 import type { SessionState } from '../state/session';
@@ -69,9 +69,15 @@ export function Turno({
   // Con turno abierto manda la placa del turno; sin él, la que se va a usar.
   const placaVisible = onShift ? (placaDelTurno ?? plate) : plate;
 
-  const shiftSeconds = session.shiftStartedAt
-    ? Math.floor((Date.now() - session.shiftStartedAt) / 1000)
-    : 0;
+  // El reloj del turno avanza solo (17/11/2026): antes se calculaba al
+  // pintar y se quedaba congelado en lo que marcaba al abrir la pantalla.
+  const [ahora, setAhora] = useState(() => Date.now());
+  useEffect(() => {
+    if (!session.shiftStartedAt) return;
+    const id = window.setInterval(() => setAhora(Date.now()), 30_000);
+    return () => window.clearInterval(id);
+  }, [session.shiftStartedAt]);
+  const shiftSeconds = session.shiftStartedAt ? Math.max(0, Math.floor((ahora - session.shiftStartedAt) / 1000)) : 0;
 
   return (
     <>

@@ -17,9 +17,18 @@ dist
 **/*.tsbuildinfo
 
 # Secretos y material local. El `.env` del VPS lo pone Dokploy.
+#
+# Todos los `.env.*`, no solo `.env.local`: en `apps/api` viven
+# `.env.produccion.local` y `.env.dokploy.local`, con los secretos de
+# producción, y un `docker build` hecho desde este equipo los metía en la
+# imagen (17/11/2026). Solo el ejemplo, que no tiene secretos, puede entrar.
 .env
 **/.env
-**/.env.local
+.env.*
+**/.env.*
+!**/.env.example
+*.local
+**/*.local
 .certs
 **/.certs
 

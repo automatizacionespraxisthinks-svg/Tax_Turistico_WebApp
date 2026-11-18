@@ -214,8 +214,13 @@ async function main(): Promise<void> {
     ]) {
       assert(acciones.includes(esperada), `registrado: «${esperada}»`);
     }
+    // Solo las de la oficina: desde el 17/11/2026 el propio conductor también
+    // deja las suyas (entrar en un celular, abrir y cerrar turno).
+    const deLaOficina = entradas.filter((e) =>
+      ['Dio de alta un conductor', 'Revocó un dispositivo', 'Reinició el PIN de un conductor', 'Desactivó un conductor'].includes(e.action),
+    );
     assert(
-      entradas.every((e) => e.actorName === 'Admin de prueba'),
+      deLaOficina.every((e) => e.actorName === 'Admin de prueba'),
       'con el nombre de quien lo hizo, no «sistema»',
     );
 

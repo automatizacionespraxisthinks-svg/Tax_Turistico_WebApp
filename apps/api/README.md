@@ -170,6 +170,51 @@ tener campos distintos cuando solo están en otro orden. `e2e-dispatch.ts`
 compara ordenando las claves en profundidad y comprueba que son los mismos 32
 campos con los mismos valores y el mismo código de estado.
 
+## Arreglos críticos de la auditoría (17/11/2026)
+
+Lo que cambia para quien despliega o para n8n:
+
+- **Idempotencia por URL real y por quién llama.** La clave era la plantilla
+  de la ruta (`/v1/rides/:rideId/cancel`), así que la misma
+  `Idempotency-Key` en dos carreras devolvía la respuesta de la primera.
+  «Cancele los 5 taxis» cancelaba uno. Las claves guardadas antes del
+  despliegue no se reconocen: un reintento que cruce el despliegue se ejecuta
+  como nuevo.
+- **Asignación manual** (`POST /v1/rides/:id/assign` y el panel): solo sobre
+  carreras sin conductor (`PENDING`, `NOTIFIED`, `UNASSIGNED`), a un conductor
+  en turno y disponible, con la oferta del intento de despacho en curso.
+  Si no, `INVALID_TRANSITION` o `DRIVER_BUSY`.
+- **Turno**: no se cierra con una carrera tomada (`DRIVER_BUSY`); al cerrarlo
+  se le retiran al conductor sus ofertas pendientes; sin turno abierto no se
+  acepta una carrera.
+- **Outbox**: un evento que quedó «entregando» porque el proceso se cayó se
+  vuelve a intentar a los dos minutos.
+- **Socket de la oficina**: exige segundo factor y contraseña definitiva,
+  como la API. Cada cinco minutos se cortan los sockets cuya sesión ya no vale.
+- **Acceso del conductor**: mismo mensaje y mismo tiempo exista o no el
+  código. Bloqueo de 5 PIN malos por código **y red** durante 15 minutos (en
+  Redis), y de 20 por cuenta (en la base, con suma atómica). Los contadores de
+  la oficina también son atómicos.
+- **Límite de peticiones**: los accesos (`/v1/auth/driver`, `/v1/auth/session`)
+  tienen 20 por minuto y por IP, sin cubos por clave de API inventada. El
+  límite responde 429 `RATE_LIMITED` (antes salía como 500).
+- **`TRUST_PROXY`** (por defecto `loopback, linklocal, uniquelocal`): solo se
+  cree el `X-Forwarded-For` que viene de redes privadas, donde vive Traefik.
+- **Permiso `sistema.tecnico`** para el QR de WAHA, el listado del outbox,
+  `GET /v1/admin/system` y `POST /v1/admin/system/whatsapp/revisar`. El panel
+  ya no pide el outbox.
+- **`GET /v1/rides`** (todas las carreras de todos los clientes) pide el ámbito
+  `rides:list`, que la clave de n8n no lleva.
+- **Foto por enlace**: cada redirección se revisa (máximo tres), no se baja
+  nada de direcciones privadas del servidor y la descarga se corta a los 5 MB.
+  Con `FOTO_HOSTS_PERMITIDOS` solo se aceptan esos servidores; **si Chatwoot
+  entrega las fotos con un nombre interno de Docker, hay que ponerlo ahí** o
+  las fotos se rechazan (la carrera sigue sin foto).
+- **`.dockerignore`** deja fuera todos los `.env.*` y `*.local`.
+
+Prueba: `src/test/e2e-criticos.ts <clave-con-rides:list> <clave-sin-rides:list>`
+(deja la IP con el límite de accesos agotado un minuto).
+
 ## Claves de API
 
 Las claves no se crean por HTTP: se emiten desde el servidor, y el secreto se
@@ -184,6 +229,10 @@ en el contenedor de producción, donde no hay `tsx`; allí se llama con
 `node dist/cli/crear-clave-api.js`.
 
 Los ámbitos importan: `rides:write` crea carreras, `rides:read` las consulta.
+`rides:list` (listar todas las carreras de todos los clientes) solo lo usan las
+pruebas de extremo a extremo: la clave de n8n no lo lleva, y para correr una
+prueba con una clave creada a mano hay que dárselo:
+`crear-clave-api.ts prueba rides:write rides:read rides:list`.
 Una clave a la que le falte uno recibe `403 FORBIDDEN` con el ámbito que le
 falta en el detalle.
 

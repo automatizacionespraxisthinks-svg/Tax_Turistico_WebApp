@@ -1,0 +1,1 @@
+ALTER TABLE "customers" ADD COLUMN "suprimido_at" timestamp with time zone;

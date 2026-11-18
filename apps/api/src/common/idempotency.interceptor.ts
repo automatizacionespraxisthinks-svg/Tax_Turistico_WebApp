@@ -100,9 +100,23 @@ export class IdempotencyInterceptor implements NestInterceptor {
 
     if (typeof cabecera !== 'string' || cabecera.length === 0) return next.handle();
 
-    // La misma clave en dos rutas distintas son dos peticiones distintas: sin
-    // el prefijo, cancelar con la clave de una creación devolvería la carrera.
-    const key = `${request.method} ${request.routeOptions?.url ?? request.url}|${cabecera}`;
+    /*
+     * La misma clave en dos URL distintas son dos peticiones distintas: sin
+     * el prefijo, cancelar con la clave de una creación devolvería la carrera.
+     *
+     * La URL REAL, no la plantilla de la ruta (17/11/2026). Con
+     * `routeOptions.url` la clave era `/v1/rides/:rideId/cancel`, igual para
+     * todas las carreras: n8n deriva la clave del mensaje del cliente, así
+     * que «cancele los 5 taxis» mandaba cinco cancelaciones con la misma
+     * clave y el mismo cuerpo, y solo se ejecutaba la primera; las otras
+     * cuatro recibían la respuesta de la primera.
+     *
+     * Y quién llama: la misma clave de dos integraciones o conductores
+     * distintos no puede devolverle a uno la respuesta del otro.
+     */
+    const ruta = (request.url ?? '').split('?')[0];
+    const quien = request.principal?.id ?? request.driver?.id ?? request.user?.id ?? 'anon';
+    const key = `${request.method} ${ruta}|${quien}|${cabecera}`;
     const huella = this.reflector.get<((cuerpo: unknown) => unknown) | undefined>(HUELLA, context.getHandler());
     const bodyHash = sha256Hex(canonico(huella ? huella(request.body) : (request.body ?? {})));
 

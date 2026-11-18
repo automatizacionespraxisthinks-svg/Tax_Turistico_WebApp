@@ -54,6 +54,15 @@ export function usePlaces() {
 }
 
 
+/** Los plazos de borrado automático que rigen en la API. */
+export function usePlazos() {
+  return useQuery({
+    queryKey: ['plazos'],
+    queryFn: () => api.get<{ fotosDias: number; posicionesDias: number }>('/v1/admin/system/plazos'),
+    staleTime: 60 * 60_000,
+  });
+}
+
 export function useAuditLog(limit = 50) {
   return useQuery({
     queryKey: ['audit', limit],

@@ -2,7 +2,6 @@ import type {
   Driver,
   DriverStatus,
   Oleada,
-  OutboxEvent,
   Ride,
   RideOffer,
   RideStatus,
@@ -133,19 +132,6 @@ export interface ApiZone {
   esReferencia?: boolean;
 }
 
-export interface ApiOutboxEvent {
-  eventId: string;
-  type: OutboxEvent['type'];
-  rideId: string | null;
-  rideCode: string | null;
-  rideVersion: number | null;
-  createdAt: string;
-  attempts: number;
-  status: OutboxEvent['status'];
-  nextAttemptAt: string | null;
-  lastError: string | null;
-}
-
 export interface ApiWahaSession {
   id: string;
   label: string;
@@ -260,17 +246,14 @@ export function toDriver(row: ApiDriver): Driver {
     })),
     vehicle: {
       plate: row.plate ?? '—',
-      type: row.vehicleType ?? 'sedan',
-      capacity: row.capacity ?? 4,
-      active: row.vehicleActive ?? true,
+      type: row.vehicleType ?? undefined,
+      capacity: row.capacity ?? undefined,
+      active: row.vehicleActive ?? undefined,
     },
     position: row.position,
     positionAgeSeconds: row.positionAgeSeconds,
     shiftStartedAt: row.shiftStartedAt ?? undefined,
     fueraDeListado: row.fueraDeListado === true,
-    // Estos dos todavía no los expone la API; se calcularán con los reportes.
-    ridesToday: 0,
-    acceptanceRate: 0,
     deviceRegistered: row.deviceRegistered,
   };
 }
@@ -284,23 +267,7 @@ export function toZone(row: ApiZone): Zone {
     polygon: (row.polygon.coordinates[0] ?? []).map(([lng, lat]) => ({ lat, lng })),
     tortuosity: row.tortuosity,
     waves: row.waves,
-    activeDrivers: 0,
     esReferencia: row.esReferencia ?? false,
-  };
-}
-
-export function toOutboxEvent(row: ApiOutboxEvent): OutboxEvent {
-  return {
-    eventId: row.eventId,
-    type: row.type,
-    rideId: row.rideId ?? '',
-    rideCode: row.rideCode ?? '—',
-    rideVersion: row.rideVersion ?? 0,
-    createdAt: row.createdAt,
-    attempts: row.attempts,
-    status: row.status,
-    nextAttemptAt: row.nextAttemptAt ?? undefined,
-    lastError: row.lastError ?? undefined,
   };
 }
 

@@ -13,7 +13,7 @@ import { Carrera } from './screens/Carrera';
 import { Resumen } from './screens/Resumen';
 import { ApiError, api, installId, storeToken, storedToken } from './api/client';
 import { connectDriverSocket, type OfferPush } from './api/socket';
-import { onQueueChange, send, watchConnection } from './api/queue';
+import { clearQueueOf, flush, onQueueChange, onQueueRejected, pendingCount, send, setQueueOwner, watchConnection } from './api/queue';
 import {
   CADENCIA_POR_DEFECTO,
   watchPosition,
@@ -21,14 +21,25 @@ import {
   type PositionWatcher,
 } from './api/position';
 import { disablePush, enablePush, pushSupport, type PushState } from './api/push';
+import { vigilarActualizaciones } from './api/actualizacion';
+import { prepararSonido } from './api/sonido';
 import {
-  initialSession,
+  borrarUltimoEstado,
+  estadoInicial,
+  guardarUltimoEstado,
   offerFromRide,
   offerFromSocket,
   sessionReducer,
   type ApiRide,
   type Phase,
 } from './state/session';
+
+/** Cómo se llama cada etapa para el conductor, para avisarle si una no se registró. */
+const NOMBRE_DE_ETAPA: Record<string, string> = {
+  arrived: 'Llegué',
+  board: 'Pasajero a bordo',
+  finish: 'Finalizar',
+};
 
 /** Orden de avance: decide si la pantalla entra por la derecha o por la izquierda. */
 const ORDER: Record<Phase, number> = {
@@ -48,6 +59,8 @@ interface DriverSessionResponse {
   totals: { rides: number };
   rules?: {
     minRideMinutes: number;
+    /** Radio de «Llegué», en metros. */
+    arrivalRadiusMeters?: number;
     /** Cada cuánto mandar la posición, en segundos, en carrera y en espera. */
     positionSeconds?: { ride: number; idle: number };
   };
@@ -63,7 +76,9 @@ interface DriverSessionResponse {
 }
 
 export function App() {
-  const [session, dispatch] = useReducer(sessionReducer, initialSession);
+  // Arranca con lo último que se supo: sin señal, el conductor ve su
+  // carrera o su turno, no la pantalla de acceso.
+  const [session, dispatch] = useReducer(sessionReducer, undefined, estadoInicial);
   const [notice, setNotice] = useState<string>();
   const [push, setPush] = useState<PushState>(() => pushSupport());
   /**
@@ -106,6 +121,16 @@ export function App() {
       // vigilante en ese mismo ciclo y tiene que leer ya la cadencia buena.
       if (me.rules?.positionSeconds) cadencia.current = me.rules.positionSeconds;
       setConductor({ code: me.driver.code, name: me.driver.name });
+      setQueueOwner(me.driver.code);
+      /*
+       * Con turno abierto y el permiso ya dado, la suscripción se vuelve a
+       * registrar (17/11/2026). La pantalla decía «te avisamos aunque cierres
+       * la aplicación» solo porque había permiso, aunque la suscripción
+       * hubiera caducado o fuera de otro conductor del mismo celular.
+       */
+      if (me.shift && typeof Notification !== 'undefined' && Notification.permission === 'granted') {
+        void enablePush().then(setPush).catch(() => undefined);
+      }
       setPlacaDelTurno(me.shift?.plate);
 
       // La placa del turno abierto manda sobre la recordada: es la que de
@@ -127,6 +152,7 @@ export function App() {
           shiftStartedAt,
           totals: me.totals,
           minRideMinutes: me.rules?.minRideMinutes,
+          radioLlegada: me.rules?.arrivalRadiusMeters,
         });
         return;
       }
@@ -139,6 +165,7 @@ export function App() {
           shiftStartedAt,
           totals: me.totals,
           minRideMinutes: me.rules?.minRideMinutes,
+          radioLlegada: me.rules?.arrivalRadiusMeters,
           offer: {
             ...offer,
             distanceKm: me.pendingOffer.distanceKm,
@@ -168,6 +195,7 @@ export function App() {
         shiftStartedAt,
         totals: me.totals,
         minRideMinutes: me.rules?.minRideMinutes,
+        radioLlegada: me.rules?.arrivalRadiusMeters,
       });
     } catch (error) {
       if (error instanceof ApiError && error.status === 401) {
@@ -188,13 +216,52 @@ export function App() {
         setNotice(
           'Tu sesión no está activa: puede que hayas entrado en otro celular, o que la oficina pausara tu acceso. Entra de nuevo o llama a la oficina.',
         );
+      } else if (error instanceof ApiError && error.isRetryable) {
+        /*
+         * Sin señal o el servidor reiniciándose: se queda con lo último que
+         * se supo y se reintenta solo. Antes se quedaba en «Entrar» hasta
+         * que el conductor cambiaba de aplicación y volvía.
+         */
+        setNotice('Sin señal: se muestra lo último que se sabía. Se actualiza solo al volver.');
+        reintento.current ??= window.setTimeout(() => {
+          reintento.current = undefined;
+          void restore();
+        }, 15_000);
       }
     }
   }, []);
+  const reintento = useRef<number | undefined>(undefined);
 
   useEffect(() => {
     void restore();
+    // Al volver la red se recupera ya, sin esperar el reintento.
+    const alVolverLaRed = () => {
+      if (storedToken()) void restore();
+    };
+    window.addEventListener('online', alVolverLaRed);
+    return () => window.removeEventListener('online', alVolverLaRed);
   }, [restore]);
+
+  /*
+   * Versión nueva: se recarga sola, pero solo en un momento seguro —sin
+   * oferta ni carrera en pantalla y sin nada en la cola—. Si llega en medio
+   * de una carrera, espera a que termine.
+   */
+  useEffect(() => prepararSonido(), []);
+
+  const [versionNueva, setVersionNueva] = useState(false);
+  useEffect(() => vigilarActualizaciones(() => setVersionNueva(true)), []);
+  useEffect(() => {
+    if (!versionNueva) return;
+    const seguro = ['login', 'off_shift', 'available', 'paused'].includes(session.phase) && session.queued === 0;
+    if (seguro) window.location.reload();
+  }, [versionNueva, session.phase, session.queued]);
+
+  // Lo último que se supo, para arrancar con ello la próxima vez.
+  useEffect(() => {
+    if (session.phase === 'login') borrarUltimoEstado();
+    else guardarUltimoEstado(session);
+  }, [session]);
 
   /*
    * Red del navegador, que es lo único que se puede saber antes de entrar.
@@ -267,7 +334,9 @@ export function App() {
       onConnectionChange: (connected) => {
         dispatch({ type: 'set_online', online: connected });
         // Al reconectar puede haber una oferta o una carrera que no se vio.
-        if (connected) void restore();
+        // Primero lo que quedó en la cola y después el estado: si no, un
+        // «Llegué» todavía sin enviar haría retroceder la pantalla.
+        if (connected) void flush().finally(() => void restore());
       },
 
       onOffer: (push: OfferPush) => {
@@ -356,11 +425,18 @@ export function App() {
   /* --- cola sin conexión --------------------------------------------------- */
   useEffect(() => {
     const unwatchQueue = onQueueChange((pending) => {
-      dispatch({ type: pending.length > 0 ? 'queued' : 'flush_queue' });
+      dispatch(pending.length > 0 ? { type: 'queued', count: pending.length } : { type: 'flush_queue' });
+    });
+    // Lo que el servidor rechazó al reenviarlo se le dice al conductor, en
+    // vez de quedar solo en la consola.
+    const unwatchRechazos = onQueueRejected(({ accion, motivo }) => {
+      setNotice(`No se registró «${NOMBRE_DE_ETAPA[accion.path.split('/').pop() ?? ''] ?? 'una acción'}»: ${motivo}`);
+      void restore();
     });
     const unwatchConnection = watchConnection();
     return () => {
       unwatchQueue();
+      unwatchRechazos();
       unwatchConnection();
     };
   }, []);
@@ -432,8 +508,26 @@ export function App() {
 
   /* --- comandos ------------------------------------------------------------ */
 
+  /*
+   * Lo que se está enviando, para no mandar dos veces lo mismo: con señal
+   * débil el conductor toca otra vez creyendo que no pasó nada.
+   */
+  const enCurso = useRef(new Set<string>());
+  const [enviando, setEnviando] = useState(false);
+
+  const mensajeDe = (error: unknown) =>
+    error instanceof ApiError
+      ? error.code === 'RIDE_ALREADY_TAKEN'
+        ? 'Otro conductor la tomó primero.'
+        : error.message
+      : 'No se pudo completar la acción.';
+
+  /** Etapas de una carrera suya: si no hay señal, se guardan y la pantalla avanza. */
   const command = useCallback(
     async (path: string, optimistic: () => void, body?: unknown) => {
+      if (enCurso.current.has(path)) return;
+      enCurso.current.add(path);
+      setEnviando(true);
       try {
         const result = await send(path, body);
         optimistic();
@@ -441,14 +535,37 @@ export function App() {
           setNotice('Guardado: se enviará al volver la señal.');
         }
       } catch (error) {
-        const message =
-          error instanceof ApiError
-            ? error.code === 'RIDE_ALREADY_TAKEN'
-              ? 'Otro conductor la tomó primero.'
-              : error.message
-            : 'No se pudo completar la acción.';
-        setNotice(message);
+        setNotice(mensajeDe(error));
         void restore();
+      } finally {
+        enCurso.current.delete(path);
+        setEnviando(enCurso.current.size > 0);
+      }
+    },
+    [restore],
+  );
+
+  /**
+   * Aceptar una oferta y el turno: directo, sin la cola (17/11/2026). Un
+   * «Aceptar» guardado sin señal llevaba al conductor a la pantalla de la
+   * carrera sin que el servidor se la hubiera dado; un «Iniciar turno»
+   * guardado lo dejaba creyéndose disponible sin recibir nada. Sin señal se
+   * le dice, y lo intenta de nuevo.
+   */
+  const directo = useCallback(
+    async (path: string, optimistic: () => void, body?: unknown, sinSenal = 'Sin señal: no se pudo enviar. Inténtalo de nuevo.') => {
+      if (enCurso.current.has(path)) return;
+      enCurso.current.add(path);
+      setEnviando(true);
+      try {
+        await api.post(path, body);
+        optimistic();
+      } catch (error) {
+        setNotice(error instanceof ApiError && error.isRetryable ? sinSenal : mensajeDe(error));
+        if (!(error instanceof ApiError && error.isRetryable)) void restore();
+      } finally {
+        enCurso.current.delete(path);
+        setEnviando(enCurso.current.size > 0);
       }
     },
     [restore],
@@ -511,6 +628,13 @@ export function App() {
   );
 
   const cambiarDeConductor = useCallback(async (): Promise<string | null> => {
+    // Lo que el que sale dejó guardado se envía antes; si no se puede, no se
+    // cierra la sesión: se perdería, o le llegaría al servidor con el token
+    // del que entra.
+    await flush();
+    if (pendingCount() > 0) {
+      return 'Hay acciones guardadas sin enviar. Espera a tener señal y vuelve a intentarlo.';
+    }
     try {
       await api.post('/v1/driver/logout');
     } catch (error) {
@@ -527,12 +651,14 @@ export function App() {
      * entra abra su turno, se registra a su nombre.
      */
     storeToken(null);
+    if (conductor) clearQueueOf(conductor.code);
+    setQueueOwner(undefined);
     setConductor(undefined);
     setPlacaDelTurno(undefined);
     dispatch({ type: 'logged_out' });
     setNotice('Sesión cerrada. Ahora entra el otro conductor con su código y su PIN.');
     return null;
-  }, []);
+  }, [conductor]);
 
   const rideId = session.offer?.rideId;
 
@@ -609,7 +735,7 @@ export function App() {
                 push={push}
                 onEnablePush={() => void enablePush().then(setPush).catch(() => undefined)}
                 onStartShift={(plate) =>
-                  void command('/v1/driver/shift/open', () => {
+                  void directo('/v1/driver/shift/open', () => {
                     dispatch({ type: 'shift_opened' });
                     setPlacaDelTurno(plate);
                     /*
@@ -622,7 +748,7 @@ export function App() {
                   }, { plate })
                 }
                 onEndShift={() =>
-                  void command('/v1/driver/shift/close', () => {
+                  void directo('/v1/driver/shift/close', () => {
                     dispatch({ type: 'end_shift' });
                     setPlacaDelTurno(undefined);
                     // Fuera de turno no llegan ofertas: tampoco avisos.
@@ -630,10 +756,10 @@ export function App() {
                   })
                 }
                 onPause={() =>
-                  void command('/v1/driver/shift/pause', () => dispatch({ type: 'pause' }))
+                  void directo('/v1/driver/shift/pause', () => dispatch({ type: 'pause' }))
                 }
                 onResume={() =>
-                  void command('/v1/driver/shift/resume', () => dispatch({ type: 'resume' }))
+                  void directo('/v1/driver/shift/resume', () => dispatch({ type: 'resume' }))
                 }
               />
             ) : null}
@@ -642,13 +768,23 @@ export function App() {
               <Oferta
                 offer={session.offer}
                 onAccept={() =>
-                  void command(`/v1/driver/rides/${rideId}/accept`, () =>
-                    dispatch({ type: 'offer_accepted' }),
+                  void directo(
+                    `/v1/driver/rides/${rideId}/accept`,
+                    () => {
+                      dispatch({ type: 'offer_accepted' });
+                      // Con la carrera ya suya llegan el cliente y su teléfono.
+                      void restore();
+                    },
+                    undefined,
+                    'Sin señal: la carrera NO quedó aceptada. Inténtalo de nuevo antes de que venza.',
                   )
                 }
                 onReject={() =>
-                  void command(`/v1/driver/rides/${rideId}/reject`, () =>
-                    dispatch({ type: 'offer_rejected' }),
+                  // Sin señal se rechaza igual en la pantalla: la oferta vence sola.
+                  void directo(`/v1/driver/rides/${rideId}/reject`, () => dispatch({ type: 'offer_rejected' })).then(
+                    () => {
+                      if (sesionViva.current.phase === 'offer') dispatch({ type: 'offer_rejected' });
+                    },
                   )
                 }
                 onExpire={() => dispatch({ type: 'offer_expired' })}
@@ -661,6 +797,8 @@ export function App() {
                 status={session.rideStatus}
                 metersToPickup={session.metersToPickup}
                 minRideMinutes={session.minRideMinutes}
+                radioLlegada={session.radioLlegada}
+                enviando={enviando}
                 onArrived={() =>
                   void command(
                     `/v1/driver/rides/${rideId}/arrived`,

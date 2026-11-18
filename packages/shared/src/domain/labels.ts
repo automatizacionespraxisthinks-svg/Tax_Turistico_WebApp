@@ -1,4 +1,4 @@
-import type { RideStatus, TransitionActor } from './ride';
+import type { RideStatus, TransitionActor, VehicleType } from './ride';
 import type { DriverStatus } from './driver';
 import type { OutboxEventType, OutboxStatus, WahaSessionStatus } from './events';
 
@@ -17,6 +17,13 @@ export const RIDE_STATUS_LABEL: Record<RideStatus, string> = {
  * Tono semántico de cada estado. Lo consume el sistema de diseño para elegir
  * color; ningún componente decide el color por su cuenta.
  */
+/** Tipos de vehículo como los dice la oficina, no la clave interna. */
+export const VEHICLE_TYPE_LABEL: Record<VehicleType, string> = {
+  sedan: 'Sedán',
+  camioneta: 'Camioneta',
+  van: 'Van',
+};
+
 export type StatusTone = 'neutral' | 'info' | 'accent' | 'progress' | 'positive' | 'warning' | 'critical';
 
 /**

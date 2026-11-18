@@ -3,6 +3,7 @@ import { AnimatePresence, motion } from 'motion/react';
 import { Ban, Banknote, Camera, Car, CreditCard, ExternalLink, MapPin, MapPinOff, MessageSquare, RefreshCw } from 'lucide-react';
 import type { Driver, Ride, RideOffer, WaveLogEntry } from '@tax/shared';
 import {
+  VEHICLE_TYPE_LABEL,
   ACTOR_LABEL,
   RIDE_STATUS_LABEL,
   RIDE_STATUS_TONE,
@@ -32,7 +33,7 @@ import {
 } from '@tax/ui';
 import { actions, loadRideDetail, useLive } from '../live/store';
 import { API_BASE, api } from '../api/client';
-import { usePuede } from '../api/queries';
+import { usePlazos, usePuede } from '../api/queries';
 
 type DetailTab = 'resumen' | 'oleadas' | 'bitacora';
 
@@ -218,7 +219,8 @@ function Resumen({ ride, driver }: { ride: Ride; driver?: Driver }) {
             <div className="min-w-0 flex-1">
               <p className="truncate text-base font-medium text-ink">{driver.name}</p>
               <p className="text-micro text-ink-muted">
-                Código {driver.code} · {driver.vehicle.plate} · {driver.vehicle.type}
+                Código {driver.code} · {driver.vehicle.plate}
+                {driver.vehicle.type ? ` · ${VEHICLE_TYPE_LABEL[driver.vehicle.type]}` : ''}
               </p>
             </div>
             <span className="font-mono text-caption text-ink-muted">{maskPhone(driver.phone)}</span>
@@ -825,7 +827,9 @@ function Bitacora({ ride }: { ride: Ride }) {
  */
 function FotoDelLugar({ rideId, version }: { rideId: string; version: string }) {
   const [url, setUrl] = useState<string>();
-  const [fallo, setFallo] = useState(false);
+  /** Por qué no se ve: ya se borró (404) u otro problema (red, sesión, servidor). */
+  const [fallo, setFallo] = useState<'borrada' | 'error' | false>(false);
+  const plazos = usePlazos();
 
   useEffect(() => {
     let creada: string | undefined;
@@ -833,6 +837,10 @@ function FotoDelLugar({ rideId, version }: { rideId: string; version: string }) 
     setFallo(false);
     fetch(`${API_BASE}/v1/admin/rides/${rideId}/photo`, { credentials: 'include' })
       .then(async (respuesta) => {
+        if (respuesta.status === 404) {
+          if (!cancelado) setFallo('borrada');
+          return;
+        }
         if (!respuesta.ok) throw new Error(String(respuesta.status));
         const blob = await respuesta.blob();
         if (cancelado) return;
@@ -840,7 +848,7 @@ function FotoDelLugar({ rideId, version }: { rideId: string; version: string }) 
         setUrl(creada);
       })
       .catch(() => {
-        if (!cancelado) setFallo(true);
+        if (!cancelado) setFallo('error');
       });
     return () => {
       cancelado = true;
@@ -854,7 +862,9 @@ function FotoDelLugar({ rideId, version }: { rideId: string; version: string }) 
       <div className="mt-2 overflow-hidden rounded-md border border-line bg-surface-sunk">
         {fallo ? (
           <p className="px-3 py-2.5 text-caption text-ink-muted">
-            La foto ya no está disponible: se borran a los 30 días.
+            {fallo === 'borrada'
+              ? `La foto ya no está disponible${plazos.data ? `: se borran a los ${plazos.data.fotosDias} días` : ''}.`
+              : 'No se pudo cargar la foto. Vuelve a abrir la carrera en un momento.'}
           </p>
         ) : url ? (
           <a href={url} target="_blank" rel="noreferrer" title="Abrir la foto en grande">

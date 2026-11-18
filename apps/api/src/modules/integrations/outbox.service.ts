@@ -1,7 +1,7 @@
 import { Inject, Injectable, Logger } from '@nestjs/common';
 import { InjectQueue } from '@nestjs/bullmq';
 import type { Queue } from 'bullmq';
-import { and, eq, lte, or, isNull, desc } from 'drizzle-orm';
+import { and, eq, inArray, lte, or, isNull, desc } from 'drizzle-orm';
 import { uuidv7 } from 'uuidv7';
 import type { OutboxEventType } from '@tax/shared';
 import { nextBackoffSeconds } from '@tax/shared';
@@ -128,7 +128,8 @@ export class OutboxService {
    *
    * Es la red de seguridad frente a reinicios: los avisos de `notify` viven
    * en Redis, pero la verdad está en Postgres. Un barrido periódico vuelve a
-   * encolar lo que se quedó atrás.
+   * encolar lo que se quedó atrás, también lo que quedó «entregando» más
+   * allá de su plazo porque el proceso se cayó a mitad del envío.
    */
   async claimDue(limit = 50): Promise<string[]> {
     const rows = await this.db
@@ -136,7 +137,7 @@ export class OutboxService {
       .from(outboxEvents)
       .where(
         and(
-          eq(outboxEvents.status, 'pending'),
+          inArray(outboxEvents.status, ['pending', 'delivering']),
           or(isNull(outboxEvents.nextAttemptAt), lte(outboxEvents.nextAttemptAt, new Date())),
         ),
       )

@@ -43,7 +43,10 @@ export class SystemController {
     private readonly geocoding: GeocodingService,
   ) {}
 
+  // Solo técnicos (17/11/2026): antes bastaba con tener sesión.
+  // Da versiones de la base y de Redis y nombres internos.
   @Get()
+  @RequierePermiso('sistema.tecnico')
   async checks(): Promise<SystemChecks> {
     const services = await Promise.all([
       this.postgres(),
@@ -67,13 +70,27 @@ export class SystemController {
   }
 
   /** Revisa las líneas ya, sin esperar al minuto. Es el «Actualizar» del panel. */
+  // Solo técnicos (17/11/2026): antes bastaba con tener sesión.
   @Post('whatsapp/revisar')
+  @RequierePermiso('sistema.tecnico')
   @HttpCode(200)
   async revisarLineas() {
     if (!this.monitor.configurado) {
       throw new ConflictException('Falta WAHA_URL en la API: el monitor de líneas está apagado');
     }
     return this.monitor.revisar();
+  }
+
+  /**
+   * Los plazos de borrado que rigen de verdad, los del entorno (17/11/2026).
+   * El panel los mostraba escritos a mano y diciendo «pendientes de
+   * confirmar» mientras la purga ya corría con otros. Solo pide sesión: son
+   * plazos, no datos.
+   */
+  @Get('plazos')
+  plazos() {
+    const env = loadEnv();
+    return { fotosDias: env.PHOTO_RETENTION_DAYS, posicionesDias: env.POSITION_RETENTION_DAYS };
   }
 
   /**

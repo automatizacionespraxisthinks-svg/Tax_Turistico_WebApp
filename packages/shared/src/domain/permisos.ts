@@ -89,6 +89,13 @@ export const PERMISOS = [
     requiere: 'reportes.ver',
   },
   {
+    clave: 'clientes.datos',
+    area: 'Sistema',
+    nombre: 'Atender solicitudes de datos personales',
+    descripcion:
+      'Consultar qué datos tiene un cliente, entregárselos y suprimirlos cuando lo pida (Ley 1581 de 2012).',
+  },
+  {
     clave: 'auditoria.ver',
     area: 'Sistema',
     nombre: 'Ver la auditoría',

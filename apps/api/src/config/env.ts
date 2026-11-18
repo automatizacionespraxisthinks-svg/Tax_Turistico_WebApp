@@ -19,6 +19,29 @@ const envSchema = z.object({
   /** Redis 7 existente, usuario ACL `tax` limitado al prefijo `tax:`. */
   REDIS_URL: z.string().url(),
   REDIS_PREFIX: z.string().default('tax:'),
+  /**
+   * De quién se cree la cabecera X-Forwarded-For (17/11/2026). Con `true`
+   * se creía de cualquiera, así que quien llegara a la API sin pasar por
+   * Traefik elegía su IP: la del límite de peticiones, la de la bitácora y
+   * la del bloqueo de accesos. Por defecto, solo las redes privadas, que es
+   * donde vive Traefik en Docker. Admite la sintaxis de `proxy-addr`.
+   */
+  TRUST_PROXY: z.string().default('loopback, linklocal, uniquelocal'),
+  /**
+   * De qué servidores se pueden bajar fotos del lugar (17/11/2026), separados
+   * por coma, por ejemplo el de Chatwoot: `chat.taxturistico.co`. Con la
+   * lista, solo esos (y sus subdominios), aunque sean internos. Sin ella,
+   * cualquiera que no sea una dirección privada o del propio servidor.
+   */
+  FOTO_HOSTS_PERMITIDOS: z
+    .string()
+    .default('')
+    .transform((valor) =>
+      valor
+        .split(',')
+        .map((h) => h.trim().toLowerCase())
+        .filter(Boolean),
+    ),
 
   /** Webhooks hacia n8n, firmados con HMAC-SHA256 (§7.1). */
   N8N_WEBHOOK_URL: z.string().url().optional(),

@@ -17,6 +17,7 @@ import {
   driverPositions,
   driverShifts,
   drivers,
+  rideOffers,
   rides,
   vehicleDrivers,
   vehicles,
@@ -281,14 +282,26 @@ export class FleetService {
   }
 
   async closeShift(driverId: string): Promise<void> {
-    await this.db.transaction(async (tx) => {
+    const retiradas = await this.db.transaction(async (tx) => {
       await tx
         .update(driverShifts)
         .set({ endedAt: new Date() })
         .where(and(eq(driverShifts.driverId, driverId), isNull(driverShifts.endedAt)));
 
       await tx.update(drivers).set({ status: 'OFF_SHIFT' }).where(eq(drivers.id, driverId));
+
+      /*
+       * Sus ofertas pendientes se retiran (17/11/2026): fuera de turno ya no
+       * puede tomarlas, y antes le quedaban en pantalla. Solo las suyas: las
+       * de los demás conductores para la misma carrera siguen vivas.
+       */
+      return tx
+        .update(rideOffers)
+        .set({ response: 'revoked', revokedAt: new Date() })
+        .where(and(eq(rideOffers.driverId, driverId), eq(rideOffers.response, 'pending')))
+        .returning({ rideId: rideOffers.rideId });
     });
+    for (const { rideId } of retiradas) this.realtime.retirarOfertaDe(driverId, rideId);
 
     // Fuera de turno no se guarda posición: se borra la que hubiera (§9.2).
     await this.redis.zrem(redisKeys.driverPositions, driverId);

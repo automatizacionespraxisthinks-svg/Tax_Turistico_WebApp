@@ -84,7 +84,8 @@ async function main(): Promise<void> {
       name: 'n8n',
       prefix,
       keyHash: await hashSecret(secret),
-      scopes: ['rides:read', 'rides:write'],
+      // `rides:list` solo en desarrollo: lo usan las pruebas de extremo a extremo.
+      scopes: ['rides:read', 'rides:write', 'rides:list'],
       webhookSecret: randomToken(32),
     })
     .onConflictDoNothing();

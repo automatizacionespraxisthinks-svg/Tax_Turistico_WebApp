@@ -93,6 +93,40 @@ export function useTablero(filtros: FiltrosDeInforme) {
   });
 }
 
+/**
+ * Las cifras de los últimos 7 días, hoy incluido, sin pruebas: las que leen
+ * Operación (tiempo a asignación, sin intervención) y Flota (carreras de hoy
+ * y aceptación de cada conductor). Se refrescan cada minuto. Antes esas
+ * tarjetas tenían cifras de muestra escritas a mano (17/11/2026).
+ *
+ * Pide `reportes.ver`: sin él no se consulta, y las tarjetas dicen «—».
+ */
+export function useCifrasRecientes(habilitado: boolean) {
+  const filtros: FiltrosDeInforme = { ...rangoDePeriodo('7d'), sinPruebas: true };
+  return useQuery({
+    queryKey: ['reports', 'recientes', filtros.desde, filtros.hasta],
+    queryFn: () => api.get<TableroInforme>(`/v1/reports/dashboard?${aConsulta(filtros)}`),
+    enabled: habilitado,
+    staleTime: 60_000,
+    refetchInterval: 60_000,
+    placeholderData: keepPreviousData,
+  });
+}
+
+/** Cifras del conductor HOY, para Flota: de un tablero de solo hoy. */
+export function useCifrasDeHoy(habilitado: boolean) {
+  const hoy = hoyEnPaipa();
+  const filtros: FiltrosDeInforme = { desde: hoy, hasta: hoy, sinPruebas: false };
+  return useQuery({
+    queryKey: ['reports', 'hoy', hoy],
+    queryFn: () => api.get<TableroInforme>(`/v1/reports/dashboard?${aConsulta(filtros)}`),
+    enabled: habilitado,
+    staleTime: 60_000,
+    refetchInterval: 60_000,
+    placeholderData: keepPreviousData,
+  });
+}
+
 export function useOpcionesDeInforme() {
   return useQuery({
     queryKey: ['reports', 'filters'],

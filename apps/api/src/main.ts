@@ -8,8 +8,14 @@ import rateLimit from '@fastify/rate-limit';
 import { Redis } from 'ioredis';
 import { AppModule } from './app.module';
 import { loadEnv } from './config/env';
-import { ProblemFilter } from './common/problem';
+import { AppError, ProblemFilter } from './common/problem';
 import { sha256Hex } from './common/crypto';
+
+/** Rutas donde se prueba una credencial: el acceso del conductor y el de la oficina. */
+function esAcceso(url: string): boolean {
+  const ruta = url.split('?')[0];
+  return ruta === '/v1/auth/driver' || ruta === '/v1/auth/session';
+}
 
 async function bootstrap(): Promise<void> {
   const env = loadEnv();
@@ -17,7 +23,7 @@ async function bootstrap(): Promise<void> {
   const app = await NestFactory.create<NestFastifyApplication>(
     AppModule,
     new FastifyAdapter({
-      trustProxy: true,
+      trustProxy: env.TRUST_PROXY,
       // Límite de tamaño de cuerpo: una foto del lugar va por otro endpoint
       // con su propio límite de 5 MB (§8.2).
       bodyLimit: 1024 * 1024,
@@ -56,7 +62,11 @@ async function bootstrap(): Promise<void> {
    */
   await app.register(rateLimit, {
     global: true,
-    max: 240,
+    /*
+     * Los accesos tienen su propio tope, mucho más bajo y siempre por IP: es
+     * donde se prueban PIN y contraseñas (17/11/2026).
+     */
+    max: (request) => (esAcceso(request.url) ? 20 : 240),
     timeWindow: '1 minute',
     redis: new Redis(env.REDIS_URL, { keyPrefix: 'tax:rl:', maxRetriesPerRequest: null }),
     /**
@@ -69,6 +79,13 @@ async function bootstrap(): Promise<void> {
      * que verificar nada contra él, solo necesitar siempre el mismo cubo.
      */
     keyGenerator: (request) => {
+      /*
+       * En los accesos nunca por clave: cada `X-Api-Key` inventada abría un
+       * cubo nuevo, y con una distinta por petición no había límite para
+       * probar PIN (17/11/2026). Fuera de los accesos una clave falsa no
+       * consigue nada —la guarda la rechaza—, así que ahí se mantiene.
+       */
+      if (esAcceso(request.url)) return `acceso:${request.ip}`;
       const apiKey = request.headers['x-api-key'] as string | undefined;
       return apiKey ? `k:${sha256Hex(apiKey)}` : request.ip;
     },
@@ -79,6 +96,13 @@ async function bootstrap(): Promise<void> {
      * el límite, que está pensado para el agente.
      */
     allowList: (request) => request.url === '/v1/driver/position',
+    /*
+     * Un 429 de verdad, con el formato de los demás errores (17/11/2026). Lo
+     * que lanzaba el plugin no lo reconocía el filtro de errores y salía como
+     * un 500: el límite frenaba, pero quien llamaba creía que la API falló.
+     */
+    errorResponseBuilder: (_request, contexto) =>
+      new AppError('RATE_LIMITED', `Demasiadas peticiones. Espera ${Math.ceil(contexto.ttl / 1000)} s y vuelve a intentarlo.`),
   });
 
   app.enableCors({

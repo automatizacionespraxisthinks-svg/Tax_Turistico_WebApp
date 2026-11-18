@@ -19,7 +19,6 @@ export interface Zone {
   tortuosity: number;
   /** Parámetros de despacho por oleada, editables desde el panel (§5.2). */
   waves: WaveConfig[];
-  activeDrivers: number;
   /** El punto de partida de las carreras que no se pudieron ubicar. */
   esReferencia?: boolean;
 }

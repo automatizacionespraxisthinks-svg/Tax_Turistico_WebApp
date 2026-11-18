@@ -1,10 +1,19 @@
-import { Body, Controller, Get, HttpCode, Post, Req, Res, UseGuards } from '@nestjs/common';
+import { Body, Controller, Get, HttpCode, Inject, Post, Req, Res, UseGuards } from '@nestjs/common';
+import type { Redis } from 'ioredis';
+import { createHash } from 'node:crypto';
 import type { FastifyReply, FastifyRequest } from 'fastify';
 import { z } from 'zod';
 import { isValidLogin, normalizeLogin } from '@tax/shared';
 import { zodBody } from '../../common/zod.pipe';
 import { loadEnv } from '../../config/env';
-import { IdentityService } from './identity.service';
+import {
+  IdentityService,
+  INTENTOS_POR_CELULAR,
+  MENSAJE_ACCESO_CONDUCTOR,
+  MINUTOS_DE_BLOQUEO,
+} from './identity.service';
+import { REDIS } from '../../redis/redis.module';
+import { AppError } from '../../common/problem';
 import { AuditService } from '../audit/audit.service';
 import { RealtimeGateway } from '../../realtime/realtime.gateway';
 import { AllowWithTemporaryPassword, AllowWithoutTotp, SESSION_COOKIE, SessionGuard } from './guards';
@@ -58,6 +67,7 @@ export class AuthController {
     private readonly identity: IdentityService,
     private readonly audit: AuditService,
     private readonly realtime: RealtimeGateway,
+    @Inject(REDIS) private readonly redis: Redis,
   ) {}
 
   @Post('driver')
@@ -65,12 +75,28 @@ export class AuthController {
     @Req() request: FastifyRequest,
     @Body(zodBody(driverLoginSchema)) body: z.infer<typeof driverLoginSchema>,
   ) {
-    const { driver, refreshToken, sesionesCerradas } = await this.identity.loginDriver(
-      body.code,
-      body.pin,
-      body.device,
-      body.install,
-    );
+    /*
+     * Bloqueo por código y red (17/11/2026): cinco PIN malos desde la misma IP
+     * pausan ese código 15 minutos SOLO desde esa IP. Antes el bloqueo era de
+     * la cuenta entera, así que cualquiera podía dejar fuera a toda la flota
+     * probando cinco PIN por código. El tope de la cuenta, más alto, sigue en
+     * `IdentityService` para un ataque desde muchas redes.
+     */
+    const clave = `acceso:conductor:${createHash('sha256').update(`${body.code}|${request.ip}`).digest('hex').slice(0, 32)}`;
+    const fallos = Number(await this.redis.get(clave)) || 0;
+    if (fallos >= INTENTOS_POR_CELULAR) throw new AppError('UNAUTHORIZED', MENSAJE_ACCESO_CONDUCTOR);
+
+    let acceso: Awaited<ReturnType<IdentityService['loginDriver']>>;
+    try {
+      acceso = await this.identity.loginDriver(body.code, body.pin, body.device, body.install);
+    } catch (error) {
+      if (error instanceof AppError && error.code === 'UNAUTHORIZED') {
+        await this.redis.multi().incr(clave).expire(clave, MINUTOS_DE_BLOQUEO * 60).exec();
+      }
+      throw error;
+    }
+    await this.redis.del(clave);
+    const { driver, refreshToken, sesionesCerradas } = acceso;
 
     // Los celulares que este acceso dejó sin sesión se enteran ya.
     for (const cerrada of sesionesCerradas) {

@@ -114,8 +114,16 @@ export class RidesController {
     return this.rides.create(body, actorFrom(request, 'customer'));
   }
 
+  /*
+   * El listado de todas las carreras, con teléfono y nombre de cada cliente,
+   * pide un ámbito propio (17/11/2026). Con `rides:read`, la clave de n8n
+   * podía listar hasta 500 carreras de todos los clientes, y el agente solo
+   * necesita consultar las suyas por id. Lo usan las pruebas de extremo a
+   * extremo; la clave del seed lo trae, la de n8n en producción no.
+   */
   @Get()
-  @Scopes('rides:read')
+  // Solo este: `Scopes` pide cualquiera de los que se le pasen, no todos.
+  @Scopes('rides:list')
   list(@Query(zodBody(listQuerySchema)) query: z.infer<typeof listQuerySchema>) {
     return this.rides.list(query.status, query.limit);
   }
@@ -200,7 +208,7 @@ export class RidesController {
 
     const ride = Buffer.isBuffer(cuerpo)
       ? await this.fotos.guardar(rideId, cuerpo, 'archivo', actor)
-      : await this.fotos.desdeEnlace(rideId, fotoSchema.parse(cuerpo).url, actor);
+      : await this.fotos.desdeEnlace(rideId, enlaceDeFoto(cuerpo), actor);
 
     this.realtime.rideChanged(ride);
     return { ok: true, code: ride.code, pickupPhotoAt: ride.pickupPhotoAt };
@@ -217,6 +225,15 @@ export class RidesController {
   ) {
     return this.dispatch.assignManually(rideId, body.driverId, actorFrom(request, 'operator'));
   }
+}
+
+/** El enlace del cuerpo, o 400: con `parse` a secas, un cuerpo malo era un 500. */
+function enlaceDeFoto(cuerpo: unknown): string {
+  const leido = fotoSchema.safeParse(cuerpo);
+  if (!leido.success) {
+    throw new AppError('VALIDATION_FAILED', 'Manda la imagen como cuerpo (image/jpeg) o un JSON con { "url": "…" }');
+  }
+  return leido.data.url;
 }
 
 const fotoSchema = z.object({ url: z.string().url().max(2000) }, {

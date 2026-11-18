@@ -21,7 +21,10 @@ const listSchema = z.object({
 export class OutboxController {
   constructor(private readonly outbox: OutboxService) {}
 
+  // Solo técnicos (17/11/2026): antes bastaba con tener sesión.
+  // Los eventos llevan teléfonos y direcciones de clientes.
   @Get()
+  @RequierePermiso('sistema.tecnico')
   list(@Query(zodBody(listSchema)) query: z.infer<typeof listSchema>) {
     return this.outbox.list(query.status, query.limit);
   }

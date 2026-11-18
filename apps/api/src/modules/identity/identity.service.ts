@@ -1,6 +1,6 @@
 import { randomBytes } from 'node:crypto';
 import { Inject, Injectable, Logger } from '@nestjs/common';
-import { and, eq, inArray, isNull, ne, or, gt, lt } from 'drizzle-orm';
+import { and, eq, inArray, isNull, ne, or, gt, lt, sql } from 'drizzle-orm';
 import { uuidv7 } from 'uuidv7';
 import { DB, type Database } from '../../db/db.module';
 import { apiKeys, driverDevices, drivers, rides, roles, sessions, userRecoveryCodes, users } from '../../db/schema';
@@ -26,6 +26,27 @@ import {
   type Permiso,
 } from '@tax/shared';
 import { AuditService } from '../audit/audit.service';
+
+/** Intentos fallidos antes de bloquear y cuánto dura el bloqueo. */
+export const INTENTOS_POR_CELULAR = 5;
+export const MINUTOS_DE_BLOQUEO = 15;
+const INTENTOS_DE_USUARIO = 5;
+/**
+ * Tope de la cuenta del conductor, por encima del de cada celular: solo
+ * salta si alguien prueba PIN desde muchas redes a la vez.
+ */
+const TOPE_CUENTA_CONDUCTOR = 20;
+
+/** Lo único que dice el acceso del conductor cuando no entra, sea cual sea la causa. */
+export const MENSAJE_ACCESO_CONDUCTOR =
+  'Código o PIN incorrectos. Tras varios intentos el acceso se pausa 15 minutos; si no recuerdas el PIN, llama a la oficina.';
+
+/** Un hash Argon2 de nada, para que un código inexistente tarde lo mismo que uno real. */
+let falso: Promise<string> | undefined;
+function hashFalso(): Promise<string> {
+  falso ??= hashSecret(`no-existe-${Math.random()}`);
+  return falso;
+}
 
 export interface ApiPrincipal {
   kind: 'integration';
@@ -174,24 +195,39 @@ export class IdentityService {
       .where(and(eq(drivers.code, code), eq(drivers.active, true)))
       .limit(1);
 
-    const invalid = new AppError('UNAUTHORIZED', 'Código o PIN incorrectos');
-    if (!driver) throw invalid;
+    /*
+     * Siempre la misma respuesta y el mismo tiempo (17/11/2026).
+     *
+     * Antes, un código que no existía respondía al instante y uno bloqueado
+     * decía «bloqueado»: así se sabía qué códigos existen, y con cinco PIN
+     * malos por código se podía bloquear a toda la flota a propósito. Ahora
+     * un código que no existe pasa igual por Argon2, y uno bloqueado no dice
+     * que lo está. El bloqueo por celular y red (5 intentos, 15 minutos) lo
+     * lleva el controlador; aquí queda el de la cuenta, con un tope más alto,
+     * para frenar un ataque repartido entre muchas redes.
+     */
+    const invalid = new AppError('UNAUTHORIZED', MENSAJE_ACCESO_CONDUCTOR);
+    if (!driver) {
+      await verifySecret(await hashFalso(), pin);
+      throw invalid;
+    }
 
     if (driver.lockedUntil && driver.lockedUntil > new Date()) {
-      throw new AppError(
-        'UNAUTHORIZED',
-        'Acceso bloqueado por intentos fallidos. Llama a la oficina.',
-      );
+      await verifySecret(await hashFalso(), pin);
+      throw invalid;
     }
 
     const ok = await verifySecret(driver.pinHash, pin);
     if (!ok) {
-      const attempts = driver.failedAttempts + 1;
+      // Atómico: sumar en la base, no leer y escribir. Con lecturas, varias
+      // peticiones a la vez veían el mismo contador y el tope no saltaba.
       await this.db
         .update(drivers)
         .set({
-          failedAttempts: attempts,
-          lockedUntil: attempts >= 5 ? new Date(Date.now() + 15 * 60_000) : null,
+          failedAttempts: sql`${drivers.failedAttempts} + 1`,
+          lockedUntil: sql`case when ${drivers.failedAttempts} + 1 >= ${TOPE_CUENTA_CONDUCTOR}
+                               then now() + make_interval(mins => ${MINUTOS_DE_BLOQUEO})
+                               else ${drivers.lockedUntil} end`,
         })
         .where(eq(drivers.id, driver.id));
       throw invalid;
@@ -393,6 +429,24 @@ export class IdentityService {
   }
 
   /**
+   * Suma un intento fallido de un usuario de oficina en una sola sentencia y
+   * lo bloquea al llegar al tope. Devuelve cuántos lleva.
+   */
+  private async sumarFalloDeUsuario(userId: string): Promise<number> {
+    const [fila] = await this.db
+      .update(users)
+      .set({
+        failedAttempts: sql`${users.failedAttempts} + 1`,
+        lockedUntil: sql`case when ${users.failedAttempts} + 1 >= ${INTENTOS_DE_USUARIO}
+                             then now() + make_interval(mins => ${MINUTOS_DE_BLOQUEO})
+                             else ${users.lockedUntil} end`,
+      })
+      .where(eq(users.id, userId))
+      .returning({ intentos: users.failedAttempts });
+    return fila?.intentos ?? 0;
+  }
+
+  /**
    * El conductor sale de este celular («Cambiar de conductor»): la sesión
    * deja de valer y el push se borra, para que no le lleguen ofertas a un
    * teléfono que ya tiene otro.
@@ -457,14 +511,7 @@ export class IdentityService {
     }
 
     if (!(await verifySecret(user.passwordHash, password))) {
-      const attempts = user.failedAttempts + 1;
-      await this.db
-        .update(users)
-        .set({
-          failedAttempts: attempts,
-          lockedUntil: attempts >= 5 ? new Date(Date.now() + 15 * 60_000) : null,
-        })
-        .where(eq(users.id, user.id));
+      await this.sumarFalloDeUsuario(user.id);
       throw invalid;
     }
 
@@ -494,14 +541,7 @@ export class IdentityService {
       if (!check.ok) {
         // Un código fallido cuenta igual que una contraseña fallida: seis
         // dígitos son uno entre un millón, pero mil intentos son gratis.
-        const attempts = user.failedAttempts + 1;
-        await this.db
-          .update(users)
-          .set({
-            failedAttempts: attempts,
-            lockedUntil: attempts >= 5 ? new Date(Date.now() + 15 * 60_000) : null,
-          })
-          .where(eq(users.id, user.id));
+        await this.sumarFalloDeUsuario(user.id);
         throw new AppError('TOTP_INVALID', 'Código incorrecto o ya usado');
       }
 
@@ -766,16 +806,9 @@ export class IdentityService {
     if (quemado.length) return;
 
     // Fuera de la transacción: el fallo tiene que contar aunque esta se deshaga.
-    const intentos = user.failedAttempts + 1;
-    await this.db
-      .update(users)
-      .set({
-        failedAttempts: intentos,
-        lockedUntil: intentos >= 5 ? new Date(Date.now() + 15 * 60_000) : null,
-      })
-      .where(eq(users.id, userId));
+    const intentos = await this.sumarFalloDeUsuario(userId);
 
-    if (intentos >= 5) {
+    if (intentos >= INTENTOS_DE_USUARIO) {
       await this.db
         .update(sessions)
         .set({ revokedAt: new Date() })

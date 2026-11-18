@@ -40,7 +40,10 @@ export class WahaController {
   }
 
   /** El QR para volver a vincular una línea, como imagen en `data:`. */
+  // Solo técnicos (17/11/2026): antes bastaba con tener sesión.
+  // Con el QR cualquiera vinculaba su propio WhatsApp en una línea de la empresa.
   @Get(':id/qr')
+  @RequierePermiso('sistema.tecnico')
   async qr(@Param('id') id: string) {
     // Solo líneas que el monitor conoce: no se le pregunta a WAHA por
     // cualquier nombre que llegue en la URL.

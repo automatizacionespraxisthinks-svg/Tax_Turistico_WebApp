@@ -20,7 +20,7 @@ import {
 } from '@tax/ui';
 import { ApiError, api } from '../api/client';
 import { usePlaces, usePuede } from '../api/queries';
-import { actions, useLive } from '../live/store';
+import { actions, useLive, zoneOf } from '../live/store';
 import { FormularioLugar, FormularioMoverZona, FormularioZona } from '../components/FormulariosCatalogo';
 
 type Tab = 'zonas' | 'lugares';
@@ -143,6 +143,13 @@ function TarjetaZona({
   onClose: () => void;
 }) {
   const { push } = useToast();
+  /*
+   * Conductores en turno cuya última posición cae dentro de la zona. Antes
+   * decía «0 conductores habituales» a todas: el dato no existía.
+   */
+  const enLaZona = useLive(
+    (s) => s.drivers.filter((d) => d.status !== 'OFF_SHIFT' && d.position && zoneOf(d.position)?.id === zone.id).length,
+  );
   // Lo que se escribe vive aquí hasta guardar; un refresco de las zonas no lo pisa.
   const [waves, setWaves] = useState<WaveConfig[]>(zone.waves);
   const [guardando, setGuardando] = useState(false);
@@ -209,7 +216,7 @@ function TarjetaZona({
     <Card className="space-y-3">
       <CardHeader
         title={zone.name}
-        subtitle={`Factor de tortuosidad ${zone.tortuosity.toFixed(2)} · ${zone.activeDrivers} conductores habituales`}
+        subtitle={`Factor de tortuosidad ${zone.tortuosity.toFixed(2)} · ${enLaZona} ${enLaZona === 1 ? 'conductor' : 'conductores'} en la zona ahora`}
         actions={
           <>
             {zone.esReferencia ? (

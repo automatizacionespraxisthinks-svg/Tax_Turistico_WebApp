@@ -1,5 +1,5 @@
 import type { WaveLogEntry } from '@tax/shared';
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, type OnModuleDestroy } from '@nestjs/common';
 import {
   type OnGatewayConnection,
   type OnGatewayDisconnect,
@@ -56,8 +56,9 @@ export interface OfficeAlert {
   pingTimeout: 25_000,
 })
 @Injectable()
-export class RealtimeGateway implements OnGatewayConnection, OnGatewayDisconnect {
+export class RealtimeGateway implements OnGatewayConnection, OnGatewayDisconnect, OnModuleDestroy {
   private readonly logger = new Logger(RealtimeGateway.name);
+  private revision?: NodeJS.Timeout;
 
   @WebSocketServer()
   private server!: Server;
@@ -68,6 +69,44 @@ export class RealtimeGateway implements OnGatewayConnection, OnGatewayDisconnect
    * Autenticación en la conexión, no por mensaje: un socket anónimo no entra
    * a ninguna sala, así que no puede leer carreras ajenas.
    */
+  /**
+   * La credencial se comprueba al conectar, y antes no se volvía a mirar:
+   * una sesión vencida o cerrada, o un conductor desactivado, seguían
+   * recibiendo eventos mientras el socket no se cayera. Cada cinco minutos se
+   * repasan los sockets abiertos y se cortan los que ya no valen.
+   */
+  afterInit(): void {
+    this.revision = setInterval(() => void this.revisarSockets(), 5 * 60_000);
+    this.revision.unref();
+  }
+
+  onModuleDestroy(): void {
+    if (this.revision) clearInterval(this.revision);
+  }
+
+  private async revisarSockets(): Promise<void> {
+    if (!this.server) return;
+    try {
+      const sockets = await this.server.fetchSockets();
+      for (const socket of sockets) {
+        const credencial = socket.data.credencial as { tipo: 'conductor' | 'oficina'; token: string } | undefined;
+        if (!credencial) continue;
+        const vale =
+          credencial.tipo === 'conductor'
+            ? await this.identity.resolveDriverToken(credencial.token)
+            : await this.identity
+                .resolveSession(credencial.token)
+                .then((u) => (u && !u.mustChangePassword && u.totpEnabled ? u : null));
+        if (!vale) {
+          socket.emit('session:closed', { motivo: 'Tu sesión ya no está activa. Vuelve a entrar.' });
+          socket.disconnect(true);
+        }
+      }
+    } catch (error) {
+      this.logger.warn({ err: error }, 'No se pudieron revisar los sockets abiertos');
+    }
+  }
+
   async handleConnection(client: Socket): Promise<void> {
     const token = client.handshake.auth?.token as string | undefined;
     const cookie = client.handshake.headers.cookie;
@@ -77,6 +116,7 @@ export class RealtimeGateway implements OnGatewayConnection, OnGatewayDisconnect
       if (driver) {
         await client.join(`driver:${driver.id}`);
         client.data.principal = driver;
+        client.data.credencial = { tipo: 'conductor', token };
         this.logger.debug({ id: client.id, driver: driver.code }, 'Conductor en su sala');
         return;
       }
@@ -86,9 +126,15 @@ export class RealtimeGateway implements OnGatewayConnection, OnGatewayDisconnect
     if (cookie) {
       const session = readCookie(cookie, 'tax_session');
       const user = session ? await this.identity.resolveSession(session) : null;
-      if (user) {
+      /*
+       * Las mismas puertas que `SessionGuard` (17/11/2026): sin segundo factor
+       * o con la contraseña temporal sin cambiar, la API no deja ver nada, y
+       * el socket le daba en vivo carreras, posiciones y alertas.
+       */
+      if (user && !user.mustChangePassword && user.totpEnabled) {
         await client.join('office');
         client.data.principal = user;
+        client.data.credencial = { tipo: 'oficina', token: session! };
         this.logger.debug({ id: client.id, user: user.name }, 'Oficina en su sala');
         return;
       }
@@ -114,6 +160,11 @@ export class RealtimeGateway implements OnGatewayConnection, OnGatewayDisconnect
    * Se emite a todos los conductores: el que no la tuviera simplemente la
    * ignora, y así no hace falta recordar a quién se le ofreció.
    */
+  /** Le quita la oferta de una carrera a UN conductor, sin tocar la de los demás. */
+  retirarOfertaDe(driverId: string, rideId: string): void {
+    this.server?.to(`driver:${driverId}`).emit('ride:offer_revoked', { rideId });
+  }
+
   revokeOffer(rideId: string): void {
     this.server?.emit('ride:offer_revoked', { rideId });
   }
