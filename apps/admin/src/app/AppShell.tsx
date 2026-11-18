@@ -7,6 +7,7 @@ import {
   BarChart3,
   CircleDot,
   LayoutGrid,
+  LogOut,
   type LucideIcon,
   Map,
   PanelLeftClose,
@@ -334,21 +335,29 @@ function Sidebar({
               </p>
               <div className="flex items-center gap-2">
                 <CambiarClave />
-                <span aria-hidden="true" className="text-micro text-on-ink-muted">
-                  ·
-                </span>
-                <button
-                  onClick={() => {
-                    void api.post('/v1/auth/logout').finally(() => window.location.reload());
-                  }}
-                  className="text-micro text-on-ink-muted transition-colors duration-150 hover:text-on-ink"
-                >
-                  Salir
-                </button>
               </div>
             </div>
           ) : null}
         </div>
+
+        {/* Cerrar sesión aparte, a todo el ancho y en rojo: es la salida y se
+            tiene que encontrar sin buscarla. Contraída, solo el icono. */}
+        <button
+          type="button"
+          onClick={() => {
+            void api.post('/v1/auth/logout').finally(() => window.location.reload());
+          }}
+          aria-label="Cerrar sesión"
+          title={collapsed ? 'Cerrar sesión' : undefined}
+          className={cn(
+            'mt-2 flex h-9 w-full items-center justify-center gap-2 rounded-md bg-danger-fill text-caption font-semibold text-on-accent',
+            'transition-[filter] duration-150 ease-[var(--ease-standard)] hover:brightness-110 active:brightness-95',
+            collapsed && 'w-8 px-0',
+          )}
+        >
+          <LogOut className="size-4 shrink-0" />
+          {!collapsed ? <span>Cerrar Sesión</span> : null}
+        </button>
       </div>
     </motion.aside>
   );
