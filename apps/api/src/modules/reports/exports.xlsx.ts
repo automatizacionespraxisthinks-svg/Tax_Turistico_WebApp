@@ -11,7 +11,7 @@ import {
 
 const FECHA_HORA = 'dd/mm/yyyy hh:mm';
 
-const VEHICULO: Record<string, string> = { sedan: 'Sedán', camioneta: 'Camioneta', van: 'Van' };
+const VEHICULO: Record<string, string> = { sedan: 'Sedán', hatchback: 'Hatchback', camioneta: 'Camioneta', van: 'Van' };
 
 interface Columna {
   titulo: string;

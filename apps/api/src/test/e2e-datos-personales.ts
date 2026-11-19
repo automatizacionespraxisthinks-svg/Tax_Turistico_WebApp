@@ -90,6 +90,7 @@ async function main() {
     if (typeof r.body.id === 'string') rideIds.push(r.body.id);
     return r;
   };
+  const conocido = () => call(`/v1/customers/conocido?telefono=${encodeURIComponent(telefono)}`, { apiKey: true });
   const cliente = async () =>
     (await db.select().from(schema.customers).where(eq(schema.customers.phone, telefono)).limit(1))[0];
 
@@ -114,10 +115,21 @@ async function main() {
     cookie = activar.setCookie?.split(';')[0] ?? cookie;
     const admin = (path: string, o: { method?: string; body?: unknown } = {}) => call(path, { ...o, cookie });
 
+    console.log('\n0. ¿Cliente conocido? (n8n muestra el aviso solo a los nuevos)');
+    {
+      const antes = await conocido();
+      assert(antes.status === 200 && antes.body.conocido === false && Object.keys(antes.body).length === 1, `sin carreras: nuevo, y solo responde sí o no (HTTP ${antes.status})`, antes.body);
+      const sinClave = await call(`/v1/customers/conocido?telefono=${encodeURIComponent(telefono)}`);
+      assert(sinClave.status === 401, `sin clave de API no responde (HTTP ${sinClave.status})`);
+      const mal = await call('/v1/customers/conocido?telefono=310', { apiKey: true });
+      assert(mal.status === 400, `con un teléfono incompleto, 400 (HTTP ${mal.status})`);
+    }
+
     console.log('\n1. La autorización se guarda con el pedido');
     {
       const r = await pedir({ version: '1', channel: 'WhatsApp · aviso en el primer mensaje' });
       assert(r.status < 400, `pedido con autorización (HTTP ${r.status})`, r.body);
+      assert((await conocido()).body.conocido === true, 'después del primer pedido ya es cliente conocido');
       const c = await cliente();
       assert(c?.consentVersion === '1' && c.consentChannel?.startsWith('WhatsApp') === true && c.consentAt !== null, 'el cliente queda con versión, canal y hora');
       const primera = c!.consentAt!.getTime();
@@ -182,6 +194,7 @@ async function main() {
       assert(otraVez.status === 400, 'no se suprime dos veces');
       const yaNo = await admin(`/v1/admin/customers/titular?telefono=${encodeURIComponent(telefono)}`);
       assert(yaNo.status === 404, 'su teléfono ya no lo encuentra');
+      assert((await conocido()).body.conocido === false, 'y para n8n vuelve a ser cliente nuevo (vería el aviso otra vez)');
 
       const nuevo = await pedir();
       assert(nuevo.status < 400 && (await cliente())?.id !== id, 'si vuelve a escribir, es un cliente nuevo');

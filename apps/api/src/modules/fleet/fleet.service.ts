@@ -2,7 +2,7 @@ import { Inject, Injectable, Logger } from '@nestjs/common';
 import { Redis } from 'ioredis';
 import { and, eq, inArray, isNull, sql } from 'drizzle-orm';
 import { uuidv7 } from 'uuidv7';
-import type { Point, VehicleType } from '@tax/shared';
+import { VEHICULOS_QUE_ATIENDEN, type Point, type VehicleType } from '@tax/shared';
 import {
   ACTIVE_RIDE_STATUSES,
   estimateEtaMinutes,
@@ -663,7 +663,7 @@ export class FleetService {
           noSuspendido,
           pagoElectronico ? eq(drivers.aceptaPagoElectronico, true) : undefined,
           eq(vehicles.active, true),
-          eq(vehicles.type, vehicleType),
+          inArray(vehicles.type, [...VEHICULOS_QUE_ATIENDEN[vehicleType]]),
         ),
       );
 

@@ -87,6 +87,14 @@ async function main(): Promise<void> {
   }
   console.log(`  ${stale.length} carreras liberadas`);
 
+  // El tercero maneja un hatchback (19/11/2026): un pedido «sedan», el de
+  // todo servicio normal, también le tiene que llegar.
+  const HATCHBACK = DRIVERS[2]!;
+  const pg = new Pool({ connectionString: process.env.DATABASE_URL, max: 1 });
+  await pg.query(`update vehicles set type = 'hatchback' where plate = $1`, [HATCHBACK.plate]);
+  const idHatchback = (await pg.query(`select id from drivers where code = $1`, [HATCHBACK.code])).rows[0]?.id as string;
+  try {
+
   console.log('\n1. Conductores entran al turno y reportan posición');
   const tokens: string[] = [];
 
@@ -163,6 +171,11 @@ async function main(): Promise<void> {
   }
 
   assert(offers.length > 0, `la oleada ofreció a ${offers.length} conductores`);
+  assert(
+    (offers as { driverId?: string }[]).some((o) => o.driverId === idHatchback),
+    `el pedido «sedan» también le llega al hatchback (${HATCHBACK.plate})`,
+    offers,
+  );
 
   console.log('\n4. Todos aceptan a la vez');
   const results = await Promise.all(
@@ -295,6 +308,10 @@ async function main(): Promise<void> {
   );
 
   console.log('\nTodo correcto.\n');
+  } finally {
+    await pg.query(`update vehicles set type = 'sedan' where plate = $1`, [HATCHBACK.plate]);
+    await pg.end();
+  }
 }
 
 main().catch((error: unknown) => {

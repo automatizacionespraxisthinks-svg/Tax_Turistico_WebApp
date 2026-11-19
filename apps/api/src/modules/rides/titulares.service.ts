@@ -49,6 +49,22 @@ export class TitularesService {
     @Inject(AuditService) private readonly audit: AuditService,
   ) {}
 
+  /**
+   * Si ese teléfono ya pidió algún taxi (y no pidió borrar sus datos). n8n lo
+   * usa para mostrar el aviso de privacidad solo a los clientes nuevos: quien
+   * ya pidió un taxi ya lo recibió y dio la autorización. No devuelve nada más
+   * que sí o no.
+   */
+  async conocido(telefono: string): Promise<boolean> {
+    const [fila] = await this.db
+      .select({ id: customers.id })
+      .from(customers)
+      .innerJoin(rides, eq(rides.customerId, customers.id))
+      .where(and(eq(customers.phone, telefono), sql`${customers.suprimidoAt} is null`))
+      .limit(1);
+    return Boolean(fila);
+  }
+
   /** Lo básico de un titular, buscado por su teléfono. */
   async buscar(telefono: string) {
     const [cliente] = await this.db

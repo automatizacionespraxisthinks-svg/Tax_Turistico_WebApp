@@ -176,6 +176,13 @@
       "when": 1795011169523,
       "tag": "0024_vehiculos_permitidos",
       "breakpoints": true
+    },
+    {
+      "idx": 25,
+      "version": "7",
+      "when": 1795116556047,
+      "tag": "0025_tipo_hatchback",
+      "breakpoints": true
     }
   ]
 }

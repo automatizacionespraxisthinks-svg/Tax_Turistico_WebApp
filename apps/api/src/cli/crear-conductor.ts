@@ -51,7 +51,7 @@ async function main(): Promise<void> {
 
   if (!code || !name || !phone || !plate) {
     console.error(
-      'Uso: crear-conductor.js <código> "<nombre>" <teléfono> <placa> [sedan|camioneta|van]',
+      'Uso: crear-conductor.js <código> "<nombre>" <teléfono> <placa> [sedan|hatchback|camioneta|van]',
     );
     process.exitCode = 1;
     return;

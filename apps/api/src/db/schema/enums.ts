@@ -30,7 +30,7 @@ export const rideStatusValues = [
 
 export const driverStatusValues = ['OFF_SHIFT', 'AVAILABLE', 'ON_RIDE', 'PAUSED'] as const;
 
-export const vehicleTypeValues = ['sedan', 'camioneta', 'van'] as const;
+export const vehicleTypeValues = ['sedan', 'hatchback', 'camioneta', 'van'] as const;
 
 export const zoneKindValues = ['urbano', 'rural', 'vereda', 'referencia'] as const;
 

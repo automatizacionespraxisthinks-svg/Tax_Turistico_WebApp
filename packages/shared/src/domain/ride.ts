@@ -195,8 +195,23 @@ export function rideProgressIndex(status: RideStatus): number {
   return i === -1 ? RIDE_PROGRESS_ORDER.length : i;
 }
 
-export const VEHICLE_TYPES = ['sedan', 'camioneta', 'van'] as const;
+export const VEHICLE_TYPES = ['sedan', 'hatchback', 'camioneta', 'van'] as const;
 export type VehicleType = (typeof VEHICLE_TYPES)[number];
+
+/**
+ * Qué vehículos pueden atender un pedido de cada tipo (19/11/2026).
+ *
+ * Sedán y hatchback son el taxi de siempre, de 4 puestos: al cliente le da
+ * igual cuál llegue, y el agente pide «sedan» para todo servicio normal. Si
+ * el despacho buscara el tipo exacto, los hatchback nunca recibirían
+ * carreras. Camioneta y van siguen siendo pedidos aparte (grupos, carga).
+ */
+export const VEHICULOS_QUE_ATIENDEN: Record<VehicleType, readonly VehicleType[]> = {
+  sedan: ['sedan', 'hatchback'],
+  hatchback: ['hatchback', 'sedan'],
+  camioneta: ['camioneta'],
+  van: ['van'],
+};
 
 export const rideAddressSchema = z.object({
   text: z.string().min(3, 'Escribe al menos 3 caracteres'),

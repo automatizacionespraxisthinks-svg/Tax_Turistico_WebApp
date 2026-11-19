@@ -627,7 +627,7 @@ la base pero no en el Excel. Para probar, se cambia el `commit;` final por
 node dist/cli/crear-conductor.js 101 "Jairo Pérez" +573118889900 UBP472 sedan
 ```
 
-El último argumento es `sedan`, `camioneta` o `van`. Crea también el vehículo
+El último argumento es `sedan`, `hatchback`, `camioneta` o `van`. Crea también el vehículo
 si esa placa no existía. Imprime un PIN de cuatro dígitos **una sola vez**.
 
 Dáselo al conductor por un canal distinto del que usa para su código: el

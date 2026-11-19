@@ -8,6 +8,7 @@ import { PricingModule } from '../pricing/pricing.module';
 import { FleetModule } from '../fleet/fleet.module';
 import { AdminRidesController } from './admin-rides.controller';
 import { AdminCustomersController } from './admin-customers.controller';
+import { CustomersController } from './customers.controller';
 import { IntegrationsModule } from '../integrations/integrations.module';
 import { DispatchModule } from '../dispatch/dispatch.module';
 
@@ -20,7 +21,7 @@ import { DispatchModule } from '../dispatch/dispatch.module';
 @Module({
   imports: [PricingModule, FleetModule, IntegrationsModule, forwardRef(() => DispatchModule)],
   providers: [RidesService, FotosService, TitularesService],
-  controllers: [RidesController, DriverRidesController, AdminRidesController, AdminCustomersController],
+  controllers: [RidesController, CustomersController, DriverRidesController, AdminRidesController, AdminCustomersController],
   exports: [RidesService],
 })
 export class RidesModule {}

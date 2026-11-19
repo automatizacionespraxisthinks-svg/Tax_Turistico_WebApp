@@ -20,6 +20,7 @@ export const RIDE_STATUS_LABEL: Record<RideStatus, string> = {
 /** Tipos de vehículo como los dice la oficina, no la clave interna. */
 export const VEHICLE_TYPE_LABEL: Record<VehicleType, string> = {
   sedan: 'Sedán',
+  hatchback: 'Hatchback',
   camioneta: 'Camioneta',
   van: 'Van',
 };
