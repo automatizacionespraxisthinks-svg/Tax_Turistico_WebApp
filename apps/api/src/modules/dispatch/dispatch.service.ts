@@ -1,7 +1,7 @@
 import { Inject, Injectable, Logger, forwardRef } from '@nestjs/common';
 import { InjectQueue } from '@nestjs/bullmq';
 import type { Queue } from 'bullmq';
-import { and, eq, inArray, isNull, or, sql } from 'drizzle-orm';
+import { and, eq, inArray, isNull, lt, or, sql } from 'drizzle-orm';
 import { uuidv7 } from 'uuidv7';
 import { DB, type Database } from '../../db/db.module';
 import { AuditService } from '../audit/audit.service';
@@ -19,6 +19,20 @@ import { OLEADA_A_TODOS, finDeSuspension, sigueSuspendido, type Oleada, type Wav
 
 export const DISPATCH_QUEUE = 'dispatch';
 export const WAVE_TIMEOUT_JOB = 'wave-timeout';
+/** Relanzar sola una carrera que agotó las oleadas (19/11/2026). */
+export const AUTO_RELAUNCH_JOB = 'auto-relaunch';
+/** Barrido periódico de carreras que se quedaron sin asignar. */
+export const EXPIRE_UNASSIGNED_JOB = 'expire-unassigned';
+
+export interface AutoRelaunchJob {
+  rideId: string;
+  /** El intento que se agotó: si la oficina ya la relanzó, no se repite. */
+  intento: number;
+}
+
+/** Por qué la cerró el sistema; viaja a n8n en `ride.cancelled.cierre`. */
+export const CIERRE_SIN_CONDUCTOR = 'sin_conductor';
+export const CIERRE_POR_INACTIVIDAD = 'caducada';
 
 export interface WaveTimeoutJob {
   rideId: string;
@@ -30,7 +44,7 @@ export interface WaveTimeoutJob {
   intento?: number;
 }
 
-const SYSTEM: Actor = { kind: 'system', name: 'Despacho', role: 'sistema' };
+export const SYSTEM: Actor = { kind: 'system', name: 'Despacho', role: 'sistema' };
 
 /**
  * Lo que una oferta vale de más sobre el fin de su oleada.
@@ -60,7 +74,7 @@ export class DispatchService {
 
   constructor(
     @Inject(DB) private readonly db: Database,
-    @InjectQueue(DISPATCH_QUEUE) private readonly queue: Queue<WaveTimeoutJob>,
+    @InjectQueue(DISPATCH_QUEUE) private readonly queue: Queue<WaveTimeoutJob | AutoRelaunchJob>,
     private readonly fleet: FleetService,
     private readonly zones: ZonesService,
     private readonly outbox: OutboxService,
@@ -366,7 +380,7 @@ export class DispatchService {
    * Si el relanzamiento no encuentra a nadie, la carrera vuelve sola a «sin
    * asignar» por el camino de siempre, y la bitacora cuenta que se intento.
    */
-  async redispatch(rideId: string, actor: Actor): Promise<void> {
+  async redispatch(rideId: string, actor: Actor, note = 'Relanzar despacho'): Promise<void> {
     const ride = await this.ridesService.byId(rideId);
     if (ride.status !== 'UNASSIGNED') {
       throw new AppError(
@@ -375,8 +389,70 @@ export class DispatchService {
       );
     }
 
-    await this.ridesService.transition(rideId, 'NOTIFIED', actor, { note: 'Relanzar despacho' });
+    await this.ridesService.transition(rideId, 'NOTIFIED', actor, { note });
     await this.startWave(rideId, 1);
+  }
+
+  /**
+   * El relanzamiento automático programado al agotar las oleadas.
+   *
+   * Solo actúa si la carrera sigue sin asignar y en el mismo intento: si
+   * entretanto la oficina la relanzó, la asignó o el cliente la canceló, no
+   * hace nada. Así nunca se pisa con una decisión de una persona.
+   */
+  async autoRelaunch(rideId: string, intento: number): Promise<void> {
+    const ride = await this.ridesService.byId(rideId);
+    if (ride.status !== 'UNASSIGNED' || ride.intentoDespacho !== intento) {
+      this.logger.debug({ rideId, intento, status: ride.status }, 'Relanzamiento automático innecesario');
+      return;
+    }
+    await this.redispatch(rideId, SYSTEM, 'Relanzamiento automático: nadie la tomó en las oleadas');
+  }
+
+  /**
+   * Red de seguridad: cierra las carreras que llevan demasiado tiempo sin
+   * asignar (19/11/2026).
+   *
+   * Una carrera sin asignar cuenta como abierta, y mientras exista el cliente
+   * no puede pedir otra. El camino normal ya no las deja ahí —relanza y, si
+   * tampoco, las cierra—, pero una que la oficina dejó sin asignar, o cuyo
+   * temporizador se perdió, bloqueaba al cliente indefinidamente.
+   */
+  async expireStaleUnassigned(): Promise<number> {
+    // Nunca antes de que le toque al relanzamiento automático, aunque la
+    // configuración ponga una espera más larga que la caducidad.
+    const segundos = Math.max(this.env.CADUCIDAD_SIN_CONDUCTOR_MIN * 60, this.env.RELANZAMIENTO_ESPERA_SEG + 60);
+    const limite = new Date(Date.now() - segundos * 1000);
+    const viejas = await this.db
+      .select({ id: rides.id, code: rides.code })
+      .from(rides)
+      .where(and(eq(rides.status, 'UNASSIGNED'), lt(rides.updatedAt, limite)))
+      .limit(50);
+
+    let cerradas = 0;
+    for (const { id, code } of viejas) {
+      try {
+        await this.ridesService.cancel(
+          id,
+          'La solicitud caducó por inactividad: siguió sin conductor demasiado tiempo',
+          SYSTEM,
+          { cierre: CIERRE_POR_INACTIVIDAD },
+        );
+        cerradas += 1;
+        this.realtime.alertOffice({
+          kind: 'no_driver',
+          rideId: id,
+          code,
+          message: `${code}: se cerró por inactividad, llevaba demasiado tiempo sin conductor`,
+        });
+      } catch (error) {
+        // Otra cosa la movió en el mismo instante (la oficina la relanzó, el
+        // cliente la canceló): no es un error, la próxima pasada ya no la ve.
+        this.logger.warn({ err: error, rideId: id }, 'No se pudo cerrar una carrera sin asignar');
+      }
+    }
+    if (cerradas) this.logger.log({ cerradas }, 'Carreras sin asignar cerradas por inactividad');
+    return cerradas;
   }
 
   /**
@@ -473,25 +549,66 @@ export class DispatchService {
      */
     const electronico = ride.pagoElectronico;
     const conQuien = electronico ? 'conductores con pago electrónico' : 'conductores';
+    const motivo = nadieLaVio
+      ? `Ninguna oleada encontró ${conQuien}`
+      : electronico
+        ? 'Nadie con pago electrónico aceptó la carrera'
+        : 'Nadie aceptó la carrera';
 
-    await this.ridesService.transition(rideId, 'UNASSIGNED', SYSTEM, {
-      note: nadieLaVio
-        ? `Ninguna oleada encontró ${conQuien}`
-        : electronico
-          ? 'Nadie con pago electrónico aceptó la carrera'
-          : 'Nadie aceptó la carrera',
-      event: { type: 'ride.no_driver', payload: { pagoElectronico: electronico } },
-    });
+    /*
+     * Relanzamiento automático (19/11/2026). El intento 1 es el lanzamiento
+     * original; cada relanzamiento suma uno. Mientras queden relanzamientos,
+     * la carrera pasa a Sin asignar con `ride.no_driver` —n8n le escribe al
+     * cliente «Estamos buscando un vehículo para su servicio»— y se programa
+     * el relanzamiento, que vuelve a avisar a los conductores. Cuando ya no
+     * quedan, se cierra: n8n le pide al cliente que vuelva a intentarlo y el
+     * cliente queda libre para pedir otro taxi.
+     */
+    const relanzar = ride.intentoDespacho <= this.env.RELANZAMIENTOS_AUTOMATICOS;
+
+    if (relanzar) {
+      await this.ridesService.transition(rideId, 'UNASSIGNED', SYSTEM, {
+        note: `${motivo}: se relanza automáticamente`,
+        event: {
+          type: 'ride.no_driver',
+          payload: { pagoElectronico: electronico, relanzamiento: true, intento: ride.intentoDespacho },
+        },
+      });
+      await this.queue.add(
+        AUTO_RELAUNCH_JOB,
+        { rideId, intento: ride.intentoDespacho },
+        {
+          // Sin dos puntos, como los temporizadores de oleada.
+          jobId: `${rideId}_relanzar_i${ride.intentoDespacho}`,
+          delay: this.env.RELANZAMIENTO_ESPERA_SEG * 1000,
+          removeOnComplete: true,
+          removeOnFail: true,
+        },
+      );
+      this.realtime.alertOffice({
+        kind: 'no_driver',
+        rideId,
+        code: ride.code,
+        message: `${ride.code}: ${motivo.toLowerCase()}; se relanza sola en ${this.env.RELANZAMIENTO_ESPERA_SEG} s`,
+      });
+      return;
+    }
+
+    // Sin relanzamientos: Sin asignar sin evento (el aviso al cliente va con
+    // la cancelación, uno solo) y enseguida cerrada.
+    await this.ridesService.transition(rideId, 'UNASSIGNED', SYSTEM, { note: motivo });
+    await this.ridesService.cancel(
+      rideId,
+      `${motivo}: no se consiguió conductor y la solicitud se cerró`,
+      SYSTEM,
+      { cierre: CIERRE_SIN_CONDUCTOR },
+    );
 
     this.realtime.alertOffice({
       kind: 'no_driver',
       rideId,
       code: ride.code,
-      message: nadieLaVio
-        ? `${ride.code}: no hay ${conQuien} disponibles`
-        : electronico
-          ? `${ride.code}: nadie con pago electrónico aceptó la carrera`
-          : `${ride.code}: nadie aceptó la carrera`,
+      message: `${ride.code}: ${motivo.toLowerCase()}; sin más relanzamientos, se cerró y se le pidió al cliente volver a intentarlo`,
     });
   }
 

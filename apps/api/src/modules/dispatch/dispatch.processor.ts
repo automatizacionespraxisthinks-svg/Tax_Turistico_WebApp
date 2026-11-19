@@ -1,7 +1,15 @@
 import { Logger } from '@nestjs/common';
 import { Processor, WorkerHost } from '@nestjs/bullmq';
 import type { Job } from 'bullmq';
-import { DISPATCH_QUEUE, DispatchService, WAVE_TIMEOUT_JOB, type WaveTimeoutJob } from './dispatch.service';
+import {
+  AUTO_RELAUNCH_JOB,
+  DISPATCH_QUEUE,
+  DispatchService,
+  EXPIRE_UNASSIGNED_JOB,
+  WAVE_TIMEOUT_JOB,
+  type AutoRelaunchJob,
+  type WaveTimeoutJob,
+} from './dispatch.service';
 
 /**
  * Temporizadores de oleada.
@@ -19,10 +27,27 @@ export class DispatchProcessor extends WorkerHost {
     super();
   }
 
-  async process(job: Job<WaveTimeoutJob>): Promise<void> {
+  async process(job: Job<WaveTimeoutJob | AutoRelaunchJob>): Promise<void> {
+    if (job.name === AUTO_RELAUNCH_JOB) {
+      const { rideId, intento } = job.data as AutoRelaunchJob;
+      try {
+        await this.dispatch.autoRelaunch(rideId, intento);
+      } catch (error) {
+        // Si falla, la carrera sigue sin asignar y el barrido la cierra por
+        // inactividad: el cliente no queda bloqueado.
+        this.logger.error({ err: error, rideId }, 'Fallo el relanzamiento automático');
+      }
+      return;
+    }
+
+    if (job.name === EXPIRE_UNASSIGNED_JOB) {
+      await this.dispatch.expireStaleUnassigned();
+      return;
+    }
+
     if (job.name !== WAVE_TIMEOUT_JOB) return;
 
-    const { rideId, wave, intento } = job.data;
+    const { rideId, wave, intento } = job.data as WaveTimeoutJob;
     try {
       await this.dispatch.expireWave(rideId, wave, intento);
     } catch (error) {

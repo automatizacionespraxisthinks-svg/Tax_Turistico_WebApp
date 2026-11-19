@@ -20,3 +20,6 @@ packages/tiles/.cache/
 # Certificado autofirmado de localhost para la prueba de Web Push (se regenera)
 .certs/
 apps/api/.certs/
+
+# Flujos de n8n exportados: llevan el secreto de firma de eventos dentro.
+n8n/

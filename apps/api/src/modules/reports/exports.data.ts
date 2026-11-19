@@ -268,6 +268,18 @@ export function percentil(valores: number[], p: number): number | null {
 
 const ABIERTA = (estado: RideStatus) => !['COMPLETED', 'CANCELLED', 'UNASSIGNED'].includes(estado);
 
+/**
+ * Se quedó sin taxi (19/11/2026): sigue sin asignar, o la cerró el sistema
+ * porque ni el relanzamiento automático consiguió conductor o caducó sin
+ * asignar. Desde que el sistema las cierra solas terminan canceladas, pero
+ * para la empresa son demanda que no se atendió, no una cancelación.
+ */
+const CIERRES_SIN_TAXI = ['sin_conductor', 'caducada'];
+const SIN_TAXI = (f: { estado: RideStatus; canceladaPor: string | null; codigoCancelacion: string | null }) =>
+  f.estado === 'UNASSIGNED' ||
+  (f.estado === 'CANCELLED' && f.canceladaPor === 'system' && CIERRES_SIN_TAXI.includes(f.codigoCancelacion ?? ''));
+const CANCELADA = (f: Parameters<typeof SIN_TAXI>[0]) => f.estado === 'CANCELLED' && !SIN_TAXI(f);
+
 export interface ResumenConductor {
   id: string;
   codigo: string;
@@ -426,8 +438,8 @@ export function resumir(filas: FilaCarrera[], dias?: string[]): Resumen {
     const d = porDia.get(dia) ?? nuevoDia();
     d.carreras += 1;
     if (f.estado === 'COMPLETED') d.finalizadas += 1;
-    if (f.estado === 'CANCELLED') d.canceladas += 1;
-    if (f.estado === 'UNASSIGNED') d.sinAsignar += 1;
+    if (CANCELADA(f)) d.canceladas += 1;
+    if (SIN_TAXI(f)) d.sinAsignar += 1;
     if (ABIERTA(f.estado)) d.abiertas += 1;
     if (f.intervenida) d.intervenidas += 1;
     if (f.asignacionSegundos !== null) d.asignaciones.push(f.asignacionSegundos);
@@ -441,7 +453,7 @@ export function resumir(filas: FilaCarrera[], dias?: string[]): Resumen {
     if (f.intervenida) l.intervenidas += 1;
     porLinea.set(linea, l);
 
-    if (f.estado === 'CANCELLED') {
+    if (CANCELADA(f)) {
       const quien = f.canceladaPor ? QUIEN_CANCELA[f.canceladaPor] : 'Sin dato';
       // Las del conductor se agrupan por el motivo de la lista, no por lo que
       // escribió: «Falla mecánica» una vez, no una por cada explicación.
@@ -466,9 +478,9 @@ export function resumir(filas: FilaCarrera[], dias?: string[]): Resumen {
   return {
     creadas: filas.length,
     finalizadas: finalizadas.length,
-    canceladas: filas.filter((f) => f.estado === 'CANCELLED').length,
+    canceladas: filas.filter(CANCELADA).length,
     canceladasPorConductor: filas.filter((f) => f.estado === 'CANCELLED' && f.canceladaPor === 'driver').length,
-    sinAsignar: filas.filter((f) => f.estado === 'UNASSIGNED').length,
+    sinAsignar: filas.filter(SIN_TAXI).length,
     enCurso: filas.filter((f) => ABIERTA(f.estado)).length,
     kmRecorridos: Math.round(finalizadas.reduce((s, f) => s + (f.distanciaKm ?? 0), 0) * 10) / 10,
     asignacionP50: percentil(asignaciones, 0.5),

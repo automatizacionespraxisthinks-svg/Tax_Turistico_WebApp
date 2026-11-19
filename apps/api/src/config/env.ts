@@ -91,6 +91,22 @@ const envSchema = z.object({
     .default('true')
     .transform((valor) => valor === 'true'),
 
+  /*
+   * Carreras sin conductor (19/11/2026). Agotadas las oleadas, el sistema la
+   * relanza solo tantas veces como diga RELANZAMIENTOS_AUTOMATICOS, esperando
+   * RELANZAMIENTO_ESPERA_SEG para que antes le llegue al cliente «Estamos
+   * buscando un vehículo». Si tampoco así la toma nadie, la cierra y le pide
+   * al cliente que vuelva a intentarlo. Con 0 no relanza: la cierra al agotar
+   * las oleadas.
+   *
+   * CADUCIDAD_SIN_CONDUCTOR_MIN es la red de seguridad: una carrera que se
+   * queda sin asignar más de esos minutos (la dejó así la oficina, o se
+   * perdió un temporizador) se cierra por inactividad.
+   */
+  RELANZAMIENTOS_AUTOMATICOS: z.coerce.number().int().min(0).max(5).default(1),
+  RELANZAMIENTO_ESPERA_SEG: z.coerce.number().int().min(5).max(600).default(20),
+  CADUCIDAD_SIN_CONDUCTOR_MIN: z.coerce.number().int().min(2).max(240).default(10),
+
   /**
    * WAHA, para vigilar las líneas de WhatsApp (§10.4). Dentro de Dokploy es
    * el nombre del servicio en la red interna, p. ej. `http://tax-turistico-waha-xxxx:3000`.

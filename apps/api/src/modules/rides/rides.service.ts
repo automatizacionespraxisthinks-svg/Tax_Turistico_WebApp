@@ -963,7 +963,17 @@ export class RidesService {
    * eso. El evento a n8n lleva lo mismo, para que el aviso al cliente pueda
    * distinguir quién la canceló.
    */
-  async cancel(rideId: string, reason: string, actor: Actor, opciones: { code?: string; at?: Point } = {}) {
+  async cancel(
+    rideId: string,
+    reason: string,
+    actor: Actor,
+    /**
+     * `cierre`: por qué la cerró el sistema (`sin_conductor`, `caducada`), para
+     * que n8n le diga al cliente lo que corresponde. Va aparte de `code`, que
+     * es el motivo del conductor y cuentan los reportes.
+     */
+    opciones: { code?: string; at?: Point; cierre?: string } = {},
+  ) {
     const ride = await this.byId(rideId);
 
     const updated = await this.transition(rideId, 'CANCELLED', actor, {
@@ -972,12 +982,19 @@ export class RidesService {
       patch: {
         cancelReason: reason,
         cancelledBy: actor.kind,
-        cancelCode: opciones.code ?? null,
+        // La causa del cierre del sistema también se guarda: Reportes la
+        // cuenta como «se quedó sin taxi», no como una cancelación más.
+        cancelCode: opciones.code ?? opciones.cierre ?? null,
         finishedAt: new Date(),
       },
       event: {
         type: 'ride.cancelled',
-        payload: { reason, cancelledBy: actor.kind, ...(opciones.code ? { code: opciones.code } : {}) },
+        payload: {
+          reason,
+          cancelledBy: actor.kind,
+          ...(opciones.code ? { code: opciones.code } : {}),
+          ...(opciones.cierre ? { cierre: opciones.cierre } : {}),
+        },
       },
     });
 

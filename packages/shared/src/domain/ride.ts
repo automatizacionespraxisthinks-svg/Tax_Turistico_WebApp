@@ -101,8 +101,9 @@ export const RIDE_TRANSITIONS: RideTransition[] = [
   {
     from: 'UNASSIGNED',
     to: 'NOTIFIED',
-    by: ['operator'],
-    condition: 'Relanzar despacho',
+    // El sistema la relanza solo una vez agotadas las oleadas (19/11/2026).
+    by: ['operator', 'system'],
+    condition: 'Relanzar despacho (la oficina o el relanzamiento automático)',
   },
   {
     from: 'UNASSIGNED',
@@ -149,8 +150,11 @@ export const RIDE_TRANSITIONS: RideTransition[] = [
   {
     from: 'UNASSIGNED',
     to: 'CANCELLED',
-    by: ['customer', 'operator'],
-    condition: 'Motivo obligatorio',
+    // El sistema la cierra cuando ni el relanzamiento consigue conductor, o
+    // cuando se queda sin asignar demasiado tiempo (19/11/2026): así el
+    // cliente nunca queda bloqueado con una carrera muerta.
+    by: ['customer', 'operator', 'system'],
+    condition: 'Motivo obligatorio; el sistema la cierra sin conductor o por inactividad',
   },
   {
     from: 'ASSIGNED',

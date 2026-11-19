@@ -13,14 +13,19 @@ import 'dotenv/config';
  * todo el que alguna vez vio la carrera. Con pocos conductores, relanzar no
  * encontraba nunca a nadie, que es justo para lo que existe el botón.
  *
- * Ahora cada lanzamiento es un intento propio. Se comprueba:
+ * Ahora cada lanzamiento es un intento propio, y desde el 19/11/2026 el
+ * sistema relanza solo al agotar las oleadas y cierra la carrera si tampoco
+ * así la toma nadie. Se comprueba:
  *
- *  1. relanzar tras una ronda final vencida no da 500 y vuelve a avisar;
- *  2. relanzar dos veces seguidas también funciona;
- *  3. quien no contestó vuelve a contar en la oleada 1 de un relanzamiento;
- *  4. quien rechazó la carrera no vuelve a recibirla, relance quien relance.
+ *  1. agotada la ronda final, queda sin asignar y se relanza sola, sin 500;
+ *  2. quien no contestó vuelve a contar en la oleada 1 del relanzamiento;
+ *  3. si el relanzamiento tampoco consigue conductor, se cierra (sistema);
+ *  4. quien rechazó la carrera no vuelve a recibirla, relance quien relance,
+ *     y un relanzamiento de la oficina no choca con el automático.
  *
  * Tarda unos tres minutos: espera vencimientos reales de la ronda final.
+ * Supone la configuración por defecto (RELANZAMIENTOS_AUTOMATICOS=1); el
+ * tiempo del relanzamiento se lee de RELANZAMIENTO_ESPERA_SEG (20 s).
  *
  *   pnpm --filter @tax/api exec tsx src/test/e2e-relanzar.ts <clave-de-api>
  *
@@ -46,6 +51,8 @@ interface Oferta { wave: number; intento: number; driverId: string; response: st
 interface Entrada { wave: number; intento?: number; candidates: number }
 interface Detalle {
   status: string;
+  cancelledBy?: string | null;
+  cancelCode?: string | null;
   waveLog: Entrada[];
   offers: Oferta[];
   intentoDespacho: number;
@@ -118,6 +125,18 @@ async function esperarOferta(id: string, intento: number): Promise<Detalle> {
 }
 
 const relanzar = (id: string) => call(`/v1/rides/${id}/redispatch`, { method: 'POST', apiKey: true });
+const ESPERA_RELANZAMIENTO = Number(process.env.RELANZAMIENTO_ESPERA_SEG ?? 20);
+
+/** Espera la primera oferta de un intento: el relanzamiento automático la crea solo. */
+async function esperarIntento(id: string, intento: number, segundos: number): Promise<Detalle> {
+  const limite = Date.now() + segundos * 1000;
+  let d = await detalle(id);
+  while (d.intentoDespacho < intento && Date.now() < limite) {
+    await new Promise((r) => setTimeout(r, 1000));
+    d = await detalle(id);
+  }
+  return esperarOferta(id, intento);
+}
 
 async function main(): Promise<void> {
   if (!API_KEY) {
@@ -148,82 +167,89 @@ async function main(): Promise<void> {
   const id = (creada.body as { id: string }).id;
 
   /* ------------------------------------------------------------------ 1 */
-  console.log('\n1. La ronda final vence sin respuesta, y se relanza');
+  console.log('\n1. La ronda final vence sin respuesta y se relanza sola');
   let d = await esperarOferta(id, 1);
   assert(d.offers.some((o) => o.wave === 4 && o.intento === 1), 'intento 1: la ronda final le llega');
   d = await esperarEstado(id, 'UNASSIGNED', 130);
-  assert(d.status === 'UNASSIGNED', 'nadie contesta: queda sin asignar');
+  assert(d.status === 'UNASSIGNED', 'nadie contesta: queda sin asignar mientras se relanza');
   // Le llego y no la tomo: no es lo mismo que no haber nadie.
   assert(
-    ultimaNotaSinAsignar(d) === 'Nadie aceptó la carrera',
+    ultimaNotaSinAsignar(d)?.startsWith('Nadie aceptó la carrera') === true,
     `la bitacora dice por que: «${ultimaNotaSinAsignar(d)}»`,
   );
 
-  const r1 = await relanzar(id);
-  assert(r1.status < 400, `relanzar responde ${r1.status}, no 500`, r1.body);
-  d = await esperarOferta(id, 2);
-  assert(d.intentoDespacho === 2, 'es el intento 2');
-  assert(
-    d.offers.some((o) => o.wave === 4 && o.intento === 2 && o.response === 'pending'),
-    'y la ronda final vuelve a avisarle al mismo conductor',
-  );
-  assert(
-    d.waveLog.filter((e) => e.intento === 2).length === 4,
-    'el registro del intento 2 tiene sus cuatro oleadas, ni una mas',
-  );
-
-  /* ------------------------------------------------------------------ 2 */
-  console.log('\n2. Vuelve a vencer; el conductor se acerca y se relanza otra vez');
-  d = await esperarEstado(id, 'UNASSIGNED', 130);
-  assert(d.status === 'UNASSIGNED', 'tampoco contesta el intento 2');
+  // Se acerca antes de que se relance: la oleada 1 tiene que encontrarlo.
   await call('/v1/driver/position', { method: 'POST', token, body: { point: CERCA } });
 
-  const r2 = await relanzar(id);
-  assert(r2.status < 400, `segundo relanzamiento responde ${r2.status}`, r2.body);
-  d = await esperarOferta(id, 3);
-  assert(d.intentoDespacho === 3, 'es el intento 3');
-
+  /* ------------------------------------------------------------------ 2 */
+  console.log('\n2. El relanzamiento automático vuelve a contar con quien no contestó');
+  d = await esperarIntento(id, 2, ESPERA_RELANZAMIENTO + 30);
+  assert(d.intentoDespacho === 2, `es el intento 2, sin que nadie lo pidiera (${d.intentoDespacho})`);
+  assert(
+    d.history.some((h) => h.note?.startsWith('Relanzamiento automático')),
+    'la bitacora dice que lo relanzo el sistema',
+  );
   /*
-   * El cambio de fondo. Antes, la oleada 1 de un relanzamiento excluia a
-   * todo el que alguna vez vio la carrera; este conductor la vio dos veces
+   * El cambio de fondo de 2026-10. Antes, la oleada 1 de un relanzamiento
+   * excluia a todo el que alguna vez vio la carrera; este conductor la vio
    * y no contesto, asi que nunca habria vuelto a recibirla por radio.
    */
   assert(
-    d.offers.some((o) => o.wave === 1 && o.intento === 3 && o.response === 'pending'),
+    d.offers.some((o) => o.wave === 1 && o.intento === 2 && o.response === 'pending'),
     'la oleada 1 vuelve a contar con quien no contesto',
   );
 
   /* ------------------------------------------------------------------ 3 */
-  console.log('\n3. Esta vez la rechaza: un tercer relanzamiento ya no se la ofrece');
+  console.log('\n3. Tampoco la toma: se cierra sola y el cliente queda libre');
   const rechazo = await call(`/v1/driver/rides/${id}/reject`, { method: 'POST', token });
   assert(rechazo.status < 400, 'el conductor la rechaza', rechazo.body);
-  d = await esperarEstado(id, 'UNASSIGNED', 20);
-  assert(d.status === 'UNASSIGNED', 'sin nadie mas, queda sin asignar al instante');
+  d = await esperarEstado(id, 'CANCELLED', 20);
+  assert(d.status === 'CANCELLED', `sin nadie mas y sin relanzamientos, queda cancelada (${d.status})`);
+  assert(d.cancelledBy === 'system' && d.cancelCode === 'sin_conductor', 'la cerro el sistema, por falta de conductor', {
+    cancelledBy: d.cancelledBy,
+    cancelCode: d.cancelCode,
+  });
 
-  const r3 = await relanzar(id);
-  assert(r3.status < 400, `tercer relanzamiento responde ${r3.status}`, r3.body);
-  d = await esperarOferta(id, 4);
+  /* ------------------------------------------------------------------ 4 */
+  console.log('\n4. Otra carrera: la rechaza y la oficina relanza antes que el sistema');
+  const segunda = await call('/v1/rides', {
+    method: 'POST',
+    apiKey: true,
+    body: { customerPhone: '+573001234599', pickup: { text: 'Carrera 21 # 24-18', point: CENTRO }, passengers: 1 },
+  });
+  assert(segunda.status < 400, 'el mismo cliente puede pedir otra: ya no esta bloqueado', segunda.body);
+  const id2 = (segunda.body as { id: string }).id;
+  d = await esperarOferta(id2, 1);
+  const rechazo2 = await call(`/v1/driver/rides/${id2}/reject`, { method: 'POST', token });
+  assert(rechazo2.status < 400, 'el conductor la rechaza', rechazo2.body);
+  d = await esperarEstado(id2, 'UNASSIGNED', 20);
+  assert(d.status === 'UNASSIGNED', 'queda sin asignar, con el relanzamiento automatico en espera');
+
+  const r = await relanzar(id2);
+  assert(r.status < 400, `la oficina relanza: responde ${r.status}, no 500`, r.body);
+  d = await esperarEstado(id2, 'CANCELLED', 20);
+  assert(!d.offers.some((o) => o.intento === 2), 'el intento 2 no le ofrece nada a quien la rechazo');
   assert(
-    !d.offers.some((o) => o.intento === 4),
-    'el intento 4 no le ofrece nada a quien la rechazo',
-  );
-  assert(
-    d.waveLog.filter((e) => e.intento === 4).every((e) => e.candidates === 0),
+    d.waveLog.filter((e) => e.intento === 2).every((e) => e.candidates === 0),
     'y sus oleadas quedan registradas como vacias',
   );
   // Aqui no le llego a nadie: la nota no puede decir que «nadie acepto».
-  d = await esperarEstado(id, 'UNASSIGNED', 10);
   assert(
     ultimaNotaSinAsignar(d) === 'Ninguna oleada encontró conductores',
-    `y la bitacora lo distingue: «${ultimaNotaSinAsignar(d)}»`,
+    `la bitacora lo distingue: «${ultimaNotaSinAsignar(d)}»`,
   );
+  assert(d.status === 'CANCELLED', 'y como ya fue relanzada, se cierra');
+
+  // El relanzamiento automático del intento 1 llega despues y no la revive.
+  await new Promise((res) => setTimeout(res, (ESPERA_RELANZAMIENTO + 5) * 1000));
+  d = await detalle(id2);
+  assert(d.status === 'CANCELLED' && d.intentoDespacho === 2, 'el relanzamiento automatico pendiente no la revive');
 
   console.log('\n4. Limpieza');
-  await call(`/v1/rides/${id}/cancel`, { method: 'POST', apiKey: true, body: { reason: 'Fin de la prueba' } });
   await call('/v1/driver/shift/close', { method: 'POST', token });
-  console.log('  carrera cancelada y turno cerrado');
+  console.log('  turno cerrado (las dos carreras ya quedaron cerradas por el sistema)');
 
-  console.log('\nok Relanzar funciona, y sirve para algo\n');
+  console.log('\nok Relanzar funciona solo, y la carrera nunca se queda colgada\n');
 }
 
 main().catch((e) => {

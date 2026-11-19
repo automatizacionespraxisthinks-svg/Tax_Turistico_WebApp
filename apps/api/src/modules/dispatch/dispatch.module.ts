@@ -1,6 +1,7 @@
-import { Module, forwardRef } from '@nestjs/common';
-import { BullModule } from '@nestjs/bullmq';
-import { DISPATCH_QUEUE, DispatchService } from './dispatch.service';
+import { Logger, Module, forwardRef, type OnApplicationBootstrap } from '@nestjs/common';
+import { BullModule, InjectQueue } from '@nestjs/bullmq';
+import type { Queue } from 'bullmq';
+import { DISPATCH_QUEUE, DispatchService, EXPIRE_UNASSIGNED_JOB } from './dispatch.service';
 import { DispatchProcessor } from './dispatch.processor';
 import { FleetModule } from '../fleet/fleet.module';
 import { PricingModule } from '../pricing/pricing.module';
@@ -27,4 +28,22 @@ import { RidesModule } from '../rides/rides.module';
   providers: [DispatchService, DispatchProcessor],
   exports: [DispatchService],
 })
-export class DispatchModule {}
+export class DispatchModule implements OnApplicationBootstrap {
+  private readonly logger = new Logger(DispatchModule.name);
+
+  constructor(@InjectQueue(DISPATCH_QUEUE) private readonly queue: Queue) {}
+
+  /**
+   * Barrido de carreras sin asignar cada minuto (19/11/2026): la red de
+   * seguridad para que ningún cliente quede bloqueado por una carrera que
+   * se quedó sin conductor. Idempotente: reiniciar no acumula programaciones.
+   */
+  async onApplicationBootstrap(): Promise<void> {
+    await this.queue.upsertJobScheduler(
+      'caducar-sin-asignar',
+      { every: 60_000 },
+      { name: EXPIRE_UNASSIGNED_JOB, data: {}, opts: { removeOnComplete: true, removeOnFail: 20 } },
+    );
+    this.logger.log('Barrido de carreras sin asignar programado (cada minuto)');
+  }
+}
