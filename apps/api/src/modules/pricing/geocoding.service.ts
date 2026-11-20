@@ -55,18 +55,53 @@ export interface EstadoGeocodificador {
   /** La última vez que Google contestó algo, bien o mal. */
   respondioEn: string | null;
   ultimaPrueba: PruebaDelGeocodificador | null;
-  /** Lo de hoy en Paipa. Vive en memoria: vuelve a cero al reiniciar la API. */
-  hoy: {
-    dia: string;
-    consultasAGoogle: number;
-    ubicadas: number;
-    descartadas: number;
-    sinResultado: number;
-    desdeCache: number;
-    sinClave: number;
-    fallos: number;
-  };
+  /** Lo de hoy en Paipa. */
+  hoy: UsoDelDia;
+  /** Lo del mes en curso, sumado día a día. */
+  mes: UsoDelDia & { mes: string; dias: number };
+  /** Los últimos 30 días, del más reciente al más viejo, con lo que se pagó cada uno. */
+  historial: Array<Pick<UsoDelDia, 'dia' | 'consultasAGoogle' | 'direcciones' | 'municipios' | 'pruebas'>>;
+  /** `false` si Redis no respondió y las cifras son solo las de este proceso. */
+  persistente: boolean;
 }
+
+/**
+ * El uso de Google en un día.
+ *
+ * `consultasAGoogle` es lo que Google cobra: cada llamada que salió de la
+ * API, sea cual sea su resultado. Se reparte en `direcciones` (dirección
+ * escrita → punto), `municipios` (punto → municipio, para decidir si una
+ * ubicación compartida es de Paipa) y `pruebas` (la del arranque y el botón
+ * «Probar ahora»). Lo demás describe el resultado; `desdeCache` no se paga.
+ */
+export interface UsoDelDia {
+  dia: string;
+  consultasAGoogle: number;
+  direcciones: number;
+  municipios: number;
+  pruebas: number;
+  ubicadas: number;
+  descartadas: number;
+  sinResultado: number;
+  desdeCache: number;
+  sinClave: number;
+  fallos: number;
+}
+
+type CampoDeUso = Exclude<keyof UsoDelDia, 'dia'>;
+
+const CAMPOS_DE_USO: CampoDeUso[] = [
+  'consultasAGoogle',
+  'direcciones',
+  'municipios',
+  'pruebas',
+  'ubicadas',
+  'descartadas',
+  'sinResultado',
+  'desdeCache',
+  'sinClave',
+  'fallos',
+];
 
 /**
  * La dirección con la que se prueba la clave: la de la Alcaldía, que Google
@@ -95,10 +130,10 @@ type Respuesta = { resuelta: DireccionResuelta | null; motivo: MotivoGeocodifica
  *
  * Lo que se comprueba antes de devolverlo:
  *
- *  - que caiga dentro del rectángulo de la cobertura, que se le pide también
- *    a Google como sesgo de búsqueda;
- *  - que caiga dentro de alguna zona con servicio, que es más estricto que
- *    el rectángulo y es lo que de verdad determina si hay taxis cerca.
+ *  - que Google lo ubique en Paipa; las zonas no cuentan, porque son para
+ *    las estadísticas y no una frontera (ver `cobertura`);
+ *  - si Google no dice el municipio, que caiga dentro del rectángulo de la
+ *    cobertura, que se le pide también a Google como sesgo de búsqueda.
  *
  * Si algo de eso falla, devuelve `null`. Nunca un punto «aproximado» ni el
  * centro del pueblo: es preferible pedirle la ubicación al cliente que
@@ -118,7 +153,14 @@ export class GeocodingService implements OnModuleInit {
 
   private actual: Pick<EstadoGeocodificador, 'estado' | 'detalle' | 'respondioEn'>;
   private ultimaPrueba: PruebaDelGeocodificador | null = null;
-  private hoy: EstadoGeocodificador['hoy'] = GeocodingService.ceros();
+  /**
+   * Copia en memoria de lo de hoy, solo para cuando Redis no responde. Lo
+   * que vale es lo de Redis: sobrevive a los reinicios y a los despliegues,
+   * que es justo cuando antes se perdía la cuenta.
+   */
+  private hoy: UsoDelDia = GeocodingService.ceros();
+  /** Un año y un mes: alcanza para comparar con la factura de cualquier mes. */
+  private static readonly USO_SEGUNDOS = 60 * 60 * 24 * 400;
 
   constructor(
     @Inject(REDIS) private readonly redis: Redis,
@@ -146,8 +188,52 @@ export class GeocodingService implements OnModuleInit {
     void this.probar().catch((error: unknown) => this.logger.error({ error }, 'No se pudo probar el geocodificador'));
   }
 
-  estado(): EstadoGeocodificador {
-    return { ...this.actual, ultimaPrueba: this.ultimaPrueba, hoy: this.contadores() };
+  /**
+   * El estado y el uso, para el panel. El uso sale de Redis, no de la
+   * memoria del proceso: antes cada despliegue y cada medianoche lo dejaban
+   * en cero y no había forma de saber cuánto se había consultado.
+   */
+  async estado(): Promise<EstadoGeocodificador> {
+    const base = { ...this.actual, ultimaPrueba: this.ultimaPrueba };
+    const hoy = diaEnPaipa();
+    const dias = Array.from({ length: 31 }, (_, i) => diaEnPaipa(new Date(Date.now() - i * 86_400_000)));
+
+    let usos: UsoDelDia[];
+    try {
+      const filas = await Promise.all(dias.map((dia) => this.redis.hgetall(redisKeys.geocodeUso(dia))));
+      usos = filas.map((fila, i) => GeocodingService.desdeRedis(dias[i]!, fila));
+    } catch (error) {
+      this.logger.warn({ error }, 'No se pudo leer el uso de Google en Redis: se muestra solo lo de este proceso');
+      const vacio = GeocodingService.ceros();
+      return {
+        ...base,
+        hoy: this.contadores(),
+        mes: { ...vacio, mes: hoy.slice(0, 7), dias: 1, ...this.contadores() },
+        historial: [],
+        persistente: false,
+      };
+    }
+
+    const mes = hoy.slice(0, 7);
+    const delMes = usos.filter((u) => u.dia.startsWith(mes));
+    const total = GeocodingService.ceros();
+    for (const u of delMes) for (const campo of CAMPOS_DE_USO) total[campo] += u[campo];
+
+    return {
+      ...base,
+      hoy: usos[0]!,
+      mes: { ...total, dia: hoy, mes, dias: delMes.length },
+      historial: usos
+        .slice(0, 30)
+        .map(({ dia, consultasAGoogle, direcciones, municipios, pruebas }) => ({
+          dia,
+          consultasAGoogle,
+          direcciones,
+          municipios,
+          pruebas,
+        })),
+      persistente: true,
+    };
   }
 
   /**
@@ -170,7 +256,7 @@ export class GeocodingService implements OnModuleInit {
     }
 
     const inicio = performance.now();
-    const r = await this.preguntarAGoogle(DIRECCION_DE_PRUEBA.toLowerCase());
+    const r = await this.preguntarAGoogle(DIRECCION_DE_PRUEBA.toLowerCase(), 'pruebas');
     const ms = Math.round(performance.now() - inicio);
     const resultado: PruebaDelGeocodificador['resultado'] =
       r.motivo === 'google' ? 'ubicada' : (r.motivo as PruebaDelGeocodificador['resultado']);
@@ -239,6 +325,108 @@ export class GeocodingService implements OnModuleInit {
     return r;
   }
 
+  /**
+   * ¿Se despacha a este punto? Lo que decide es el municipio, no las zonas.
+   *
+   * Las zonas son para las estadísticas y para afinar el despacho, no una
+   * frontera: Paipa es casi todo rural, y cubrir cada vereda con un polígono
+   * no se termina nunca. Una carrera no puede perderse porque a alguien se le
+   * olvidó dibujar un rincón del municipio; si el punto queda lejos, ya es
+   * cosa del conductor aceptarla o no.
+   *
+   * En orden, del más barato al más caro:
+   *
+   *  1. Dentro de una zona: es Paipa, sin preguntarle a nadie.
+   *  2. Google, con geocodificación inversa: el municipio del punto. Si dice
+   *     Paipa, entra; si dice otro (Duitama, Tunja), no.
+   *  3. Si Google no puede contestar (sin clave, caído, sin resultado), el
+   *     rectángulo que envuelve las zonas: no se le niega el taxi a nadie por
+   *     una caída de Google, y un punto en otro departamento sigue fuera.
+   */
+  async cobertura(point: Point): Promise<Cobertura> {
+    const zona = this.zones.classify(point);
+    if (zona) return { dentro: true, como: 'zona', municipio: MUNICIPIO };
+
+    const { municipio, motivo } = await this.municipioDe(point);
+    if (municipio) {
+      const dentro = esElMunicipio(municipio);
+      this.logger.log({ point, municipio, motivo, dentro }, 'Punto fuera de las zonas: municipio según Google');
+      return { dentro, como: 'google', municipio };
+    }
+
+    const caja = this.zones.boundingBox();
+    const dentro = Boolean(caja && dentroDe(caja, point));
+    this.logger.warn(
+      { point, motivo, dentro },
+      'Punto fuera de las zonas y Google no dijo el municipio: se decide por el rectángulo de la cobertura',
+    );
+    return { dentro, como: 'caja', municipio: null };
+  }
+
+  /** El municipio de un punto según Google, o `null` si no lo pudo decir. */
+  async municipioDe(point: Point): Promise<{ municipio: string | null; motivo: MotivoGeocodificacion }> {
+    if (!this.env.GOOGLE_GEOCODING_API_KEY) return { municipio: null, motivo: 'sin_clave' };
+
+    // Tres decimales son unos cien metros: el municipio no cambia en esa
+    // distancia salvo justo en la raya, y así el mismo cliente no paga dos.
+    const clave = redisKeys.geocode(`municipio:${point.lat.toFixed(3)},${point.lng.toFixed(3)}`);
+    try {
+      const guardado = await this.redis.get(clave);
+      if (guardado !== null) {
+        void this.anotar({ desdeCache: 1 });
+        return { municipio: guardado, motivo: 'cache' };
+      }
+    } catch {
+      // Redis caído no puede impedir pedir un taxi.
+    }
+
+    const url = new URL('https://maps.googleapis.com/maps/api/geocode/json');
+    url.searchParams.set('latlng', `${point.lat},${point.lng}`);
+    // Se cuenta al salir, no al volver: Google la cobra aunque falle.
+    void this.anotar({ consultasAGoogle: 1, municipios: 1 });
+    url.searchParams.set('language', 'es');
+    url.searchParams.set('key', this.env.GOOGLE_GEOCODING_API_KEY);
+
+    const control = new AbortController();
+    const temporizador = setTimeout(() => control.abort(), GeocodingService.TIEMPO_LIMITE_MS);
+    let cuerpo: GoogleRespuesta;
+    try {
+      const respuesta = await fetch(url, { signal: control.signal });
+      if (!respuesta.ok) {
+        this.sinServicio('sin_respuesta', `Google respondió HTTP ${respuesta.status}`);
+        return { municipio: null, motivo: 'sin_respuesta' };
+      }
+      cuerpo = (await respuesta.json()) as GoogleRespuesta;
+    } catch (error) {
+      this.logger.warn({ error }, 'No se pudo consultar el municipio del punto');
+      this.sinServicio('sin_respuesta', String(error));
+      return { municipio: null, motivo: 'sin_respuesta' };
+    } finally {
+      clearTimeout(temporizador);
+    }
+
+    if (cuerpo.status === 'ZERO_RESULTS') {
+      this.respondio();
+      return { municipio: null, motivo: 'sin_resultado' };
+    }
+    if (cuerpo.status !== 'OK') {
+      this.logger.error({ status: cuerpo.status, error: cuerpo.error_message }, 'Google rechazó la consulta del municipio');
+      this.sinServicio('rechazada', `${cuerpo.status}${cuerpo.error_message ? `: ${cuerpo.error_message}` : ''}`);
+      return { municipio: null, motivo: 'rechazada' };
+    }
+    this.respondio();
+
+    const municipio = municipioDeResultados(cuerpo.results ?? []);
+    if (!municipio) return { municipio: null, motivo: 'sin_resultado' };
+
+    try {
+      await this.redis.set(clave, municipio, 'EX', GeocodingService.CACHE_SEGUNDOS);
+    } catch {
+      // No guardarlo solo cuesta una consulta más.
+    }
+    return { municipio, motivo: 'google' };
+  }
+
   /* ----------------------------------------------------------- interno */
 
   private async resolverSinContar(direccion: string): Promise<Respuesta> {
@@ -249,7 +437,7 @@ export class GeocodingService implements OnModuleInit {
     const enCache = await this.leerDeCache(consulta);
     if (enCache !== undefined) return { resuelta: enCache, motivo: 'cache' };
 
-    const r = await this.preguntarAGoogle(consulta);
+    const r = await this.preguntarAGoogle(consulta, 'direcciones');
 
     /*
      * Se guarda lo que Google contestó, también «no existe»: si una dirección
@@ -264,7 +452,7 @@ export class GeocodingService implements OnModuleInit {
     return r;
   }
 
-  private async preguntarAGoogle(consulta: string): Promise<Respuesta> {
+  private async preguntarAGoogle(consulta: string, para: 'direcciones' | 'pruebas'): Promise<Respuesta> {
     const caja = this.zones.boundingBox();
 
     const url = new URL('https://maps.googleapis.com/maps/api/geocode/json');
@@ -276,6 +464,8 @@ export class GeocodingService implements OnModuleInit {
       url.searchParams.set('bounds', `${caja.south},${caja.west}|${caja.north},${caja.east}`);
     }
     url.searchParams.set('key', this.env.GOOGLE_GEOCODING_API_KEY!);
+    // Se cuenta al salir, no al volver: Google la cobra aunque falle.
+    void this.anotar({ consultasAGoogle: 1, [para]: 1 });
 
     const control = new AbortController();
     const temporizador = setTimeout(() => control.abort(), GeocodingService.TIEMPO_LIMITE_MS);
@@ -338,6 +528,7 @@ export class GeocodingService implements OnModuleInit {
   }
 
   private sinServicio(motivo: 'rechazada' | 'sin_respuesta', detalle: string): Respuesta {
+    void this.anotar({ fallos: 1 });
     this.actual = {
       estado: motivo,
       detalle,
@@ -346,53 +537,56 @@ export class GeocodingService implements OnModuleInit {
     return { resuelta: null, motivo, detalle };
   }
 
-  private static ceros(): EstadoGeocodificador['hoy'] {
-    return {
-      dia: diaEnPaipa(),
-      consultasAGoogle: 0,
-      ubicadas: 0,
-      descartadas: 0,
-      sinResultado: 0,
-      desdeCache: 0,
-      sinClave: 0,
-      fallos: 0,
-    };
+  private static ceros(dia = diaEnPaipa()): UsoDelDia {
+    const uso = { dia } as UsoDelDia;
+    for (const campo of CAMPOS_DE_USO) uso[campo] = 0;
+    return uso;
   }
 
-  private contadores(): EstadoGeocodificador['hoy'] {
+  private static desdeRedis(dia: string, fila: Record<string, string>): UsoDelDia {
+    const uso = GeocodingService.ceros(dia);
+    for (const campo of CAMPOS_DE_USO) uso[campo] = Number(fila[campo] ?? 0) || 0;
+    return uso;
+  }
+
+  private contadores(): UsoDelDia {
     if (this.hoy.dia !== diaEnPaipa()) this.hoy = GeocodingService.ceros();
     return { ...this.hoy };
   }
 
-  private contar(motivo: MotivoGeocodificacion): void {
+  /**
+   * Suma al uso del día, en Redis y en la copia en memoria. Nunca falla:
+   * no poder anotar una consulta no puede tumbar la carrera que la pidió.
+   */
+  private async anotar(cambios: Partial<Record<CampoDeUso, number>>): Promise<void> {
     const hoy = (this.hoy = this.contadores());
-    switch (motivo) {
-      case 'sin_clave':
-        hoy.sinClave++;
-        break;
-      case 'cache':
-        hoy.desdeCache++;
-        break;
-      case 'google':
-        hoy.consultasAGoogle++;
-        hoy.ubicadas++;
-        break;
-      case 'sin_resultado':
-        hoy.consultasAGoogle++;
-        hoy.sinResultado++;
-        break;
-      case 'descartada':
-        hoy.consultasAGoogle++;
-        hoy.descartadas++;
-        break;
-      case 'rechazada':
-      case 'sin_respuesta':
-        hoy.consultasAGoogle++;
-        hoy.fallos++;
-        break;
-      case 'corta':
-        break;
+    for (const [campo, n] of Object.entries(cambios) as [CampoDeUso, number][]) hoy[campo] += n;
+
+    const clave = redisKeys.geocodeUso(hoy.dia);
+    try {
+      const multi = this.redis.multi();
+      for (const [campo, n] of Object.entries(cambios)) multi.hincrby(clave, campo, n);
+      multi.expire(clave, GeocodingService.USO_SEGUNDOS);
+      await multi.exec();
+    } catch (error) {
+      this.logger.warn({ error, cambios }, 'No se pudo anotar el uso de Google en Redis');
     }
+  }
+
+  /**
+   * El resultado de una dirección escrita. Que salió a Google ya lo anotó
+   * `preguntarAGoogle`, y los fallos `sinServicio`: aquí solo el desenlace.
+   */
+  private contar(motivo: MotivoGeocodificacion): void {
+    const campo: Partial<Record<MotivoGeocodificacion, CampoDeUso>> = {
+      sin_clave: 'sinClave',
+      cache: 'desdeCache',
+      google: 'ubicadas',
+      sin_resultado: 'sinResultado',
+      descartada: 'descartadas',
+    };
+    const elegido = campo[motivo];
+    if (elegido) void this.anotar({ [elegido]: 1 });
   }
 
   /**
@@ -436,21 +630,24 @@ export class GeocodingService implements OnModuleInit {
       return null;
     }
 
-    if (caja) {
-      const dentroDeCaja =
-        point.lat >= caja.south && point.lat <= caja.north && point.lng >= caja.west && point.lng <= caja.east;
-      if (!dentroDeCaja) {
-        // `bounds` solo sesga la búsqueda, no la limita: Google puede
-        // devolver una calle del mismo nombre en otro municipio.
-        this.logger.warn({ consulta, point }, 'El geocodificador salió de la cobertura');
+    /*
+     * Lo que decide es el municipio, no las zonas: una dirección de Paipa en
+     * un rincón sin polígono sigue siendo de Paipa (ver `cobertura`). Google
+     * lo dice en el propio resultado; si dice otro municipio, es una calle
+     * del mismo nombre en otra parte —`bounds` solo sesga, no limita—. Si no
+     * lo dice, se decide por el rectángulo de la cobertura.
+     */
+    const municipio = municipioDeResultados([candidato]);
+    if (municipio) {
+      if (!esElMunicipio(municipio)) {
+        this.logger.warn({ consulta, point, municipio }, 'El geocodificador devolvió otro municipio');
         return null;
       }
+      return point;
     }
 
-    // Más estricto que el rectángulo: dentro de la caja hay huecos sin zona,
-    // y un punto ahí no tendría conductores a los que ofrecerle la carrera.
-    if (!this.zones.classify(point)) {
-      this.logger.warn({ consulta, point }, 'La dirección cae fuera de toda zona con servicio');
+    if (caja && !dentroDe(caja, point)) {
+      this.logger.warn({ consulta, point }, 'El geocodificador salió de la cobertura');
       return null;
     }
 
@@ -528,6 +725,47 @@ export function viaDe(texto: string): Via | null {
 function mismaVia(pedida: Via, hallada: Via): boolean {
   if (pedida.tipo !== hallada.tipo || Number(pedida.numero) !== Number(hallada.numero)) return false;
   return !pedida.letra || pedida.letra === hallada.letra;
+}
+
+/** El municipio donde se presta el servicio. */
+export const MUNICIPIO = 'Paipa';
+
+export interface Cobertura {
+  dentro: boolean;
+  /** Qué lo decidió: una zona, Google, o el rectángulo si Google no pudo. */
+  como: 'zona' | 'google' | 'caja';
+  municipio: string | null;
+}
+
+const normalizar = (texto: string) =>
+  texto
+    .normalize('NFD')
+    .replace(/[̀-ͯ]/g, '')
+    .toLowerCase()
+    .trim();
+
+export function esElMunicipio(nombre: string): boolean {
+  return normalizar(nombre) === normalizar(MUNICIPIO);
+}
+
+function dentroDe(caja: { south: number; west: number; north: number; east: number }, point: Point): boolean {
+  return point.lat >= caja.south && point.lat <= caja.north && point.lng >= caja.west && point.lng <= caja.east;
+}
+
+/**
+ * El municipio que nombran los resultados de Google. En Colombia es el
+ * `administrative_area_level_2`; `locality` es el casco, que en las veredas
+ * a veces falta, así que va de respaldo.
+ */
+export function municipioDeResultados(resultados: GoogleResultado[]): string | null {
+  for (const tipo of ['administrative_area_level_2', 'locality']) {
+    for (const resultado of resultados) {
+      const componente = resultado.address_components?.find((c) => c.types?.includes(tipo));
+      const nombre = componente?.long_name ?? componente?.short_name;
+      if (nombre) return nombre;
+    }
+  }
+  return null;
 }
 
 interface GoogleResultado {

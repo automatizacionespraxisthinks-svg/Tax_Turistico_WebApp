@@ -105,7 +105,9 @@ export class DispatchService {
       return;
     }
 
-    if (!ride.pickupLat || !ride.pickupLng || !ride.zoneId) {
+    // La zona no hace falta: un punto de Paipa sin polígono se despacha con
+    // las oleadas por defecto (ver `ZonesService.waveConfig`).
+    if (!ride.pickupLat || !ride.pickupLng) {
       throw new AppError('MISSING_LOCATION', 'La carrera no tiene punto de recogida');
     }
 
@@ -300,7 +302,7 @@ export class DispatchService {
       ...(sinGps !== undefined ? { sinGps } : {}),
     });
 
-    const zoneName = this.zones.byId(ride.zoneId)?.name;
+    const zoneName = ride.zoneId ? this.zones.byId(ride.zoneId)?.name : undefined;
     const oferta = (c: { distanceKm: number; etaMinutes: number }) => ({
       rideId,
       code: ride.code,

@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { MapPinned, RefreshCw } from 'lucide-react';
 import { formatDateTime, formatRelative } from '@tax/shared';
@@ -31,17 +31,33 @@ interface Estado {
   detalle: string | null;
   respondioEn: string | null;
   ultimaPrueba: Prueba | null;
-  hoy: {
-    dia: string;
-    consultasAGoogle: number;
-    ubicadas: number;
-    descartadas: number;
-    sinResultado: number;
-    desdeCache: number;
-    sinClave: number;
-    fallos: number;
-  };
+  hoy: Uso;
+  mes: Uso & { mes: string; dias: number };
+  historial: Array<Pick<Uso, 'dia' | 'consultasAGoogle' | 'direcciones' | 'municipios' | 'pruebas'>>;
+  /** `false` si Redis no respondió: las cifras son solo las del proceso. */
+  persistente: boolean;
 }
+
+/** El uso de Google en un día (o sumado en el mes). Lo guarda la API en Redis. */
+interface Uso {
+  dia: string;
+  /** Lo que Google cobra: cada llamada, sea cual sea su resultado. */
+  consultasAGoogle: number;
+  direcciones: number;
+  municipios: number;
+  pruebas: number;
+  ubicadas: number;
+  descartadas: number;
+  sinResultado: number;
+  desdeCache: number;
+  sinClave: number;
+  fallos: number;
+}
+
+const MESES = ['enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio', 'julio', 'agosto', 'septiembre', 'octubre', 'noviembre', 'diciembre'];
+
+/** «2026-11-20» → «20 nov». Sin pasar por Date: el día ya viene en hora de Paipa. */
+const diaCorto = (dia: string) => `${Number(dia.slice(8, 10))} ${MESES[Number(dia.slice(5, 7)) - 1]!.slice(0, 3)}`;
 
 const ESTADO: Record<Estado['estado'], { etiqueta: string; tono: 'positive' | 'neutral' | 'warning' | 'critical'; texto: string }> = {
   ok: {
@@ -86,8 +102,10 @@ export function useGeocodificador() {
   return useQuery({
     queryKey: ['geocodificador'],
     queryFn: () => api.get<Estado>('/v1/admin/system/geocodificador'),
-    refetchInterval: 60_000,
-    staleTime: 30_000,
+    // Cada consulta se anota al hacerse; el panel la ve en el siguiente
+    // refresco, o al abrir el detalle.
+    refetchInterval: 30_000,
+    staleTime: 10_000,
   });
 }
 
@@ -156,6 +174,11 @@ function Detalle({ estado }: { estado: Estado }) {
   const e = ESTADO[estado.estado];
   const prueba = estado.ultimaPrueba;
   const hoy = estado.hoy;
+  const mes = estado.mes;
+  // Al abrir el detalle, las cifras de este momento y no las de hace 30 s.
+  useEffect(() => {
+    void qc.invalidateQueries({ queryKey: ['geocodificador'] });
+  }, [qc]);
 
   const probar = useMutation({
     mutationFn: () => api.post<{ prueba: Prueba; estado: Estado }>('/v1/admin/system/geocodificador/probar'),
@@ -235,6 +258,12 @@ function Detalle({ estado }: { estado: Estado }) {
         ) : null}
       </div>
 
+      {!estado.persistente ? (
+        <Banner tone="warning">
+          No se pudo leer el registro de uso en Redis: las cifras son solo las de este proceso de la API.
+        </Banner>
+      ) : null}
+
       <div className="space-y-2">
         <SectionLabel>Hoy</SectionLabel>
         <dl className="grid grid-cols-2 gap-2 sm:grid-cols-3">
@@ -253,10 +282,59 @@ function Detalle({ estado }: { estado: Estado }) {
           ))}
         </dl>
         <p className="text-micro text-ink-muted">
-          Cuentan desde que arrancó la API y vuelven a cero cada día. Lo que sale de la caché no se paga:
-          cada dirección se guarda 30 días.
+          De las {hoy.consultasAGoogle} consultas: {hoy.direcciones} de direcciones escritas, {hoy.municipios} para saber
+          si una ubicación compartida es de Paipa y {hoy.pruebas} de prueba de la clave.
         </p>
       </div>
+
+      <div className="space-y-2">
+        <SectionLabel>Este mes · {MESES[Number(mes.mes.slice(5, 7)) - 1]}</SectionLabel>
+        <div className="rounded-md border border-line bg-surface px-3 py-2">
+          <p className="text-micro text-ink-muted">Consultas a Google</p>
+          <p className="tnum mt-0.5 text-title font-semibold text-ink">{mes.consultasAGoogle}</p>
+          <p className="mt-1 text-micro text-ink-muted">
+            {mes.direcciones} de direcciones · {mes.municipios} de municipio · {mes.pruebas} de prueba ·{' '}
+            {mes.desdeCache} desde la caché (no se pagan)
+          </p>
+        </div>
+      </div>
+
+      <div className="space-y-2">
+        <SectionLabel>Últimos 30 días</SectionLabel>
+        <Historial dias={estado.historial} />
+      </div>
+
+      <p className="text-micro text-ink-muted">
+        Cada llamada a Google se anota al hacerse y queda guardada un año, aunque la API se reinicie. «Consultas a
+        Google» es lo que Google cobra; lo que sale de la caché no se paga: cada dirección y cada municipio se guardan
+        30 días.
+      </p>
     </div>
+  );
+}
+
+/** Una barra por día: de un vistazo, qué días se consultó más. */
+function Historial({ dias }: { dias: Estado['historial'] }) {
+  if (dias.length === 0) return <p className="text-caption text-ink-muted">Sin registro.</p>;
+  const maximo = Math.max(1, ...dias.map((d) => d.consultasAGoogle));
+  return (
+    <ul className="max-h-64 space-y-1 overflow-y-auto rounded-md border border-line p-2">
+      {dias.map((d) => (
+        <li
+          key={d.dia}
+          className="grid grid-cols-[3.5rem_1fr_2.5rem] items-center gap-2 text-caption"
+          title={`${d.direcciones} de direcciones · ${d.municipios} de municipio · ${d.pruebas} de prueba`}
+        >
+          <span className="text-ink-muted">{diaCorto(d.dia)}</span>
+          <span className="h-2 rounded-full bg-surface-sunk">
+            <span
+              className="block h-2 rounded-full bg-accent"
+              style={{ width: `${(d.consultasAGoogle / maximo) * 100}%` }}
+            />
+          </span>
+          <span className="tnum text-right text-ink">{d.consultasAGoogle}</span>
+        </li>
+      ))}
+    </ul>
   );
 }

@@ -5,7 +5,6 @@ import type { Point, WaveConfig } from '@tax/shared';
 import { DB, type Database } from '../../db/db.module';
 import { zones } from '../../db/schema';
 import type { GeoJsonPolygon } from '../../db/schema/geo';
-import { AppError } from '../../common/problem';
 
 export interface LoadedZone {
   id: string;
@@ -66,25 +65,14 @@ export class ZonesService implements OnModuleInit {
   }
 
   /**
-   * Clasifica un punto. Devuelve `undefined` cuando cae fuera de toda zona:
-   * eso es `OUT_OF_COVERAGE` para el agente, no un error del sistema.
+   * Clasifica un punto. Devuelve `undefined` cuando cae fuera de toda zona,
+   * y eso no es un rechazo: la zona es para las estadísticas. Si el punto es
+   * o no de Paipa lo decide `GeocodingService.cobertura`.
    */
   classify(point: Point): LoadedZone | undefined {
     // GeoJSON va en [lng, lat]; confundir el orden es el error clásico aquí.
     const coordinates: [number, number] = [point.lng, point.lat];
     return this.cache.find((zone) => booleanPointInPolygon(coordinates, zone.polygon));
-  }
-
-  /** Igual que `classify`, pero exige cobertura. */
-  requireZone(point: Point): LoadedZone {
-    const zone = this.classify(point);
-    if (!zone) {
-      throw new AppError(
-        'OUT_OF_COVERAGE',
-        'El punto de recogida está fuera de las zonas con servicio',
-      );
-    }
-    return zone;
   }
 
   /**
@@ -140,8 +128,8 @@ export class ZonesService implements OnModuleInit {
   }
 
   /** Parámetros de la oleada N para una zona, con respaldo razonable. */
-  waveConfig(zoneId: string, wave: 1 | 2 | 3): WaveConfig {
-    const zone = this.byId(zoneId);
+  waveConfig(zoneId: string | null, wave: 1 | 2 | 3): WaveConfig {
+    const zone = zoneId ? this.byId(zoneId) : undefined;
     const configured = zone?.waves.find((w) => w.wave === wave);
     if (configured) return configured;
 

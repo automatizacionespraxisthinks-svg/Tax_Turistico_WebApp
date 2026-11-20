@@ -95,7 +95,7 @@ export class SystemController {
 
   /**
    * Cómo está el geocodificador de Google: si hay clave, si la última vez
-   * respondió, la última prueba y lo de hoy. No consulta a Google: es lo que
+   * respondió, la última prueba y el uso (hoy, el mes y 30 días). No consulta a Google: es lo que
    * la API ya sabe. Lo pinta el panel junto a las líneas de WhatsApp.
    */
   @Get('geocodificador')
@@ -113,7 +113,7 @@ export class SystemController {
   @RequierePermiso('sistema.tecnico')
   async probarGeocodificador() {
     const prueba = await this.geocoding.probar();
-    return { prueba, estado: this.geocoding.estado() };
+    return { prueba, estado: await this.geocoding.estado() };
   }
 
   /* ---------------------------------------------------------- servicios */

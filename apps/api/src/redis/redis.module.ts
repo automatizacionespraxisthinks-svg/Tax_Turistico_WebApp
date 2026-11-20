@@ -59,4 +59,6 @@ export const redisKeys = {
    * y con la clave nueva se vuelven a preguntar en vez de reutilizarse.
    */
   geocode: (consulta: string) => `geo:q2:${consulta}`,
+  /** El uso de Google de un día en Paipa (YYYY-MM-DD): un hash de contadores. */
+  geocodeUso: (dia: string) => `geo:uso:${dia}`,
 } as const;

@@ -27,7 +27,7 @@ import { AppError } from '../../common/problem';
 import { AuditService } from '../audit/audit.service';
 import { OutboxService } from '../integrations/outbox.service';
 import { TrayectosService } from '../pricing/trayectos.service';
-import { GeocodingService, type MotivoGeocodificacion } from '../pricing/geocoding.service';
+import { GeocodingService, MUNICIPIO, type MotivoGeocodificacion } from '../pricing/geocoding.service';
 import { ZonesService } from '../pricing/zones.service';
 import { CatalogoService } from '../pricing/catalogo.service';
 import { DispatchService } from '../dispatch/dispatch.service';
@@ -94,6 +94,23 @@ export class RidesService {
     @Inject(forwardRef(() => DispatchService))
     private readonly dispatch: DispatchService,
   ) {}
+
+  /**
+   * Rechaza un punto que no es de Paipa. Que no caiga en una zona no es
+   * motivo: las zonas son para las estadísticas, y un rincón del municipio
+   * sin dibujar no puede dejar a un cliente sin taxi.
+   */
+  private async exigirPaipa(point: Point): Promise<void> {
+    const { dentro, municipio } = await this.geocoding.cobertura(point);
+    if (!dentro) {
+      throw new AppError(
+        'OUT_OF_COVERAGE',
+        municipio
+          ? `El punto de recogida queda en ${municipio}, fuera de ${MUNICIPIO}`
+          : `El punto de recogida está fuera de ${MUNICIPIO}`,
+      );
+    }
+  }
 
   /* ------------------------------------------------------------- creación */
 
@@ -176,6 +193,11 @@ export class RidesService {
       // Solo si no hay ni una zona configurada: eso es un sistema sin montar.
       throw new AppError('MISSING_LOCATION', 'No hay zonas configuradas para despachar');
     }
+
+    // La ubicación compartida es la única que llega sin comprobar: las de
+    // Google y el catálogo ya vienen comprobadas, y la de «sin ubicar» es la
+    // del pueblo.
+    if (pickupSource === 'compartida') await this.exigirPaipa(point);
 
     /*
      * Una ubicación compartida que cae en un lugar del catálogo lleva su
@@ -835,6 +857,7 @@ export class RidesService {
     const ubicacion = puntoNuevo
       ? { pickupSource: 'compartida' as const, pickupLink: link }
       : {};
+    if (puntoNuevo) await this.exigirPaipa(puntoNuevo);
     const trayecto = this.trayectos.medir(
       point,
       ride.dropoffLat && ride.dropoffLng ? { lat: ride.dropoffLat, lng: ride.dropoffLng } : undefined,
