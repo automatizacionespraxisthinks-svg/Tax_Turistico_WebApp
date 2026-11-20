@@ -268,6 +268,14 @@ export const createRideSchema = z.object({
    * otra, sin abrirse a los demás. Sin el campo, efectivo.
    */
   pagoElectronico: z.boolean().default(false),
+  /**
+   * La línea de WhatsApp por la que escribió el cliente (20/11/2026). Vale
+   * cualquiera de las tres formas que n8n puede tener a mano: el nombre de
+   * la sesión de WAHA, el número de la línea (con o sin +57) o su nombre en
+   * el panel. La API la traduce a la línea registrada; sin ella, la carrera
+   * queda «Sin línea» en Reportes.
+   */
+  line: z.string().trim().min(1).max(60).optional(),
   notes: z.string().max(280).optional(),
   /**
    * Enlace a la foto del lugar que mandó el cliente (el `data_url` del

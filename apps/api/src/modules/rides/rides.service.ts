@@ -22,6 +22,7 @@ import {
   rideStatusHistory,
   rides,
   vehicles,
+  wahaSessions,
 } from '../../db/schema';
 import { AppError } from '../../common/problem';
 import { AuditService } from '../audit/audit.service';
@@ -110,6 +111,37 @@ export class RidesService {
           : `El punto de recogida está fuera de ${MUNICIPIO}`,
       );
     }
+  }
+
+  /**
+   * La línea por la que entró el pedido, con el nombre que se ve en el panel.
+   *
+   * n8n puede mandar el nombre de la sesión de WAHA, el número de la línea
+   * o su nombre: los tres llevan a la misma fila, y se guarda siempre el
+   * nombre, para que en Reportes una línea no salga tres veces escrita de
+   * tres formas. Si no coincide con ninguna, se guarda tal cual llegó: mejor
+   * un nombre raro que perder de dónde vino la carrera.
+   */
+  private async lineaRegistrada(dicha: string | undefined): Promise<string | null> {
+    if (!dicha) return null;
+    const digitos = (texto: string | null) => (texto ?? '').replace(/\D/g, '').slice(-10);
+    const buscada = dicha.trim();
+    try {
+      const lineas = await this.db
+        .select({ id: wahaSessions.id, label: wahaSessions.label, phone: wahaSessions.phone })
+        .from(wahaSessions);
+      const hallada =
+        lineas.find((l) => l.id === buscada) ??
+        lineas.find((l) => l.label.trim().toLowerCase() === buscada.toLowerCase()) ??
+        (digitos(buscada).length >= 7
+          ? lineas.find((l) => digitos(l.phone) === digitos(buscada) || digitos(l.label) === digitos(buscada))
+          : undefined);
+      if (hallada) return hallada.label;
+      this.logger.warn({ line: buscada }, 'La línea del pedido no coincide con ninguna registrada: se guarda tal cual');
+    } catch (error) {
+      this.logger.warn({ error, line: buscada }, 'No se pudieron leer las líneas: se guarda la línea tal cual');
+    }
+    return buscada;
   }
 
   /* ------------------------------------------------------------- creación */
@@ -236,6 +268,8 @@ export class RidesService {
       return `${grupo}${propia ? ` ${propia}` : ''}`.slice(0, 280);
     };
 
+    const line = await this.lineaRegistrada(input.line);
+
     const creadas = await this.db
       .transaction(async (tx) => {
         const customerId = await this.upsertCustomer(tx, input.customerPhone, input.customerName, input.consent);
@@ -306,6 +340,7 @@ export class RidesService {
               // destino en palabras no sirve para medir nada.
               dropoffSource: input.dropoff?.point ? 'cliente' : undefined,
               zoneId: trayecto.originZoneId,
+              line,
               vehicleType: input.vehicleType,
               passengers: input.passengers,
               /*
