@@ -183,6 +183,20 @@
       "when": 1795116556047,
       "tag": "0025_tipo_hatchback",
       "breakpoints": true
+    },
+    {
+      "idx": 26,
+      "version": "7",
+      "when": 1795281580847,
+      "tag": "0026_acuse_de_avisos",
+      "breakpoints": true
+    },
+    {
+      "idx": 27,
+      "version": "7",
+      "when": 1795282539530,
+      "tag": "0027_cancelacion_del_conductor_relanza",
+      "breakpoints": true
     }
   ]
 }

@@ -109,8 +109,8 @@ export class ReportsService {
       leerPeriodo(this.db, params),
       f.conductor ? leerPeriodo(this.db, paramsDelGrupo) : Promise.resolve(null),
     ]);
-    const r = resumir(periodo.filas, periodo.dias);
-    const grupo = periodoDelGrupo ? resumir(periodoDelGrupo.filas, periodoDelGrupo.dias) : r;
+    const r = resumir(periodo.filas, periodo.dias, periodo.abandonos);
+    const grupo = periodoDelGrupo ? resumir(periodoDelGrupo.filas, periodoDelGrupo.dias, periodoDelGrupo.abandonos) : r;
 
     const conductores = await this.filasDeConductores(paramsDelGrupo, periodo, grupo);
     const individual = f.conductor ? await this.individual(f.conductor, periodo, conductores, grupo) : null;

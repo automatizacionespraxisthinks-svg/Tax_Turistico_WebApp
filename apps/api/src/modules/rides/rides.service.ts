@@ -9,8 +9,10 @@ import {
   enlaceDeMapaValido,
   formatRideCode,
   haversineKm,
+  nombreClaro,
   normalizarParaBuscar,
   puntoDeEnlace,
+  recogidaSinSentido,
   tieneNomenclatura,
 } from '@tax/shared';
 import { DB, type Database, type Tx } from '../../db/db.module';
@@ -160,6 +162,25 @@ export class RidesService {
     // mandó el punto aparte, se lee del propio enlace.
     const pickupLink = enlaceDeMapaValido(input.pickup.link);
     let point = input.pickup.point ?? puntoDeEnlace(pickupLink) ?? undefined;
+
+    /*
+     * Datos que no sirven (21/11/2026). Una recogida «disponible» sin
+     * ubicación compartida no la encuentra ningún conductor: se le devuelve
+     * al agente MISSING_LOCATION, que ya sabe pedir la ubicación. Y si n8n
+     * avisó que el nombre de WhatsApp no sirve, sin un nombre claro no se crea.
+     */
+    if (!point && recogidaSinSentido(input.pickup.text) && recogidaSinSentido(input.pickup.reference)) {
+      throw new AppError(
+        'MISSING_LOCATION',
+        `«${input.pickup.text}» no es una dirección: pídele al cliente la dirección exacta o que comparta su ubicación por WhatsApp`,
+      );
+    }
+    if (input.nombreObligatorio && !nombreClaro(input.customerName)) {
+      throw new AppError(
+        'MISSING_CUSTOMER_NAME',
+        'El nombre de WhatsApp no sirve para identificar al cliente: pregúntale a nombre de quién va el taxi y vuelve a pedirlo con ese nombre',
+      );
+    }
     let pickupSource: 'compartida' | 'catalogo' | 'geocodificada' | 'sin_ubicar' = 'compartida';
     let direccionResuelta: string | undefined;
     let pickupText = input.pickup.text;
@@ -774,6 +795,8 @@ export class RidesService {
           etaMinutes: rideOffers.etaMinutes,
           distanceKm: rideOffers.distanceKm,
           response: rideOffers.response,
+          aviso: rideOffers.aviso,
+          recibidaAt: rideOffers.recibidaAt,
         })
         .from(rideOffers)
         .innerJoin(drivers, eq(drivers.id, rideOffers.driverId))

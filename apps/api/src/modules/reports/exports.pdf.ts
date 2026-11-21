@@ -176,7 +176,7 @@ export function generarPdf(
   periodo: Periodo,
   opciones: { titulo: string; pedidoPor: string; tablero?: TableroInforme; filtros?: string },
 ): Promise<Buffer> {
-  const r = resumir(periodo.filas, periodo.dias);
+  const r = resumir(periodo.filas, periodo.dias, periodo.abandonos);
   const doc = new PDFDocument({
     size: 'A4',
     margin: 40,

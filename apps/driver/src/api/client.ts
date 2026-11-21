@@ -181,3 +181,18 @@ export const api = {
   /** Sin token: el acceso es lo que lo obtiene. */
   login: <T>(path: string, body: unknown) => request<T>(path, { method: 'POST', body, auth: false }),
 };
+
+/**
+ * Acuse de recibo de una oferta (21/11/2026): le dice a la API que el aviso
+ * llegó a este teléfono. Sin sesión a propósito —lo usa también el service
+ * worker—; lo que autoriza es la firma de la oferta. Si falla no pasa nada:
+ * la oferta sigue igual y el panel solo la verá «sin confirmar».
+ */
+export function confirmarAviso(offerId: string, firma: string): void {
+  void fetch(`${API_BASE}/v1/driver/push/recibido`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ offerId, firma }),
+    keepalive: true,
+  }).catch(() => undefined);
+}

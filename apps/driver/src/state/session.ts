@@ -54,6 +54,8 @@ export interface OfferedRide {
   vehicleType: VehicleType;
   notes?: string;
   zoneName?: string;
+  /** La carrera ya dio una vuelta completa sin conductor (21/11/2026). */
+  urgente?: boolean;
   /**
    * Cliente: ausente mientras es una oferta, presente una vez aceptada.
    * El conductor no ve el teléfono hasta que la carrera es suya (§8.1).
@@ -346,6 +348,7 @@ export interface ApiOffer {
   etaMinutes: number;
   expiresAt: string;
   wave: number;
+  urgente?: boolean;
 }
 
 export function offerFromSocket(push: ApiOffer): OfferedRide {
@@ -361,6 +364,7 @@ export function offerFromSocket(push: ApiOffer): OfferedRide {
     vehicleType: 'sedan',
     expiresAt: new Date(push.expiresAt).getTime(),
     wave: Math.min(4, Math.max(1, push.wave)) as Oleada,
+    urgente: push.urgente === true,
   };
 }
 

@@ -104,7 +104,7 @@ function hojaResumen(
   periodo: Periodo,
   opciones: { pedidoPor: string; titulo: string; tablero?: TableroInforme; filtros?: string },
 ): void {
-  const r = resumir(periodo.filas, periodo.dias);
+  const r = resumir(periodo.filas, periodo.dias, periodo.abandonos);
   const ws = libro.addWorksheet('Resumen');
   ws.columns = [{ width: 34 }, { width: 22 }];
 
@@ -152,7 +152,7 @@ function hojaResumen(
 }
 
 function hojasDeResumen(libro: ExcelJS.Workbook, periodo: Periodo, tablero?: TableroInforme): void {
-  const r = resumir(periodo.filas, periodo.dias);
+  const r = resumir(periodo.filas, periodo.dias, periodo.abandonos);
 
   if (tablero) {
     hoja(

@@ -3,11 +3,13 @@ import { Processor, WorkerHost } from '@nestjs/bullmq';
 import type { Job } from 'bullmq';
 import {
   AUTO_RELAUNCH_JOB,
+  AVISO_REENVIO_JOB,
   DISPATCH_QUEUE,
   DispatchService,
   EXPIRE_UNASSIGNED_JOB,
   WAVE_TIMEOUT_JOB,
   type AutoRelaunchJob,
+  type AvisoReenvioJob,
   type WaveTimeoutJob,
 } from './dispatch.service';
 
@@ -27,14 +29,24 @@ export class DispatchProcessor extends WorkerHost {
     super();
   }
 
-  async process(job: Job<WaveTimeoutJob | AutoRelaunchJob>): Promise<void> {
+  async process(job: Job<WaveTimeoutJob | AutoRelaunchJob | AvisoReenvioJob>): Promise<void> {
+    if (job.name === AVISO_REENVIO_JOB) {
+      const { rideId, wave, intento } = job.data as AvisoReenvioJob;
+      try {
+        await this.dispatch.reenviarAvisos(rideId, wave, intento);
+      } catch (error) {
+        this.logger.warn({ err: error, rideId }, 'Falló el reenvío de avisos');
+      }
+      return;
+    }
+
     if (job.name === AUTO_RELAUNCH_JOB) {
       const { rideId, intento } = job.data as AutoRelaunchJob;
       try {
         await this.dispatch.autoRelaunch(rideId, intento);
       } catch (error) {
-        // Si falla, la carrera sigue sin asignar y el barrido la cierra por
-        // inactividad: el cliente no queda bloqueado.
+        // Si falla, la carrera sigue sin asignar y el barrido la vuelve a
+        // relanzar (o la cierra, con BUSCAR_HASTA_CANCELAR apagado).
         this.logger.error({ err: error, rideId }, 'Fallo el relanzamiento automático');
       }
       return;

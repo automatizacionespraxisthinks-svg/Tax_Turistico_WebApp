@@ -114,8 +114,21 @@ export const RIDE_TRANSITIONS: RideTransition[] = [
   {
     from: 'ASSIGNED',
     to: 'NOTIFIED',
-    by: ['operator'],
+    // El sistema, cuando el conductor cancela por fuerza mayor (21/11/2026):
+    // la carrera vuelve a buscar taxi en vez de cerrarse.
+    by: ['operator', 'system'],
     condition: 'Reasignación (RF-41): el conductor original queda liberado',
+  },
+  {
+    /**
+     * Añadida el 21/11/2026: el conductor llegó al punto y tuvo una causa
+     * mayor (se varó, una emergencia). El cliente sigue esperando, así que se
+     * le busca otro taxi igual que desde «Asignada».
+     */
+    from: 'DRIVER_ARRIVED',
+    to: 'NOTIFIED',
+    by: ['system'],
+    condition: 'El conductor canceló por fuerza mayor: se busca otro taxi',
   },
   {
     from: 'ASSIGNED',
@@ -233,6 +246,13 @@ export const createRideSchema = z.object({
     .string()
     .regex(/^\+\d{8,15}$/, 'Teléfono en formato E.164, por ejemplo +573001234567'),
   customerName: z.string().min(2).optional(),
+  /**
+   * El nombre de WhatsApp no sirve («Dd», «.», un número) y el agente tenía
+   * que preguntarlo (21/11/2026). Con esto en true, una carrera sin un nombre
+   * claro se rechaza con `MISSING_CUSTOMER_NAME` en vez de crearse a nombre
+   * de nadie. Lo pone n8n; sin el campo, el nombre sigue siendo opcional.
+   */
+  nombreObligatorio: z.boolean().optional(),
   pickup: rideAddressSchema,
   dropoff: rideAddressSchema.optional(),
   vehicleType: z.enum(VEHICLE_TYPES).default('sedan'),
@@ -366,6 +386,13 @@ export interface RideOffer {
   etaMinutes: number;
   distanceKm: number;
   response: 'pending' | 'accepted' | 'rejected' | 'expired' | 'revoked';
+  /**
+   * Qué pasó con el aviso al teléfono (21/11/2026): 'enviado', 'reenviado',
+   * 'sin_dispositivo', 'fallido' o 'apagado'. Nulo en ofertas anteriores.
+   */
+  aviso?: string | null;
+  /** Cuando el teléfono confirmó que le llegó. La única prueba de entrega. */
+  recibidaAt?: string | null;
 }
 
 export interface Ride {

@@ -85,6 +85,8 @@ export interface ApiRideDetail extends ApiRide {
     etaMinutes: number;
     distanceKm: number;
     response: RideOffer['response'];
+    aviso?: string | null;
+    recibidaAt?: string | null;
   }[];
 }
 
@@ -220,6 +222,8 @@ export function toRideDetail(row: ApiRideDetail): Ride {
       etaMinutes: offer.etaMinutes,
       distanceKm: offer.distanceKm,
       response: offer.response,
+      aviso: offer.aviso ?? null,
+      recibidaAt: offer.recibidaAt ?? null,
     })),
   };
 }

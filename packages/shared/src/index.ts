@@ -13,3 +13,4 @@ export * from './domain/enlace-de-mapa';
 export * from './domain/permisos';
 export * from './domain/cancelacion';
 export * from './format';
+export * from './domain/datos-cliente';

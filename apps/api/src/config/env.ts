@@ -107,6 +107,32 @@ const envSchema = z.object({
   RELANZAMIENTO_ESPERA_SEG: z.coerce.number().int().min(5).max(600).default(20),
   CADUCIDAD_SIN_CONDUCTOR_MIN: z.coerce.number().int().min(2).max(240).default(10),
 
+  /*
+   * Buscar hasta que el cliente cancele (21/11/2026, decisión de la empresa).
+   * Encendido, las dos salidas de arriba dejan de cerrar la carrera: agotadas
+   * las oleadas se relanza siempre, y una que se quedó quieta sin asignar se
+   * relanza en vez de caducar. Solo la cierra el cliente (por el chat), la
+   * oficina o el conductor. Desde el segundo intento el aviso a los
+   * conductores sale como urgente.
+   *
+   * Entre un intento y el siguiente se espera RELANZAMIENTO_ESPERA_SEG la
+   * primera vez y REINTENTO_URGENTE_ESPERA_SEG las demás: sin conductores en
+   * turno, las oleadas vacías se agotan al instante y sin esa pausa la
+   * carrera daría vueltas sin parar.
+   */
+  BUSCAR_HASTA_CANCELAR: z
+    .enum(['true', 'false'])
+    .default('true')
+    .transform((valor) => valor === 'true'),
+  REINTENTO_URGENTE_ESPERA_SEG: z.coerce.number().int().min(5).max(900).default(45),
+
+  /*
+   * Avisos que no se confirman (21/11/2026). El teléfono confirma cada aviso
+   * de oferta al recibirlo; si a los AVISO_REENVIO_SEG no lo ha confirmado y
+   * la oferta sigue viva, se le vuelve a mandar una vez. 0 lo apaga.
+   */
+  AVISO_REENVIO_SEG: z.coerce.number().int().min(0).max(120).default(15),
+
   /**
    * WAHA, para vigilar las líneas de WhatsApp (§10.4). Dentro de Dokploy es
    * el nombre del servicio en la red interna, p. ej. `http://tax-turistico-waha-xxxx:3000`.

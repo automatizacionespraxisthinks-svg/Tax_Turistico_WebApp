@@ -262,6 +262,18 @@ export const rideOffers = pgTable(
     respondedAt: timestamp('responded_at', { withTimezone: true }),
     revokedAt: timestamp('revoked_at', { withTimezone: true }),
     response: offerResponse('response').notNull().default('pending'),
+    /*
+     * Qué pasó con el aviso al teléfono (21/11/2026). Antes el panel decía
+     * «notificado» con solo crear la oferta, aunque el aviso nunca saliera.
+     *  - aviso: 'enviado' (el servicio de push lo aceptó), 'reenviado',
+     *    'sin_dispositivo' (el conductor no tiene avisos activados),
+     *    'fallido' (el servicio lo rechazó) o 'apagado' (sin claves VAPID).
+     *  - recibidaAt: cuando el teléfono confirmó que le llegó, por el aviso o
+     *    por la aplicación abierta. Es la única prueba de entrega.
+     */
+    aviso: text('aviso'),
+    avisoEnviadoAt: timestamp('aviso_enviado_at', { withTimezone: true }),
+    recibidaAt: timestamp('recibida_at', { withTimezone: true }),
   },
   (table) => [
     index('ride_offers_ride_idx').on(table.rideId, table.wave),
@@ -279,6 +291,39 @@ export const rideOffers = pgTable(
       table.wave,
       table.intento,
     ),
+  ],
+);
+
+/**
+ * El conductor soltó la carrera por fuerza mayor antes de recoger al cliente
+ * (21/11/2026). La carrera no se cancela —se le busca otro taxi—, así que
+ * esto es lo que queda de esa cancelación: quién, por qué y dónde estaba.
+ * Reportes la cuenta aquí como «cancelada por el conductor», y el despacho no
+ * le vuelve a ofrecer esa carrera a quien la soltó.
+ */
+export const rideDriverCancellations = pgTable(
+  'ride_driver_cancellations',
+  {
+    id: uuid('id').primaryKey(),
+    rideId: uuid('ride_id')
+      .notNull()
+      .references(() => rides.id, { onDelete: 'cascade' }),
+    driverId: uuid('driver_id')
+      .notNull()
+      .references(() => drivers.id),
+    /** Clave de `MOTIVOS_CANCELACION_CONDUCTOR`. */
+    motivo: text('motivo').notNull(),
+    /** El texto que se muestra: «Falla mecánica o pinchazo», o lo que escribió con «Otro». */
+    motivoTexto: text('motivo_texto').notNull(),
+    /** En qué estado iba: «ASSIGNED» o «DRIVER_ARRIVED». */
+    desde: text('desde').notNull(),
+    lat: doublePrecision('lat'),
+    lng: doublePrecision('lng'),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    index('ride_driver_cancellations_ride_idx').on(table.rideId),
+    index('ride_driver_cancellations_fecha_idx').on(table.createdAt),
   ],
 );
 

@@ -11,7 +11,7 @@ import { Turno } from './screens/Turno';
 import { Oferta } from './screens/Oferta';
 import { Carrera } from './screens/Carrera';
 import { Resumen } from './screens/Resumen';
-import { ApiError, api, installId, storeToken, storedToken } from './api/client';
+import { ApiError, api, confirmarAviso, installId, storeToken, storedToken } from './api/client';
 import { connectDriverSocket, type OfferPush } from './api/socket';
 import { clearQueueOf, flush, onQueueChange, onQueueRejected, pendingCount, send, setQueueOwner, watchConnection } from './api/queue';
 import {
@@ -341,6 +341,9 @@ export function App() {
 
       onOffer: (push: OfferPush) => {
         dispatch({ type: 'offer_received', offer: offerFromSocket(push) });
+        // Con la aplicación abierta, el socket es la entrega: se confirma
+        // para que el panel no la cuente como «sin confirmar».
+        if (push.offerId && push.firma) confirmarAviso(push.offerId, push.firma);
       },
 
       onOfferRevoked: (rideId) => {
@@ -834,7 +837,11 @@ export function App() {
                     });
                     const code = session.offer?.code;
                     dispatch({ type: 'back_to_available' });
-                    setNotice(`Cancelaste la carrera ${code ?? ''}. La oficina ya tiene el motivo.`);
+                    setNotice(
+                      motivo === 'cliente_no_aparece'
+                        ? `Cancelaste la carrera ${code ?? ''}. La oficina ya tiene el motivo.`
+                        : `Soltaste la carrera ${code ?? ''}. Al cliente ya le estamos buscando otro taxi.`,
+                    );
                     return null;
                   } catch (error) {
                     if (error instanceof ApiError && error.isOffline) {

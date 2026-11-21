@@ -71,8 +71,10 @@ export function Oferta({
       <Screen className="gap-4">
         <div className="flex items-start justify-between gap-4">
           <div>
-            <StatusPill tone="warning" size="md" live>
-              {offer.wave === 4 ? 'Para todos' : `Oleada ${offer.wave}`} · nueva carrera
+            <StatusPill tone={offer.urgente ? 'critical' : 'warning'} size="md" live>
+              {offer.urgente
+                ? '🚨 Urgente · el cliente lleva rato esperando'
+                : `${offer.wave === 4 ? 'Para todos' : `Oleada ${offer.wave}`} · nueva carrera`}
             </StatusPill>
             <p className="mt-2 font-mono text-caption text-ink-muted">{offer.code}</p>
           </div>

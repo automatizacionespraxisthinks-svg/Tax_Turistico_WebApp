@@ -1,11 +1,11 @@
 import { Inject, Injectable, Logger, forwardRef } from '@nestjs/common';
 import { InjectQueue } from '@nestjs/bullmq';
 import type { Queue } from 'bullmq';
-import { and, eq, inArray, isNull, lt, or, sql } from 'drizzle-orm';
+import { and, eq, gt, inArray, isNull, lt, or, sql } from 'drizzle-orm';
 import { uuidv7 } from 'uuidv7';
 import { DB, type Database } from '../../db/db.module';
 import { AuditService } from '../audit/audit.service';
-import { driverShifts, drivers, rideOffers, rideStatusHistory, rides, vehicles } from '../../db/schema';
+import { driverShifts, drivers, rideDriverCancellations, rideOffers, rideStatusHistory, rides, vehicles } from '../../db/schema';
 import { AppError } from '../../common/problem';
 import { isUniqueViolation } from '../../common/pg-errors';
 import { OutboxService } from '../integrations/outbox.service';
@@ -13,7 +13,7 @@ import { FleetService } from '../fleet/fleet.service';
 import { ZonesService } from '../pricing/zones.service';
 import { RidesService, type Actor } from '../rides/rides.service';
 import { RealtimeGateway } from '../../realtime/realtime.gateway';
-import { PushService } from '../push/push.service';
+import { PushService, type EstadoAviso } from '../push/push.service';
 import { loadEnv } from '../../config/env';
 import { OLEADA_A_TODOS, finDeSuspension, sigueSuspendido, type Oleada, type WaveLogEntry } from '@tax/shared';
 
@@ -31,6 +31,14 @@ export interface AutoRelaunchJob {
 }
 
 /** Por qué la cerró el sistema; viaja a n8n en `ride.cancelled.cierre`. */
+/** Reenviar los avisos que el teléfono no confirmó (21/11/2026). */
+export const AVISO_REENVIO_JOB = 'aviso-reenvio';
+export interface AvisoReenvioJob {
+  rideId: string;
+  wave: Oleada;
+  intento: number;
+}
+
 export const CIERRE_SIN_CONDUCTOR = 'sin_conductor';
 export const CIERRE_POR_INACTIVIDAD = 'caducada';
 
@@ -153,7 +161,12 @@ export class DispatchService {
           or(eq(rideOffers.intento, intento), eq(rideOffers.response, 'rejected')),
         ),
       );
-    const excluidos = alreadyOffered.map((row) => row.driverId);
+    // Quien la soltó por fuerza mayor tampoco la vuelve a recibir (21/11/2026).
+    const laSoltaron = await this.db
+      .select({ driverId: rideDriverCancellations.driverId })
+      .from(rideDriverCancellations)
+      .where(eq(rideDriverCancellations.rideId, rideId));
+    const excluidos = [...alreadyOffered, ...laSoltaron].map((row) => row.driverId);
 
     if (aTodos) {
       const todos = await this.fleet.findAllAvailable(pickup, excluidos, ride.pagoElectronico);
@@ -248,10 +261,13 @@ export class DispatchService {
       },
     );
 
+    // El id de cada oferta se conoce antes de guardarla: viaja en el aviso
+    // para que el teléfono confirme que le llegó (ver PushService).
+    const idOferta = new Map(candidates.map((candidate) => [candidate.driverId, uuidv7()]));
     if (candidates.length > 0) {
       await this.db.insert(rideOffers).values(
         candidates.map((candidate) => ({
-          id: uuidv7(),
+          id: idOferta.get(candidate.driverId)!,
           rideId,
           driverId: candidate.driverId,
           wave,
@@ -303,8 +319,13 @@ export class DispatchService {
     });
 
     const zoneName = ride.zoneId ? this.zones.byId(ride.zoneId)?.name : undefined;
-    const oferta = (c: { distanceKm: number; etaMinutes: number }) => ({
+    // Desde el segundo intento la carrera ya dio una vuelta sin conductor.
+    const urgente = intento >= 2;
+    const esperandoMin = Math.round((Date.now() - new Date(ride.createdAt).getTime()) / 60000);
+    const oferta = (c: { distanceKm: number; etaMinutes: number; offerId?: string }) => ({
       rideId,
+      urgente,
+      ...(c.offerId ? { offerId: c.offerId, firma: this.push.firmaAcuse(c.offerId) } : {}),
       code: ride.code,
       pickupText: ride.pickupText,
       pickupReference: ride.pickupReference,
@@ -324,11 +345,12 @@ export class DispatchService {
      * Un aviso por oleada a la misma persona sería ruido.
      */
     for (const viva of vivas) {
-      this.realtime.offerToDriver(viva.driverId, oferta(viva));
+      this.realtime.offerToDriver(viva.driverId, oferta({ ...viva, offerId: viva.id }));
     }
 
     for (const candidate of candidates) {
-      this.realtime.offerToDriver(candidate.driverId, oferta(candidate));
+      const offerId = idOferta.get(candidate.driverId)!;
+      this.realtime.offerToDriver(candidate.driverId, oferta({ ...candidate, offerId }));
 
       /*
        * El push va además del socket, no en su lugar: con la aplicación
@@ -336,21 +358,105 @@ export class DispatchService {
        * teléfono bloqueado es lo único que llega. Enviarlo no puede frenar
        * la oleada, así que no se espera.
        */
-      void this.push
-        .notifyOffer(candidate.driverId, {
-          rideId,
-          code: ride.code,
-          zona: zoneName,
-        })
-        .catch((error: unknown) => {
-          this.logger.warn({ err: error, driverId: candidate.driverId }, 'Aviso no entregado');
-        });
+      void this.avisar(candidate.driverId, offerId, {
+        rideId,
+        code: ride.code,
+        zona: zoneName,
+        venceEn: ofertaVence,
+        urgente,
+        esperandoMin,
+      });
+    }
+
+    // A los que no confirmen que les llegó, se les vuelve a mandar una vez.
+    if (candidates.length > 0 && this.env.AVISO_REENVIO_SEG > 0) {
+      await this.queue
+        .add(
+          AVISO_REENVIO_JOB,
+          { rideId, wave, intento },
+          {
+            jobId: `${rideId}_i${intento}_w${wave}_reaviso`,
+            delay: this.env.AVISO_REENVIO_SEG * 1000,
+            removeOnComplete: true,
+            removeOnFail: true,
+          },
+        )
+        .catch((error: unknown) => this.logger.warn({ err: error, rideId }, 'No se programó el reenvío de avisos'));
     }
 
     this.logger.log(
       { rideId, wave, candidatos: candidates.length, arrastrados: vivas.length, radioKm: config.radiusKm },
       'Oleada lanzada',
     );
+  }
+
+  /**
+   * Manda el aviso de una oferta y anota qué pasó (21/11/2026). Nunca frena
+   * la oleada: si algo falla, queda dicho en la oferta y en el registro.
+   */
+  private async avisar(
+    driverId: string,
+    offerId: string,
+    datos: Omit<Parameters<PushService['notifyOffer']>[1], 'offerId'>,
+    reenvio = false,
+  ): Promise<void> {
+    let estado: EstadoAviso;
+    try {
+      estado = await this.push.notifyOffer(driverId, { ...datos, offerId });
+    } catch (error) {
+      this.logger.warn({ err: error, driverId }, 'Aviso no entregado');
+      estado = 'fallido';
+    }
+    if (estado !== 'enviado') {
+      this.logger.warn({ driverId, rideId: datos.rideId, estado }, 'El aviso de la oferta no salió');
+    }
+    await this.db
+      .update(rideOffers)
+      .set({ aviso: reenvio && estado === 'enviado' ? 'reenviado' : estado, avisoEnviadoAt: new Date() })
+      .where(eq(rideOffers.id, offerId))
+      .catch((error: unknown) => this.logger.warn({ err: error, offerId }, 'No se anotó el aviso'));
+  }
+
+  /**
+   * Reenvío de avisos sin confirmar (21/11/2026).
+   *
+   * A los AVISO_REENVIO_SEG de lanzar una oleada, las ofertas de esa oleada
+   * que siguen vivas y cuyo teléfono no confirmó el aviso se vuelven a
+   * mandar, una sola vez. Cubre el aviso que el servicio de push aceptó pero
+   * el teléfono no recibió (reposo profundo, red caída un momento).
+   */
+  async reenviarAvisos(rideId: string, wave: Oleada, intento: number): Promise<number> {
+    const ride = await this.ridesService.byId(rideId);
+    if (ride.status !== 'NOTIFIED' || ride.intentoDespacho !== intento) return 0;
+
+    const sinConfirmar = await this.db
+      .select({ id: rideOffers.id, driverId: rideOffers.driverId, expiresAt: rideOffers.expiresAt })
+      .from(rideOffers)
+      .where(
+        and(
+          eq(rideOffers.rideId, rideId),
+          eq(rideOffers.intento, intento),
+          eq(rideOffers.wave, wave),
+          eq(rideOffers.response, 'pending'),
+          isNull(rideOffers.revokedAt),
+          isNull(rideOffers.recibidaAt),
+          gt(rideOffers.expiresAt, new Date()),
+        ),
+      );
+    const zona = ride.zoneId ? this.zones.byId(ride.zoneId)?.name : undefined;
+    const esperandoMin = Math.round((Date.now() - new Date(ride.createdAt).getTime()) / 60000);
+    await Promise.all(
+      sinConfirmar.map((o) =>
+        this.avisar(
+          o.driverId,
+          o.id,
+          { rideId, code: ride.code, zona, venceEn: o.expiresAt, urgente: intento >= 2, esperandoMin },
+          true,
+        ),
+      ),
+    );
+    if (sinConfirmar.length) this.logger.log({ rideId, wave, reenviados: sinConfirmar.length }, 'Avisos sin confirmar reenviados');
+    return sinConfirmar.length;
   }
 
   /**
@@ -423,7 +529,11 @@ export class DispatchService {
   async expireStaleUnassigned(): Promise<number> {
     // Nunca antes de que le toque al relanzamiento automático, aunque la
     // configuración ponga una espera más larga que la caducidad.
-    const segundos = Math.max(this.env.CADUCIDAD_SIN_CONDUCTOR_MIN * 60, this.env.RELANZAMIENTO_ESPERA_SEG + 60);
+    const segundos = Math.max(
+      this.env.CADUCIDAD_SIN_CONDUCTOR_MIN * 60,
+      this.env.RELANZAMIENTO_ESPERA_SEG + 60,
+      this.env.REINTENTO_URGENTE_ESPERA_SEG + 60,
+    );
     const limite = new Date(Date.now() - segundos * 1000);
     const viejas = await this.db
       .select({ id: rides.id, code: rides.code })
@@ -433,6 +543,20 @@ export class DispatchService {
 
     let cerradas = 0;
     for (const { id, code } of viejas) {
+      /*
+       * Con BUSCAR_HASTA_CANCELAR no se cierra: se vuelve a buscar. Una
+       * carrera quieta aquí es un temporizador perdido (reinicio de la API,
+       * cola caída), no un cliente que se rindió.
+       */
+      if (this.env.BUSCAR_HASTA_CANCELAR) {
+        try {
+          await this.redispatch(id, SYSTEM, 'Relanzamiento automático: llevaba sin asignar demasiado tiempo');
+          cerradas += 1;
+        } catch (error) {
+          this.logger.warn({ err: error, rideId: id }, 'No se pudo relanzar una carrera sin asignar');
+        }
+        continue;
+      }
       try {
         await this.ridesService.cancel(
           id,
@@ -566,15 +690,32 @@ export class DispatchService {
      * quedan, se cierra: n8n le pide al cliente que vuelva a intentarlo y el
      * cliente queda libre para pedir otro taxi.
      */
-    const relanzar = ride.intentoDespacho <= this.env.RELANZAMIENTOS_AUTOMATICOS;
+    /*
+     * Con BUSCAR_HASTA_CANCELAR (21/11/2026) se relanza siempre: la búsqueda
+     * solo la corta una cancelación. Al cliente se le escribe una sola vez,
+     * al agotarse el primer intento («Estamos buscando…»); los siguientes
+     * siguen en silencio hasta que un conductor acepte. La oficina oye la
+     * alerta la primera vez y luego cada cinco intentos, para enterarse sin
+     * tener que intervenir.
+     */
+    const sinLimite = this.env.BUSCAR_HASTA_CANCELAR;
+    const relanzar = sinLimite || ride.intentoDespacho <= this.env.RELANZAMIENTOS_AUTOMATICOS;
 
     if (relanzar) {
+      const primero = ride.intentoDespacho <= 1;
+      const espera = primero ? this.env.RELANZAMIENTO_ESPERA_SEG : this.env.REINTENTO_URGENTE_ESPERA_SEG;
       await this.ridesService.transition(rideId, 'UNASSIGNED', SYSTEM, {
-        note: `${motivo}: se relanza automáticamente`,
-        event: {
-          type: 'ride.no_driver',
-          payload: { pagoElectronico: electronico, relanzamiento: true, intento: ride.intentoDespacho },
-        },
+        note: primero
+          ? `${motivo}: se relanza automáticamente`
+          : `${motivo} (intento ${ride.intentoDespacho}): se vuelve a avisar como urgente`,
+        ...(primero || !sinLimite
+          ? {
+              event: {
+                type: 'ride.no_driver' as const,
+                payload: { pagoElectronico: electronico, relanzamiento: true, intento: ride.intentoDespacho },
+              },
+            }
+          : {}),
       });
       await this.queue.add(
         AUTO_RELAUNCH_JOB,
@@ -582,17 +723,21 @@ export class DispatchService {
         {
           // Sin dos puntos, como los temporizadores de oleada.
           jobId: `${rideId}_relanzar_i${ride.intentoDespacho}`,
-          delay: this.env.RELANZAMIENTO_ESPERA_SEG * 1000,
+          delay: espera * 1000,
           removeOnComplete: true,
           removeOnFail: true,
         },
       );
-      this.realtime.alertOffice({
-        kind: 'no_driver',
-        rideId,
-        code: ride.code,
-        message: `${ride.code}: ${motivo.toLowerCase()}; se relanza sola en ${this.env.RELANZAMIENTO_ESPERA_SEG} s`,
-      });
+      if (primero || ride.intentoDespacho % 5 === 0) {
+        this.realtime.alertOffice({
+          kind: 'no_driver',
+          rideId,
+          code: ride.code,
+          message: sinLimite
+            ? `${ride.code}: ${motivo.toLowerCase()}; se sigue buscando sola (intento ${ride.intentoDespacho})`
+            : `${ride.code}: ${motivo.toLowerCase()}; se relanza sola en ${espera} s`,
+        });
+      }
       return;
     }
 
@@ -612,6 +757,65 @@ export class DispatchService {
       code: ride.code,
       message: `${ride.code}: ${motivo.toLowerCase()}; sin más relanzamientos, se cerró y se le pidió al cliente volver a intentarlo`,
     });
+  }
+
+  /* ------------------------------------------------ fuerza mayor (21/11) */
+
+  /**
+   * El conductor suelta la carrera por fuerza mayor antes de recoger al
+   * cliente: se varó, un accidente, una emergencia.
+   *
+   * Antes la carrera se cancelaba y el cliente se quedaba sin taxi hasta que
+   * volviera a escribir. Ahora vuelve a buscar: se libera al conductor, se le
+   * avisa al cliente que se le está buscando otro (`ride.no_driver` con
+   * `conductorCancelo`), se lanza la oleada 1 sin él, y cuando otro acepte el
+   * evento es `ride.reassigned`: «Le asignamos otro taxi». La cancelación del
+   * conductor queda en `ride_driver_cancellations`, que es de donde Reportes
+   * la cuenta, porque la carrera ya no termina cancelada.
+   */
+  async soltarPorFuerzaMayor(
+    rideId: string,
+    conductor: { id: string; name: string; code: string },
+    motivo: { clave: string; texto: string },
+    at?: { lat: number; lng: number },
+  ) {
+    const antes = await this.ridesService.byId(rideId);
+    await this.ridesService.transition(rideId, 'NOTIFIED', SYSTEM, {
+      note: `${conductor.name} (${conductor.code}) canceló por fuerza mayor: ${motivo.texto}. Se busca otro taxi.`,
+      at,
+      patch: { driverId: null, vehicleId: null, assignedAt: null, arrivedAt: null },
+      event: {
+        type: 'ride.no_driver',
+        payload: {
+          pagoElectronico: antes.pagoElectronico,
+          conductorCancelo: true,
+          motivo: motivo.clave,
+          // En qué iba: si ya estaba en el punto, el cliente lo estaba viendo.
+          desde: antes.status,
+        },
+      },
+    });
+    await this.db.insert(rideDriverCancellations).values({
+      id: uuidv7(),
+      rideId,
+      driverId: conductor.id,
+      motivo: motivo.clave,
+      motivoTexto: motivo.texto,
+      desde: antes.status,
+      lat: at?.lat ?? null,
+      lng: at?.lng ?? null,
+    });
+    await this.releaseDriver(conductor.id);
+
+    this.realtime.alertOffice({
+      kind: 'driver_cancelled',
+      rideId,
+      code: antes.code,
+      message: `${conductor.name} (${conductor.code}) canceló ${antes.code}: ${motivo.texto}. Se está buscando otro taxi solo.`,
+    });
+
+    await this.startWave(rideId, 1);
+    return this.ridesService.byId(rideId);
   }
 
   /* ---------------------------------------------------------- aceptación */
@@ -764,9 +968,17 @@ export class DispatchService {
 
         revokedDrivers.push(...revoked.map((row) => row.driverId));
 
+        /*
+         * Si otro conductor la había soltado por fuerza mayor, para el cliente
+         * es un taxi nuevo: «Le asignamos otro taxi» (21/11/2026).
+         */
+        const [soltada] = await tx
+          .select({ n: sql<number>`count(*)::int` })
+          .from(rideDriverCancellations)
+          .where(eq(rideDriverCancellations.rideId, rideId));
         eventIds.push(
           await this.outbox.enqueue(tx, {
-            type: 'ride.assigned',
+            type: (soltada?.n ?? 0) > 0 ? 'ride.reassigned' : 'ride.assigned',
             rideId,
             rideCode: row.code,
             rideVersion: row.version,

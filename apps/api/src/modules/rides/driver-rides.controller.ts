@@ -4,6 +4,7 @@ import { z } from 'zod';
 import {
   CANCELABLE_POR_EL_CONDUCTOR,
   cancelacionConductorSchema,
+  cancelacionRelanza,
   haversineKm,
   pointSchema,
   textoDelMotivo,
@@ -247,6 +248,21 @@ export class DriverRidesController {
     }
 
     const motivo = textoDelMotivo(body.motivo, body.detalle);
+
+    /*
+     * Fuerza mayor (21/11/2026): la carrera no se cancela, se le busca otro
+     * taxi al cliente y se le avisa cuando lo haya. Solo «El cliente no
+     * aparece» la cierra.
+     */
+    if (cancelacionRelanza(body.motivo)) {
+      return this.dispatch.soltarPorFuerzaMayor(
+        rideId,
+        { id: driver.id, name: driver.name, code: driver.code },
+        { clave: body.motivo, texto: motivo },
+        body.at,
+      );
+    }
+
     // El motivo va solo: quién canceló ya queda en `cancelled_by` y en la
     // bitácora, y así se lee igual en el panel, en Reportes y en n8n.
     const cancelada = await this.rides.cancel(rideId, motivo, actorFrom(request), {
@@ -258,7 +274,7 @@ export class DriverRidesController {
       kind: 'driver_cancelled',
       rideId,
       code: ride.code,
-      message: `${driver.name} (${driver.code}) canceló ${ride.code}: ${motivo}. El cliente se quedó sin taxi.`,
+      message: `${driver.name} (${driver.code}) canceló ${ride.code}: ${motivo}. Se cerró la carrera y se le avisó al cliente.`,
     });
     return cancelada;
   }

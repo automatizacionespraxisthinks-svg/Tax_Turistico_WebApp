@@ -747,8 +747,33 @@ function OleadaFila({
   );
 }
 
+/**
+ * Si el aviso llegó de verdad al teléfono (21/11/2026). «Recibida» solo se
+ * muestra cuando el teléfono lo confirmó; lo demás dice por qué no hay
+ * prueba de entrega, para que la oficina sepa a quién llamar.
+ */
+function entregaDe(offer: RideOffer): { texto: string; clase: string; titulo: string } | null {
+  if (offer.recibidaAt) {
+    return { texto: 'Le llegó', clase: TONE_CLASS.positive, titulo: `El teléfono confirmó el aviso a las ${new Date(offer.recibidaAt).toLocaleTimeString('es-CO')}` };
+  }
+  switch (offer.aviso) {
+    case 'enviado':
+    case 'reenviado':
+      return { texto: offer.aviso === 'reenviado' ? 'Reenviado, sin confirmar' : 'Enviado, sin confirmar', clase: TONE_CLASS.warning, titulo: 'El aviso salió, pero el teléfono todavía no confirmó que le llegó' };
+    case 'sin_dispositivo':
+      return { texto: 'Sin avisos activos', clase: TONE_CLASS.critical, titulo: 'El conductor no tiene los avisos activados en su celular: solo la ve con la aplicación abierta' };
+    case 'fallido':
+      return { texto: 'Falló el aviso', clase: TONE_CLASS.critical, titulo: 'El servicio de avisos rechazó el envío' };
+    case 'apagado':
+      return { texto: 'Avisos apagados', clase: TONE_CLASS.critical, titulo: 'La API no tiene configurados los avisos (claves VAPID)' };
+    default:
+      return null;
+  }
+}
+
 function OfertaFila({ offer }: { offer: RideOffer }) {
   const { label, tone } = RESPUESTA[offer.response];
+  const entrega = entregaDe(offer);
   return (
     <li
       className={cn(
@@ -762,6 +787,11 @@ function OfertaFila({ offer }: { offer: RideOffer }) {
       <span className="tnum shrink-0 text-caption text-ink-muted">
         {formatDistance(offer.distanceKm)} · {offer.etaMinutes} min
       </span>
+      {entrega ? (
+        <span className={cn('shrink-0 text-micro font-medium text-[var(--tone-ink)]', entrega.clase)} title={entrega.titulo}>
+          {entrega.texto}
+        </span>
+      ) : null}
       <span className="shrink-0 text-caption font-medium text-[var(--tone-ink)]">{label}</span>
     </li>
   );

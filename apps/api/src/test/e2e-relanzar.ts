@@ -1,4 +1,6 @@
 import 'dotenv/config';
+import { createHmac } from 'node:crypto';
+import { Pool } from 'pg';
 
 /**
  * Relanzar el despacho de una carrera que nadie aceptó.
@@ -19,8 +21,12 @@ import 'dotenv/config';
  *
  *  1. agotada la ronda final, queda sin asignar y se relanza sola, sin 500;
  *  2. quien no contestó vuelve a contar en la oleada 1 del relanzamiento;
- *  3. si el relanzamiento tampoco consigue conductor, se cierra (sistema);
- *  4. quien rechazó la carrera no vuelve a recibirla, relance quien relance,
+ *  3. el teléfono confirma el aviso con la firma de la oferta, y una firma
+ *     falsa no marca nada (acuse de recibo, 21/11/2026);
+ *  4. si tampoco así la toma nadie, NO se cierra: sigue relanzándose, con
+ *     aviso urgente, y al cliente se le escribe una sola vez; solo la cierra
+ *     la cancelación del cliente (BUSCAR_HASTA_CANCELAR, 21/11/2026);
+ *  5. quien rechazó la carrera no vuelve a recibirla, relance quien relance,
  *     y un relanzamiento de la oficina no choca con el automático.
  *
  * Tarda unos tres minutos: espera vencimientos reales de la ronda final.
@@ -126,6 +132,7 @@ async function esperarOferta(id: string, intento: number): Promise<Detalle> {
 
 const relanzar = (id: string) => call(`/v1/rides/${id}/redispatch`, { method: 'POST', apiKey: true });
 const ESPERA_RELANZAMIENTO = Number(process.env.RELANZAMIENTO_ESPERA_SEG ?? 20);
+const ESPERA_URGENTE = Number(process.env.REINTENTO_URGENTE_ESPERA_SEG ?? 45);
 
 /** Espera la primera oferta de un intento: el relanzamiento automático la crea solo. */
 async function esperarIntento(id: string, intento: number, segundos: number): Promise<Detalle> {
@@ -200,24 +207,59 @@ async function main(): Promise<void> {
   );
 
   /* ------------------------------------------------------------------ 3 */
-  console.log('\n3. Tampoco la toma: se cierra sola y el cliente queda libre');
-  const rechazo = await call(`/v1/driver/rides/${id}/reject`, { method: 'POST', token });
-  assert(rechazo.status < 400, 'el conductor la rechaza', rechazo.body);
-  d = await esperarEstado(id, 'CANCELLED', 20);
-  assert(d.status === 'CANCELLED', `sin nadie mas y sin relanzamientos, queda cancelada (${d.status})`);
-  assert(d.cancelledBy === 'system' && d.cancelCode === 'sin_conductor', 'la cerro el sistema, por falta de conductor', {
-    cancelledBy: d.cancelledBy,
-    cancelCode: d.cancelCode,
-  });
+  console.log('\n3. Acuse de recibo: el teléfono confirma el aviso');
+  {
+    const pool = new Pool({ connectionString: process.env.DATABASE_URL, max: 1 });
+    const fila = (
+      await pool.query(`select id, aviso from ride_offers where ride_id = $1 and intento = 2 order by sent_at limit 1`, [id])
+    ).rows[0] as { id: string; aviso: string | null };
+    assert(Boolean(fila?.aviso), `la oferta dice qué pasó con el aviso («${fila?.aviso}»)`);
+    const firma = createHmac('sha256', String(process.env.SESSION_SECRET)).update(`acuse:${fila.id}`).digest('base64url').slice(0, 32);
+    const mala = await call('/v1/driver/push/recibido', { method: 'POST', body: { offerId: fila.id, firma: 'x'.repeat(32) } });
+    let recibida = (await pool.query(`select recibida_at from ride_offers where id = $1`, [fila.id])).rows[0].recibida_at;
+    assert(mala.status === 204 && recibida === null, 'con una firma falsa no se marca');
+    const buena = await call('/v1/driver/push/recibido', { method: 'POST', body: { offerId: fila.id, firma } });
+    recibida = (await pool.query(`select recibida_at from ride_offers where id = $1`, [fila.id])).rows[0].recibida_at;
+    assert(buena.status === 204 && recibida !== null, 'con la firma del aviso queda como recibida');
+    const conAcuse = (await detalle(id)).offers.some((o) => (o as Oferta & { recibidaAt?: string }).recibidaAt);
+    assert(conAcuse, 'y el detalle que ve el panel lo muestra');
+    await pool.end();
+  }
 
   /* ------------------------------------------------------------------ 4 */
-  console.log('\n4. Otra carrera: la rechaza y la oficina relanza antes que el sistema');
+  console.log('\n4. Tampoco la toma: sigue buscando, en silencio, hasta que el cliente cancele');
+  const rechazo = await call(`/v1/driver/rides/${id}/reject`, { method: 'POST', token });
+  assert(rechazo.status < 400, 'el conductor la rechaza', rechazo.body);
+  d = await esperarEstado(id, 'UNASSIGNED', 20);
+  assert(d.status === 'UNASSIGNED', `no se cierra: queda sin asignar mientras vuelve a buscar (${d.status})`);
+  assert(
+    ultimaNotaSinAsignar(d)?.includes('se vuelve a avisar como urgente') === true,
+    `la bitácora dice que el siguiente aviso es urgente: «${ultimaNotaSinAsignar(d)}»`,
+  );
+  d = await esperarIntento(id, 3, ESPERA_URGENTE + 30);
+  assert(d.intentoDespacho >= 3 && d.status !== 'CANCELLED', `relanza otra vez sola (intento ${d.intentoDespacho}, ${d.status})`);
+  {
+    const pool = new Pool({ connectionString: process.env.DATABASE_URL, max: 1 });
+    const n = (
+      await pool.query(`select count(*)::int n from outbox_events where type = 'ride.no_driver' and ride_id = $1`, [id])
+    ).rows[0].n as number;
+    await pool.end();
+    assert(n === 1, `al cliente se le escribió una sola vez «Estamos buscando…» (${n})`);
+  }
+  const cancelada = await call(`/v1/rides/${id}/cancel`, { method: 'POST', apiKey: true, body: { reason: 'Ya no lo necesito' } });
+  assert(cancelada.status < 400, 'el cliente la cancela por el chat', cancelada.body);
+  await new Promise((res) => setTimeout(res, (ESPERA_URGENTE + 5) * 1000));
+  d = await detalle(id);
+  assert(d.status === 'CANCELLED' && d.cancelledBy !== 'system', `solo la cancelación del cliente la cierra (${d.status}, ${d.cancelledBy})`);
+
+  /* ------------------------------------------------------------------ 5 */
+  console.log('\n5. Otra carrera: la rechaza y la oficina relanza antes que el sistema');
   const segunda = await call('/v1/rides', {
     method: 'POST',
     apiKey: true,
     body: { customerPhone: '+573001234599', pickup: { text: 'Carrera 21 # 24-18', point: CENTRO }, passengers: 1 },
   });
-  assert(segunda.status < 400, 'el mismo cliente puede pedir otra: ya no esta bloqueado', segunda.body);
+  assert(segunda.status < 400, 'el mismo cliente puede pedir otra', segunda.body);
   const id2 = (segunda.body as { id: string }).id;
   d = await esperarOferta(id2, 1);
   const rechazo2 = await call(`/v1/driver/rides/${id2}/reject`, { method: 'POST', token });
@@ -227,7 +269,7 @@ async function main(): Promise<void> {
 
   const r = await relanzar(id2);
   assert(r.status < 400, `la oficina relanza: responde ${r.status}, no 500`, r.body);
-  d = await esperarEstado(id2, 'CANCELLED', 20);
+  d = await esperarEstado(id2, 'UNASSIGNED', 20);
   assert(!d.offers.some((o) => o.intento === 2), 'el intento 2 no le ofrece nada a quien la rechazo');
   assert(
     d.waveLog.filter((e) => e.intento === 2).every((e) => e.candidates === 0),
@@ -235,21 +277,21 @@ async function main(): Promise<void> {
   );
   // Aqui no le llego a nadie: la nota no puede decir que «nadie acepto».
   assert(
-    ultimaNotaSinAsignar(d) === 'Ninguna oleada encontró conductores',
+    ultimaNotaSinAsignar(d)?.startsWith('Ninguna oleada encontró conductores') === true,
     `la bitacora lo distingue: «${ultimaNotaSinAsignar(d)}»`,
   );
-  assert(d.status === 'CANCELLED', 'y como ya fue relanzada, se cierra');
 
-  // El relanzamiento automático del intento 1 llega despues y no la revive.
+  // El relanzamiento automático del intento 1 llega despues y no se suma.
   await new Promise((res) => setTimeout(res, (ESPERA_RELANZAMIENTO + 5) * 1000));
   d = await detalle(id2);
-  assert(d.status === 'CANCELLED' && d.intentoDespacho === 2, 'el relanzamiento automatico pendiente no la revive');
+  assert(d.intentoDespacho === 2 || ESPERA_URGENTE <= ESPERA_RELANZAMIENTO + 5, `el relanzamiento pendiente del intento 1 no se suma (intento ${d.intentoDespacho})`);
 
-  console.log('\n4. Limpieza');
+  console.log('\n6. Limpieza');
+  await call(`/v1/rides/${id2}/cancel`, { method: 'POST', apiKey: true, body: { reason: 'Limpieza' } });
   await call('/v1/driver/shift/close', { method: 'POST', token });
-  console.log('  turno cerrado (las dos carreras ya quedaron cerradas por el sistema)');
+  console.log('  carrera cancelada y turno cerrado');
 
-  console.log('\nok Relanzar funciona solo, y la carrera nunca se queda colgada\n');
+  console.log('\nok La búsqueda no se corta sola, y la oficina puede relanzar sin chocar con el sistema\n');
 }
 
 main().catch((e) => {

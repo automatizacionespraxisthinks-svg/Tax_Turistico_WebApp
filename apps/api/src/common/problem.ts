@@ -78,6 +78,8 @@ export const ERROR_CODES = {
   VEHICLE_NOT_ALLOWED: 'Ese vehículo no está entre tus vehículos permitidos',
   RIDE_TOO_SHORT: 'Todavía no ha pasado el tiempo mínimo para finalizar',
   NO_FARE_RULE: 'No hay regla tarifaria vigente para ese par de zonas',
+  /* El nombre de WhatsApp no sirve y el agente no preguntó el nombre (21/11/2026). */
+  MISSING_CUSTOMER_NAME: 'Falta el nombre del cliente',
 
   INTERNAL: 'Error interno',
 } as const;
@@ -86,6 +88,7 @@ export type ErrorCode = keyof typeof ERROR_CODES;
 
 const STATUS_BY_CODE: Record<ErrorCode, HttpStatus> = {
   MISSING_LOCATION: HttpStatus.UNPROCESSABLE_ENTITY,
+  MISSING_CUSTOMER_NAME: HttpStatus.UNPROCESSABLE_ENTITY,
   OUT_OF_COVERAGE: HttpStatus.UNPROCESSABLE_ENTITY,
   RIDE_ALREADY_ACTIVE: HttpStatus.CONFLICT,
   MAX_ACTIVE_RIDES: HttpStatus.CONFLICT,

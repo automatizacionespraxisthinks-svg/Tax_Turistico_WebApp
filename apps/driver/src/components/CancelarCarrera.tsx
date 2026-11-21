@@ -92,8 +92,8 @@ export function CancelarCarrera({
                 <p className="font-mono text-caption text-ink-muted">{code}</p>
                 <h2 className="mt-1 text-2xl font-bold text-ink">¿Cancelar la carrera?</h2>
                 <p className="mt-2 text-lg leading-snug text-ink-secondary">
-                  Solo por una causa mayor. El cliente se queda sin este taxi y la oficina recibe el aviso con
-                  el motivo.
+                  Solo por una causa mayor. Al cliente se le busca otro taxi enseguida y la oficina recibe
+                  el aviso con el motivo. Si el cliente no aparece, la carrera se cierra.
                 </p>
 
                 <fieldset className="mt-4 space-y-2">

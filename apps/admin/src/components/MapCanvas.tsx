@@ -73,11 +73,28 @@ const DRIVER_TONE: Record<Driver['status'], string> = {
   OFF_SHIFT: 'neutral',
 };
 
-function driversToGeoJson(drivers: Driver[]): FeatureCollection {
+/*
+ * Pasajero a bordo (21/11/2026): con la carrera en curso, el cliente va en el
+ * taxi. Su pin deja el punto de recogida y se dibuja donde está el taxi, con
+ * el borde azul del conductor en carrera: una sola figura que se mueve. El
+ * punto del conductor se oculta mientras tanto para no dibujarlo dos veces.
+ */
+function aBordo(rides: Ride[], drivers: Driver[]): Map<string, { lat: number; lng: number }> {
+  const posicion = new Map(drivers.filter((d) => d.position).map((d) => [d.id, d.position!]));
+  const enCurso = new Map<string, { lat: number; lng: number }>();
+  for (const ride of rides) {
+    if (ride.status !== 'IN_PROGRESS' || !ride.driverId) continue;
+    const p = posicion.get(ride.driverId);
+    if (p) enCurso.set(ride.id, p);
+  }
+  return enCurso;
+}
+
+function driversToGeoJson(drivers: Driver[], ocultos: Set<string> = new Set()): FeatureCollection {
   return {
     type: 'FeatureCollection',
     features: drivers
-      .filter((driver) => driver.position)
+      .filter((driver) => driver.position && !ocultos.has(driver.id))
       .map((driver) => ({
         type: 'Feature' as const,
         id: driver.id,
@@ -102,20 +119,27 @@ function driversToGeoJson(drivers: Driver[]): FeatureCollection {
   };
 }
 
-function ridesToGeoJson(rides: Ride[], selectedId?: string | null): FeatureCollection {
+function ridesToGeoJson(
+  rides: Ride[],
+  selectedId?: string | null,
+  enElTaxi: Map<string, { lat: number; lng: number }> = new Map(),
+): FeatureCollection {
   return {
     type: 'FeatureCollection',
     features: rides
       // Una carrera sin ubicar tiene punto —el de partida del pueblo, desde
       // donde se despacha—, pero no es donde está el cliente: pintarla ahí
-      // es lo que hacía creer que la dirección se había ubicado mal.
-      .filter((ride) => ride.pickup.point && ride.pickupSource !== 'sin_ubicar')
+      // es lo que hacía creer que la dirección se había ubicado mal. Con el
+      // pasajero a bordo sí se pinta: está donde está el taxi.
+      .filter((ride) => enElTaxi.has(ride.id) || (ride.pickup.point && ride.pickupSource !== 'sin_ubicar'))
       .map((ride) => ({
         type: 'Feature' as const,
         id: ride.id,
         geometry: {
           type: 'Point' as const,
-          coordinates: [ride.pickup.point!.lng, ride.pickup.point!.lat],
+          coordinates: enElTaxi.has(ride.id)
+            ? [enElTaxi.get(ride.id)!.lng, enElTaxi.get(ride.id)!.lat]
+            : [ride.pickup.point!.lng, ride.pickup.point!.lat],
         },
         properties: {
           id: ride.id,
@@ -133,6 +157,8 @@ function ridesToGeoJson(rides: Ride[], selectedId?: string | null): FeatureColle
           esperando:
             ride.status === 'NOTIFIED' || ride.status === 'UNASSIGNED' || ride.status === 'PENDING',
           seleccionada: ride.id === selectedId,
+          aBordo: enElTaxi.has(ride.id),
+          borde: enElTaxi.has(ride.id) ? toneColor(DRIVER_TONE.ON_RIDE) : token('--c-surface'),
         },
       })),
   };
@@ -324,8 +350,9 @@ export function MapCanvas({ rides, selectedRideId, onSelectRide, className }: Ma
         paint: {
           'circle-radius': ['case', ['get', 'seleccionada'], 13, 10],
           'circle-color': ['get', 'color'],
-          'circle-stroke-color': colors.surface,
-          'circle-stroke-width': ['case', ['get', 'seleccionada'], 3, 2.5],
+          // A bordo, el borde es el azul del taxi en carrera: el cliente va en él.
+          'circle-stroke-color': ['get', 'borde'],
+          'circle-stroke-width': ['case', ['get', 'aBordo'], 3.5, ['get', 'seleccionada'], 3, 2.5],
         },
       });
       instance.addLayer({
@@ -450,13 +477,19 @@ export function MapCanvas({ rides, selectedRideId, onSelectRide, className }: Ma
     publish('zonas', zonesGeoJson);
   }, [zonesGeoJson, ready]);
 
-  useEffect(() => {
-    publish('conductores', driversToGeoJson(drivers));
-  }, [drivers, ready]);
+  // Las carreras en curso, con la posición en vivo del taxi que las lleva.
+  const enElTaxi = useMemo(() => aBordo(rides, drivers), [rides, drivers]);
 
   useEffect(() => {
-    publish('pines', ridesToGeoJson(rides, selectedRideId));
-  }, [rides, selectedRideId, ready]);
+    const llevanPasajero = new Set(
+      rides.filter((r) => enElTaxi.has(r.id) && r.driverId).map((r) => r.driverId!),
+    );
+    publish('conductores', driversToGeoJson(drivers, llevanPasajero));
+  }, [drivers, rides, enElTaxi, ready]);
+
+  useEffect(() => {
+    publish('pines', ridesToGeoJson(rides, selectedRideId, enElTaxi));
+  }, [rides, selectedRideId, enElTaxi, ready]);
 
   /** Línea entre el conductor asignado y el punto de recogida. */
   useEffect(() => {
@@ -480,7 +513,9 @@ export function MapCanvas({ rides, selectedRideId, onSelectRide, className }: Ma
               [ride.pickup.point.lng, ride.pickup.point.lat],
             ],
           },
-          properties: { color: toneColor('info') },
+          // Yendo a recoger: azul hacia el punto. En curso: el recorrido desde
+          // la recogida hasta donde va el taxi, en el verde de «En curso».
+          properties: { color: ride.status === 'IN_PROGRESS' ? toneColor(RIDE_STATUS_TONE.IN_PROGRESS) : toneColor('info') },
         },
       ],
     });

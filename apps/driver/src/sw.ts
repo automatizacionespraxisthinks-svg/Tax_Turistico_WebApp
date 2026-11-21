@@ -62,6 +62,28 @@ interface Aviso {
   rideId: string;
   titulo?: string;
   cuerpo?: string;
+  /** Desde el segundo intento: la carrera ya dio una vuelta sin conductor. */
+  urgente?: boolean;
+  /** Acuse de recibo (21/11/2026): se devuelve a la API apenas llega. */
+  ack?: { offerId: string; firma: string };
+}
+
+/** La API: la misma que usa la aplicación (VITE_API_BASE). */
+const API_BASE: string = import.meta.env.VITE_API_BASE ?? 'http://localhost:3000';
+
+/**
+ * Le dice a la API que el aviso llegó a este teléfono. Es lo que permite al
+ * panel distinguir «le llegó» de «se envió y no sabemos»; si no confirma, la
+ * API lo reenvía. Nunca frena el aviso: va en paralelo y sus fallos se
+ * ignoran.
+ */
+function confirmar(aviso: Aviso): Promise<unknown> {
+  if (!aviso.ack) return Promise.resolve();
+  return fetch(`${API_BASE}/v1/driver/push/recibido`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(aviso.ack),
+  }).catch(() => undefined);
 }
 
 worker.addEventListener('push', ((event: PushEvent) => {
@@ -75,32 +97,48 @@ worker.addEventListener('push', ((event: PushEvent) => {
   }
 
   if (aviso.tipo === 'oferta_retirada') {
-    // Otro conductor la tomó: se quita de la pantalla bloqueada en vez de
-    // dejar ahí una carrera que ya no puede aceptar.
+    /*
+     * Otro conductor la tomó: se cambia el aviso de la pantalla bloqueada por
+     * uno discreto, con el mismo identificador. No basta con cerrarlo: Safari
+     * (iPhone) le quita el permiso de avisos a la página que recibe pushes
+     * sin mostrar nada, y desde entonces no le llegaría ninguna carrera.
+     */
     event.waitUntil(
-      worker.registration
-        .getNotifications({ tag: aviso.rideId })
-        .then((notifications) => notifications.forEach((notification) => notification.close())),
+      worker.registration.showNotification('Carrera ya tomada', {
+        body: 'Otro conductor la aceptó.',
+        tag: aviso.rideId,
+        renotify: false,
+        silent: true,
+        requireInteraction: false,
+        data: { rideId: aviso.rideId },
+        icon: '/icon-192.png',
+        badge: '/badge-96.png',
+      } as NotificationOptions),
     );
     return;
   }
 
   event.waitUntil(
-    worker.registration.showNotification(aviso.titulo ?? 'Nueva carrera', {
-      body: aviso.cuerpo ?? 'Toca para verla',
-      // Mismo identificador que la carrera: un aviso nuevo de la misma
-      // carrera sustituye al anterior en vez de apilarse.
-      tag: aviso.rideId,
-      renotify: true,
-      // La ventana de la oleada son 45 segundos: el aviso tiene que quedarse
-      // en pantalla hasta que el conductor lo atienda.
-      requireInteraction: true,
-      silent: false,
-      data: { rideId: aviso.rideId },
-      icon: '/icon-192.png',
-      // Android solo mira la forma del icono pequeño de la barra de avisos.
-      badge: '/badge-96.png',
-    } as NotificationOptions),
+    Promise.all([
+      worker.registration.showNotification(aviso.titulo ?? 'Nueva carrera', {
+        body: aviso.cuerpo ?? 'Toca para verla',
+        // Mismo identificador que la carrera: un aviso nuevo de la misma
+        // carrera sustituye al anterior en vez de apilarse.
+        tag: aviso.rideId,
+        renotify: true,
+        // La ventana de la oleada son 45 segundos: el aviso tiene que quedarse
+        // en pantalla hasta que el conductor lo atienda.
+        requireInteraction: true,
+        silent: false,
+        // Urgente: vibración larga e insistente, para que se note en el bolsillo.
+        vibrate: aviso.urgente ? [600, 200, 600, 200, 600, 200, 1200] : [300, 150, 300],
+        data: { rideId: aviso.rideId },
+        icon: '/icon-192.png',
+        // Android solo mira la forma del icono pequeño de la barra de avisos.
+        badge: '/badge-96.png',
+      } as NotificationOptions),
+      confirmar(aviso),
+    ]),
   );
 }) as never);
 

@@ -24,6 +24,11 @@ export interface OfferPush {
   etaMinutes: number;
   expiresAt: string;
   wave: number;
+  /** Desde el segundo intento: la carrera ya dio una vuelta sin conductor. */
+  urgente?: boolean;
+  /** Para confirmar que la oferta llegó (acuse de recibo, 21/11/2026). */
+  offerId?: string;
+  firma?: string;
 }
 
 export interface RideChangedPush {

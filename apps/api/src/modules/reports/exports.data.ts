@@ -64,8 +64,23 @@ export interface Periodo {
   /** Los días del periodo, en orden; solo cuando se pidió por fechas. */
   dias?: string[];
   filas: FilaCarrera[];
+  /**
+   * Carreras que un conductor soltó por fuerza mayor y siguieron buscando
+   * taxi (21/11/2026). No terminan canceladas, así que no salen en `filas`
+   * como canceladas por el conductor; se cuentan desde aquí.
+   */
+  abandonos?: AbandonoConductor[];
   /** Si había más carreras que `MAX_FILAS` y el archivo va recortado. */
   recortado: boolean;
+}
+
+export interface AbandonoConductor {
+  /** El código de la carrera que soltó. */
+  codigo: string;
+  conductorId: string;
+  conductorCodigo: string;
+  conductor: string;
+  motivo: string;
 }
 
 /**
@@ -212,12 +227,30 @@ export async function leerPeriodo(db: Database, params: ExportParams): Promise<P
   const crudas = resultado.rows;
   const recortado = crudas.length > MAX_FILAS;
 
+  // Las que un conductor soltó por fuerza mayor, con los mismos filtros.
+  const abandonos = await db.execute<{ codigo: string; conductor_id: string; conductor_codigo: string; conductor: string; motivo: string }>(sql`
+    select r.code as codigo, x.driver_id as conductor_id, d.code as conductor_codigo, d.name as conductor, x.motivo
+      from ride_driver_cancellations x
+      join rides r on r.id = x.ride_id
+      join drivers d on d.id = x.driver_id
+      left join zones z on z.id = r.zone_id
+      left join customers c on c.id = r.customer_id
+     where ${sql.join(condiciones, sql` and `)}
+  `);
+
   return {
     params,
     ...limites,
     texto: textoDelPeriodo(params),
     dias: params.desde && params.hasta ? fechasDelRango(params.desde, params.hasta) : undefined,
     recortado,
+    abandonos: abandonos.rows.map((a) => ({
+      codigo: a.codigo,
+      conductorId: a.conductor_id,
+      conductorCodigo: a.conductor_codigo,
+      conductor: a.conductor,
+      motivo: a.motivo,
+    })),
     filas: crudas.slice(0, MAX_FILAS).map((f) => ({
       codigo: f.codigo,
       creada: new Date(f.creada),
@@ -351,7 +384,7 @@ export const SIN_MOTIVO = 'Sin motivo escrito';
  * `dias` son los días del periodo: con ellos, un día sin carreras sale en
  * cero en vez de desaparecer de la gráfica.
  */
-export function resumir(filas: FilaCarrera[], dias?: string[]): Resumen {
+export function resumir(filas: FilaCarrera[], dias?: string[], abandonos: AbandonoConductor[] = []): Resumen {
   const finalizadas = filas.filter((f) => f.estado === 'COMPLETED');
   const asignaciones = filas.flatMap((f) => (f.asignacionSegundos === null ? [] : [f.asignacionSegundos]));
   const llegadas = filas.flatMap((f) => (f.llegadaSegundos === null ? [] : [f.llegadaSegundos]));
@@ -466,6 +499,33 @@ export function resumir(filas: FilaCarrera[], dias?: string[]): Resumen {
     }
   }
 
+  /*
+   * Fuerza mayor (21/11/2026): la carrera siguió y la terminó otro, pero para
+   * el conductor que la soltó cuenta como cancelada por él, con su motivo.
+   */
+  for (const a of abandonos) {
+    const c = porConductor.get(a.conductorId) ?? {
+      id: a.conductorId,
+      codigo: a.conductorCodigo,
+      nombre: a.conductor,
+      asignadas: 0,
+      finalizadas: 0,
+      canceladas: 0,
+      canceladasPorEl: 0,
+      km: 0,
+      duracionP50: null,
+      llegadaP50: null,
+      duraciones: [],
+      llegadas: [],
+    };
+    c.asignadas += 1;
+    c.canceladas += 1;
+    c.canceladasPorEl += 1;
+    porConductor.set(a.conductorId, c);
+    const clave = `${QUIEN_CANCELA.driver}\u0000${textoDelMotivo(a.motivo, null)}`;
+    cancelaciones.set(clave, (cancelaciones.get(clave) ?? 0) + 1);
+  }
+
   const horas = Array.from({ length: 24 }, (_, i) => {
     const hora = String(i).padStart(2, '0');
     return { hora, ...(porHora.get(hora) ?? { carreras: 0, urbano: 0, rural: 0 }) };
@@ -479,7 +539,8 @@ export function resumir(filas: FilaCarrera[], dias?: string[]): Resumen {
     creadas: filas.length,
     finalizadas: finalizadas.length,
     canceladas: filas.filter(CANCELADA).length,
-    canceladasPorConductor: filas.filter((f) => f.estado === 'CANCELLED' && f.canceladaPor === 'driver').length,
+    canceladasPorConductor:
+      filas.filter((f) => f.estado === 'CANCELLED' && f.canceladaPor === 'driver').length + abandonos.length,
     sinAsignar: filas.filter(SIN_TAXI).length,
     enCurso: filas.filter((f) => ABIERTA(f.estado)).length,
     kmRecorridos: Math.round(finalizadas.reduce((s, f) => s + (f.distanciaKm ?? 0), 0) * 10) / 10,

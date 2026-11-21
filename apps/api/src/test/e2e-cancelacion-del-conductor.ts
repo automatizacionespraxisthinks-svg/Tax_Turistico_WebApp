@@ -154,40 +154,76 @@ async function main(): Promise<void> {
     assert((await fila(primera.id)).status === 'ASSIGNED', 'y la carrera sigue asignada');
 
     /* ---------------------------------------------------------------- 2 */
-    console.log('\n2. Yendo a recoger: se cancela, con trazabilidad');
+    console.log('\n2. Yendo a recoger, fuerza mayor: NO se cancela, se le busca otro taxi al cliente');
     const cancela = await call(`/v1/driver/rides/${primera.id}/cancel`, {
       token,
       body: { motivo: 'falla_mecanica', detalle: 'Se pinchó la llanta en la vía', at: EN_LA_VIA },
     });
-    assert(cancela.status < 400, 'el conductor la cancela', cancela.body);
+    assert(cancela.status < 400, 'el conductor la suelta', cancela.body);
 
     const f1 = await fila(primera.id);
-    assert(f1.status === 'CANCELLED', 'la carrera queda cancelada');
-    assert(f1.cancelled_by === 'driver', `cancelada por: ${f1.cancelled_by}`);
-    assert(f1.cancel_code === 'falla_mecanica', `con la clave del motivo: ${f1.cancel_code}`);
-    assert(
-      f1.cancel_reason === 'Falla mecánica o pinchazo: Se pinchó la llanta en la vía',
-      `y el motivo escrito: «${f1.cancel_reason}»`,
-    );
+    assert(['NOTIFIED', 'UNASSIGNED'].includes(f1.status), `la carrera sigue buscando taxi (${f1.status})`);
+    assert(f1.cancelled_by === null, 'y no queda cancelada');
+    const sinConductor = (await pool.query(`select driver_id from rides where id = $1`, [primera.id])).rows[0]?.driver_id;
+    assert(sinConductor === null, 'ya no tiene conductor');
 
-    const paso = (
-      await pool.query<{ actor: string; actor_name: string; note: string | null; lat: number | null }>(
-        `select actor, actor_name, note, lat
-           from ride_status_history where ride_id = $1 and to_status = 'CANCELLED'`,
+    const soltada = (
+      await pool.query<{ motivo: string; motivo_texto: string; desde: string; lat: number | null }>(
+        `select motivo, motivo_texto, desde, lat from ride_driver_cancellations where ride_id = $1`,
         [primera.id],
       )
     ).rows[0];
-    assert(paso?.actor === 'driver', `la bitácora dice que fue el conductor (${paso?.actor_name})`, paso);
-    assert(paso?.note === f1.cancel_reason, 'con el mismo motivo');
-    assert(paso?.lat !== null && Math.abs((paso?.lat ?? 0) - EN_LA_VIA.lat) < 1e-4, 'y dónde estaba al cancelar', paso);
+    assert(soltada?.motivo === 'falla_mecanica' && soltada.desde === 'ASSIGNED', 'queda registrado quién la soltó y por qué', soltada);
+    assert(soltada?.motivo_texto === 'Falla mecánica o pinchazo: Se pinchó la llanta en la vía', `con el motivo escrito: «${soltada?.motivo_texto}»`);
+    assert(soltada?.lat !== null && Math.abs((soltada?.lat ?? 0) - EN_LA_VIA.lat) < 1e-4, 'y dónde estaba');
+
+    const paso = (
+      await pool.query<{ actor: string; note: string | null; lat: number | null }>(
+        `select actor, note, lat from ride_status_history
+          where ride_id = $1 and from_status = 'ASSIGNED' and to_status = 'NOTIFIED'`,
+        [primera.id],
+      )
+    ).rows[0];
+    assert(paso?.note?.includes('canceló por fuerza mayor') === true, `la bitácora lo cuenta: «${paso?.note}»`, paso);
 
     const evento = (
       await pool.query<{ payload: Record<string, unknown> }>(
-        `select payload from outbox_events where ride_id = $1 and type = 'ride.cancelled' order by created_at desc limit 1`,
+        `select payload from outbox_events where ride_id = $1 and type = 'ride.no_driver' order by created_at desc limit 1`,
         [primera.id],
       )
     ).rows[0]?.payload;
-    assert(evento?.cancelledBy === 'driver' && evento?.code === 'falla_mecanica', 'el evento hacia n8n dice quién y por qué', evento);
+    assert(evento?.conductorCancelo === true && evento?.motivo === 'falla_mecanica', 'a n8n le llega «el conductor canceló, se busca otro»', evento);
+    const cancelados = (
+      await pool.query(`select count(*)::int n from outbox_events where ride_id = $1 and type = 'ride.cancelled'`, [primera.id])
+    ).rows[0].n as number;
+    assert(cancelados === 0, 'y ningún «cancelada»');
+
+    const ofertasNuevas = (
+      await pool.query(
+        `select count(*)::int n from ride_offers o join drivers d on d.id = o.driver_id
+          where o.ride_id = $1 and d.code = $2 and o.intento > 1`,
+        [primera.id, CONDUCTOR.code],
+      )
+    ).rows[0].n as number;
+    assert(ofertasNuevas === 0, 'al que la soltó no se le vuelve a ofrecer');
+
+    // Otro conductor la toma: para el cliente es un taxi nuevo.
+    const tokenOtro = await entrar(OTRO);
+    await call('/v1/driver/shift/close', { method: 'POST', token: tokenOtro });
+    await call('/v1/driver/shift/open', { token: tokenOtro, body: { plate: OTRO.plate } });
+    await call('/v1/driver/position', { token: tokenOtro, body: { point: CENTRO } });
+    const otroId = (await pool.query(`select id from drivers where code = $1`, [OTRO.code])).rows[0]?.id as string;
+    const asigna = await call(`/v1/rides/${primera.id}/assign`, { apiKey: true, body: { driverId: otroId } });
+    assert(asigna.status < 400, 'otro conductor la toma', asigna.body);
+    const reasignada = (
+      await pool.query<{ payload: Record<string, unknown> }>(
+        `select payload from outbox_events where ride_id = $1 and type = 'ride.reassigned' order by created_at desc limit 1`,
+        [primera.id],
+      )
+    ).rows[0]?.payload as { driver?: { name?: string; plate?: string } } | undefined;
+    assert(Boolean(reasignada?.driver?.plate), `el cliente recibe «le asignamos otro taxi», con la placa ${reasignada?.driver?.plate}`, reasignada);
+    await call(`/v1/driver/rides/${primera.id}/cancel`, { token: tokenOtro, body: { motivo: 'cliente_no_aparece' } });
+    await call('/v1/driver/shift/close', { method: 'POST', token: tokenOtro });
 
     /* ---------------------------------------------------------------- 3 */
     console.log('\n3. Con «Llegué» también: el cliente no aparece');
@@ -243,13 +279,25 @@ async function main(): Promise<void> {
     /* ---------------------------------------------------------------- 5 */
     console.log('\n5. Reportes');
     const codigos = new Set([primera.code, segunda.code, tercera.code, cuartaRide.code]);
+    /*
+     * El periodo acaba en la hora de este proceso, y las carreras llevan la
+     * de Postgres: si el reloj del contenedor va unos segundos adelantado,
+     * las recién creadas quedan «en el futuro» y no salen. Se espera a que
+     * pase la última antes de leer.
+     */
+    const ultima = (
+      await pool.query<{ t: Date }>(`select max(created_at) as t from rides where code = any($1)`, [[...codigos]])
+    ).rows[0]!.t;
+    await new Promise((r) => setTimeout(r, Math.max(0, new Date(ultima).getTime() - Date.now() + 500)));
     const periodo = await leerPeriodo(db, { days: 1 });
     const filas = periodo.filas.filter((f) => codigos.has(f.codigo));
     assert(filas.length === 4, `las cuatro carreras salen en el periodo (${filas.length})`);
-    const r = resumir(filas);
-    assert(r.canceladas === 3, `tres canceladas (${r.canceladas})`);
-    assert(r.canceladasPorConductor === 2, `dos por el conductor (${r.canceladasPorConductor})`);
-    const suyo = r.porConductor.find((c) => c.asignadas > 0);
+    const abandonos = (periodo.abandonos ?? []).filter((a) => codigos.has(a.codigo));
+    assert(abandonos.length === 1, `la que soltó por fuerza mayor sale como abandono (${abandonos.length})`);
+    const r = resumir(filas.filter((f) => f.codigo !== primera.code), undefined, abandonos);
+    assert(r.canceladas === 2, `dos canceladas de verdad (${r.canceladas})`);
+    assert(r.canceladasPorConductor === 2, `dos por el conductor: la que soltó y la del cliente que no apareció (${r.canceladasPorConductor})`);
+    const suyo = r.porConductor.find((c) => c.codigo === CONDUCTOR.code);
     assert(
       suyo?.asignadas === 3 && suyo.canceladas === 2 && suyo.canceladasPorEl === 2 && suyo.finalizadas === 1,
       'por conductor: tomó 3, terminó 1 y canceló él 2',

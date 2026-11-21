@@ -56,5 +56,14 @@ export const QUIEN_CANCELA: Record<TransitionActor, string> = {
   system: 'Sistema',
 };
 
+/**
+ * Fuerza mayor del conductor (21/11/2026): con estos motivos la carrera NO se
+ * cancela, se le busca otro taxi al cliente y se le avisa cuando lo haya. Solo
+ * «El cliente no aparece» cierra la carrera, porque ahí el que falta es él.
+ */
+export function cancelacionRelanza(motivo: MotivoCancelacionConductor | string | null | undefined): boolean {
+  return motivo !== 'cliente_no_aparece';
+}
+
 /** Los estados desde los que el conductor todavía puede cancelar. */
 export const CANCELABLE_POR_EL_CONDUCTOR = ['ASSIGNED', 'DRIVER_ARRIVED'] as const;
